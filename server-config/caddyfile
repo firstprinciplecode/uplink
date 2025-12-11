@@ -1,0 +1,29 @@
+# Caddyfile for uplink.spot tunnel relay + existing domains
+# Place this at /etc/caddy/Caddyfile on your server
+
+# Existing domains - dealbook.ai
+dealbook.ai, www.dealbook.ai {
+    reverse_proxy localhost:3001
+}
+
+# Existing domains - getantelope.com
+getantelope.com, www.getantelope.com {
+    reverse_proxy localhost:3000
+}
+
+# Tunnel relay - handle dev.uplink.spot subdomains
+# Use on-demand TLS - Caddy will get certs automatically per subdomain
+*.dev.uplink.spot {
+    reverse_proxy localhost:7070
+}
+
+# Base domain (optional, for health checks)
+dev.uplink.spot {
+    reverse_proxy localhost:7070
+}
+
+# Control channel (separate subdomain for tunnel client connections)
+tunnel.dev.uplink.spot {
+    reverse_proxy localhost:7071
+}
+

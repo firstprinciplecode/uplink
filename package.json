@@ -1,0 +1,31 @@
+{
+  "name": "agentcloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-friendly control plane, CLI, and tunnel prototype",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "dev:relay": "node scripts/tunnel/relay.js",
+    "dev:stub": "PORT=4100 AGENTCLOUD_TOKEN_DEV=dev-token node scripts/dev/stub-control-plane.js",
+    "dev:cli": "tsx cli/src/index.ts",
+    "dev:api": "tsx backend/src/server.ts",
+    "migrate": "tsx backend/scripts/migrate.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "body-parser": "^1.20.3",
+    "commander": "^12.1.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.4",
+    "@types/node-fetch": "^2.6.11",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.2"
+  }
+}
