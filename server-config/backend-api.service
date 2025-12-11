@@ -7,8 +7,8 @@ Type=simple
 User=root
 WorkingDirectory=/opt/agentcloud
 Environment="NODE_ENV=production"
-EnvironmentFile=/opt/agentcloud/.env
-ExecStart=/usr/bin/node --loader tsx/esm backend/src/server.ts
+EnvironmentFile=-/opt/agentcloud/.env
+ExecStart=/usr/bin/npx tsx backend/src/server.ts
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -16,4 +16,3 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-
