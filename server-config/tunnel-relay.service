@@ -1,0 +1,21 @@
+[Unit]
+Description=AgentCloud Tunnel Relay
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/agentcloud
+Environment="NODE_ENV=production"
+Environment="TUNNEL_RELAY_HTTP=7070"
+Environment="TUNNEL_RELAY_CTRL=7071"
+Environment="TUNNEL_DOMAIN=dev.uplink.spot"
+ExecStart=/usr/bin/node /opt/agentcloud/scripts/tunnel/relay-host.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
