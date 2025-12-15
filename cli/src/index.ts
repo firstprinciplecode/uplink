@@ -17,6 +17,14 @@ program.addCommand(devCommand);
 program.addCommand(adminCommand);
 program.addCommand(menuCommand);
 
+// If no command provided and not a flag, default to menu
+if (process.argv.length === 2) {
+  process.argv.push("menu");
+} else if (process.argv.length === 3 && process.argv[2] === "--help") {
+  // Show main help, not menu
+  process.argv.pop();
+}
+
 program.parseAsync(process.argv).catch((err) => {
   console.error(err);
   process.exit(1);
