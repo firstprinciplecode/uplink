@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { dbCommand } from "./subcommands/db";
 import { devCommand } from "./subcommands/dev";
 import { adminCommand } from "./subcommands/admin";
+import { menuCommand } from "./subcommands/menu";
 
 const program = new Command();
 
@@ -14,6 +15,7 @@ program
 program.addCommand(dbCommand);
 program.addCommand(devCommand);
 program.addCommand(adminCommand);
+program.addCommand(menuCommand);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err);
