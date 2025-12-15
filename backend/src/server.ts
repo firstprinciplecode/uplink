@@ -3,6 +3,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import { dbRouter } from "./routes/dbs";
 import { tunnelRouter, tunnelTokenExists } from "./routes/tunnels";
+import { adminRouter } from "./routes/admin";
 import { authMiddleware } from "./middleware/auth";
 
 const app = express();
@@ -38,6 +39,7 @@ app.get("/internal/allow-tls", async (req, res) => {
 app.use("/v1", authMiddleware);
 app.use("/v1/dbs", dbRouter);
 app.use("/v1/tunnels", tunnelRouter);
+app.use("/v1/admin", adminRouter);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
