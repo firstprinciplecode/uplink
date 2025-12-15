@@ -98,6 +98,14 @@ uplink db delete db_123456
 
 ## Tunnel Service
 
+### How it works (relay + client)
+- Ingress: Requests to `https://<token>.t.uplink.spot` hit Caddy, then the relay ingress on port 7070.
+- Lookup: Relay extracts the `<token>` from the Host header and finds the matching connected client.
+- Forward: Relay forwards the HTTP request over the control channel to the client; the client proxies to your local app (e.g., `localhost:3000`) and returns the response.
+- Control channel: A persistent socket on port 7071 where clients register and stay connected.
+- Safety: Token validation (via API), per-token rate limits, request size limits, and a health endpoint at `/health` (no Host needed).
+- HTTPS is terminated by Caddy; the control channel can be plain or TLS (configurable).
+
 ### Features
 
 #### ✅ Phase 1 (Implemented)
@@ -189,6 +197,10 @@ uplink admin tunnels --status active
 - `AGENTCLOUD_API_BASE` - API base URL for token validation
 - `TUNNEL_RATE_LIMIT_REQUESTS` - Requests per minute per token (default: 1000)
 - `TUNNEL_MAX_REQUEST_SIZE` - Max request size (default: 10MB)
+- `TUNNEL_CTRL_TLS` - Enable TLS for control channel (default: false)
+- `TUNNEL_CTRL_CA` - CA bundle for control TLS (optional)
+- `TUNNEL_CTRL_CERT` / `TUNNEL_CTRL_KEY` - Cert/key for control TLS (optional)
+- `TUNNEL_CTRL_TLS_INSECURE` - Allow self-signed (default: false; set true for dev)
 
 ---
 

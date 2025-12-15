@@ -5,7 +5,9 @@
  */
 
 const net = require("net");
+const tls = require("tls");
 const http = require("http");
+const fs = require("fs");
 
 // Configuration
 const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
@@ -35,6 +37,21 @@ if (!token || !port || !ctrl) {
 
 const [CTRL_HOST, CTRL_PORT] = ctrl.split(":");
 const MAX_BODY_SIZE = maxSize || MAX_REQUEST_SIZE;
+const CTRL_TLS_ENABLED = process.env.TUNNEL_CTRL_TLS === "true";
+const CTRL_TLS_INSECURE = process.env.TUNNEL_CTRL_TLS_INSECURE === "true";
+const CTRL_TLS_CA_PATH = process.env.TUNNEL_CTRL_CA || "";
+const CTRL_TLS_CERT_PATH = process.env.TUNNEL_CTRL_CERT || "";
+const CTRL_TLS_KEY_PATH = process.env.TUNNEL_CTRL_KEY || "";
+
+function optionalRead(path) {
+  if (!path) return undefined;
+  try {
+    return fs.readFileSync(path);
+  } catch {
+    log("warn", `Could not read TLS file: ${path}`);
+    return undefined;
+  }
+}
 
 // State
 let socket = null;
@@ -113,18 +130,41 @@ function connect() {
     socket.destroy();
   }
 
-  log("info", `Connecting to relay at ${CTRL_HOST}:${CTRL_PORT}...`);
+  log("info", `Connecting to relay at ${CTRL_HOST}:${CTRL_PORT}... ${CTRL_TLS_ENABLED ? "(TLS)" : "(plain)"}`);
 
-  socket = net.createConnection({ host: CTRL_HOST, port: Number(CTRL_PORT) }, () => {
-    isConnected = true;
-    reconnectDelay = INITIAL_RECONNECT_DELAY; // Reset delay on successful connection
-    log("success", "Connected to relay");
-    
-    // Register with relay
-    socket.write(
-      JSON.stringify({ type: "register", token, targetPort: port }) + "\n"
-    );
-  });
+  if (CTRL_TLS_ENABLED) {
+    const ca = optionalRead(CTRL_TLS_CA_PATH);
+    const cert = optionalRead(CTRL_TLS_CERT_PATH);
+    const key = optionalRead(CTRL_TLS_KEY_PATH);
+    const options = {
+      host: CTRL_HOST,
+      port: Number(CTRL_PORT),
+      ca: ca ? [ca] : undefined,
+      cert,
+      key,
+      rejectUnauthorized: !CTRL_TLS_INSECURE,
+      servername: CTRL_HOST,
+    };
+    socket = tls.connect(options, () => {
+      isConnected = true;
+      reconnectDelay = INITIAL_RECONNECT_DELAY;
+      log("success", "Connected to relay (TLS)");
+      socket.setKeepAlive(true, 15000);
+      socket.write(JSON.stringify({ type: "register", token, targetPort: port }) + "\n");
+    });
+  } else {
+    socket = net.createConnection({ host: CTRL_HOST, port: Number(CTRL_PORT) }, () => {
+      isConnected = true;
+      reconnectDelay = INITIAL_RECONNECT_DELAY; // Reset delay on successful connection
+      log("success", "Connected to relay");
+      socket.setKeepAlive(true, 15000);
+      
+      // Register with relay
+      socket.write(
+        JSON.stringify({ type: "register", token, targetPort: port }) + "\n"
+      );
+    });
+  }
 
   let buf = "";
   socket.on("data", (chunk) => {

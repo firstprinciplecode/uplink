@@ -10,6 +10,8 @@
 
 const http = require("http");
 const net = require("net");
+const tls = require("tls");
+const fs = require("fs");
 const { randomUUID } = require("crypto");
 
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
@@ -20,6 +22,11 @@ const API_BASE = process.env.AGENTCLOUD_API_BASE || process.env.API_BASE || "htt
 const RATE_LIMIT_REQUESTS = Number(process.env.TUNNEL_RATE_LIMIT_REQUESTS || 1000); // per minute
 const RATE_LIMIT_WINDOW = 60000; // 1 minute in ms
 const MAX_REQUEST_SIZE = Number(process.env.TUNNEL_MAX_REQUEST_SIZE || 10 * 1024 * 1024); // 10MB
+const CTRL_TLS_ENABLED = process.env.TUNNEL_CTRL_TLS === "true";
+const CTRL_TLS_INSECURE = process.env.TUNNEL_CTRL_TLS_INSECURE === "true";
+const CTRL_TLS_CA = process.env.TUNNEL_CTRL_CA || "";
+const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
+const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 
 // token -> client socket
 const clients = new Map();
@@ -131,7 +138,27 @@ function extractTokenFromHost(host) {
 }
 
 // Control server: clients connect and register their token/port
-const ctrlServer = net.createServer((socket) => {
+function optionalRead(path) {
+  if (!path) return undefined;
+  try {
+    return fs.readFileSync(path);
+  } catch {
+    log("warn", `Could not read TLS file: ${path}`);
+    return undefined;
+  }
+}
+
+const tlsOptions = CTRL_TLS_ENABLED
+  ? {
+      key: optionalRead(CTRL_TLS_KEY),
+      cert: optionalRead(CTRL_TLS_CERT),
+      ca: CTRL_TLS_CA ? [optionalRead(CTRL_TLS_CA)].filter(Boolean) : undefined,
+      requestCert: false,
+      rejectUnauthorized: !CTRL_TLS_INSECURE,
+    }
+  : undefined;
+
+const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.createServer)((socket) => {
   let buf = "";
   let registeredToken = null;
 
@@ -216,6 +243,7 @@ const ctrlServer = net.createServer((socket) => {
 
 ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
   log(`Tunnel control listening on ${LISTEN_CTRL}`);
+  log(`Control TLS: ${CTRL_TLS_ENABLED ? "enabled" : "disabled"}`);
   log(`Token validation: ${VALIDATE_TOKENS ? "enabled" : "disabled"}`);
   log(`Rate limit: ${RATE_LIMIT_REQUESTS} requests/minute per token`);
 });
@@ -329,6 +357,10 @@ const httpServer = http.createServer(async (req, res) => {
     pending.delete(id);
   });
 });
+
+// Tune keep-alive for better throughput
+httpServer.keepAliveTimeout = 60000; // 60s
+httpServer.headersTimeout = 65000;   // must be greater than keepAliveTimeout
 
 httpServer.listen(LISTEN_HTTP, "0.0.0.0", () => {
   log(`Tunnel ingress listening on ${LISTEN_HTTP}`);
