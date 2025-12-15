@@ -11,7 +11,8 @@ set -euo pipefail
 
 API_BASE="${AGENTCLOUD_API_BASE:-${API_BASE:-https://api.uplink.spot}}"
 AUTH_TOKEN="${AGENTCLOUD_TOKEN:-${AUTH_TOKEN:-dev-token}}"
-CTRL="${TUNNEL_CTRL:-tunnel.uplink.spot:7071}"
+# Default to Hetzner control/relay
+CTRL="${TUNNEL_CTRL:-178.156.149.124:7071}"
 RELAY="${TUNNEL_RELAY_HTTP:-https://t.uplink.spot}"
 DOMAIN="${TUNNEL_DOMAIN:-t.uplink.spot}"
 PORT="${PORT:-39333}"
