@@ -28,8 +28,12 @@ export function toTunnelResponse(
   domain: string,
   useHostRouting: boolean = true
 ): TunnelResponse {
+  // NOTE: HTTPS for wildcard subdomains requires extra server-side config (DNS-01 / on-demand TLS).
+  // Default to HTTP so returned URLs work immediately; can be overridden via env for deployments
+  // that have HTTPS working.
+  const scheme = (process.env.TUNNEL_URL_SCHEME || "http").toLowerCase();
   const url = useHostRouting
-    ? `https://${record.token}.${domain}`
+    ? `${scheme}://${record.token}.${domain}`
     : `http://127.0.0.1:7070/t/${record.token}`;
 
   return {

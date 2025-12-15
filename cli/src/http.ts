@@ -1,7 +1,13 @@
 import fetch from "node-fetch";
 
 const API_BASE = process.env.AGENTCLOUD_API_BASE ?? "http://localhost:4000";
-const API_TOKEN = process.env.AGENTCLOUD_TOKEN;
+const isLocalApiBase =
+  API_BASE.includes("://localhost") ||
+  API_BASE.includes("://127.0.0.1") ||
+  API_BASE.includes("://0.0.0.0");
+const API_TOKEN =
+  process.env.AGENTCLOUD_TOKEN ??
+  (isLocalApiBase ? process.env.AGENTCLOUD_TOKEN_DEV || "dev-token" : undefined);
 
 export async function apiRequest(
   method: string,
@@ -9,7 +15,9 @@ export async function apiRequest(
   body?: unknown
 ): Promise<any> {
   if (!API_TOKEN) {
-    throw new Error("Missing AGENTCLOUD_TOKEN");
+    throw new Error(
+      "Missing AGENTCLOUD_TOKEN (required when AGENTCLOUD_API_BASE is non-local)"
+    );
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
@@ -28,4 +36,6 @@ export async function apiRequest(
 
   return json;
 }
+
+
 

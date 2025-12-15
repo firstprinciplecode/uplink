@@ -12,8 +12,9 @@ getantelope.com, www.getantelope.com {
 }
 
 # Tunnel relay - handle dev.uplink.spot subdomains
-# Use on-demand TLS - Caddy will get certs automatically per subdomain
-*.dev.uplink.spot {
+# HTTP only for now (HTTPS requires DNS-01 for wildcards or per-subdomain config)
+# Use explicit http:// to prevent automatic HTTPS redirect
+http://*.dev.uplink.spot {
     reverse_proxy localhost:7070
 }
 

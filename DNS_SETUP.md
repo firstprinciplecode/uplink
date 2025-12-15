@@ -65,3 +65,5 @@ journalctl -u caddy -f
 
 You should see certificate acquisition messages. If there are errors, they'll appear in the logs.
 
+
+

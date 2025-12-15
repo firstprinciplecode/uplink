@@ -10,7 +10,10 @@
     "dev:stub": "PORT=4100 AGENTCLOUD_TOKEN_DEV=dev-token node scripts/dev/stub-control-plane.js",
     "dev:cli": "tsx cli/src/index.ts",
     "dev:api": "tsx backend/src/server.ts",
-    "migrate": "tsx backend/scripts/migrate.ts"
+    "migrate": "tsx backend/scripts/migrate.ts",
+    "smoke:tunnel": "bash scripts/tunnel-smoke.sh",
+    "smoke:db": "bash scripts/db-api-smoke.sh",
+    "smoke:all": "bash scripts/smoke-all.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

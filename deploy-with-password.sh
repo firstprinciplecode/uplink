@@ -81,3 +81,5 @@ echo "Next steps:"
 echo "1. SSH into server: sshpass -p 'YOUR_PASSWORD' ssh root@${SERVER_IP}"
 echo "2. Configure Caddy and systemd service (see DEPLOYMENT.md)"
 
+
+
