@@ -223,10 +223,31 @@ ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
 // HTTP ingress -> forward to client (host-based routing)
 const httpServer = http.createServer(async (req, res) => {
   stats.requests++;
-  
+
   const host = req.headers.host;
+  const url = new URL(req.url, `http://${host || "localhost"}`);
+
+  // Friendly health endpoint when no Host token is provided
+  if (url.pathname === "/health" && (!host || !host.includes(TUNNEL_DOMAIN))) {
+    const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(
+      JSON.stringify({
+        status: "ok",
+        uptime,
+        stats: {
+          requests: stats.requests,
+          errors: stats.errors,
+          rateLimited: stats.rateLimited,
+          invalidTokens: stats.invalidTokens,
+          activeConnections: clients.size,
+          pendingRequests: pending.size,
+        },
+      })
+    );
+  }
+
   const token = extractTokenFromHost(host);
-  
   if (!token) {
     res.statusCode = 404;
     res.setHeader("Content-Type", "text/plain");
@@ -249,7 +270,6 @@ const httpServer = http.createServer(async (req, res) => {
     return res.end("Tunnel not connected");
   }
 
-  const url = new URL(req.url, `http://${host}`);
   const path = url.pathname + (url.search || "");
 
   // Read request body with size limit
