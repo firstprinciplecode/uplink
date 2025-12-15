@@ -1,0 +1,40 @@
+# Caddyfile for uplink.spot using Cloudflare DNS-01 (wildcard HTTPS)
+# Intended layout:
+# - Control plane API (HTTPS):      api.uplink.spot -> 127.0.0.1:4000
+# - Tunnel ctrl (raw TCP):          tunnel.uplink.spot:7071 (handled by tunnel relay, not Caddy)
+# - Tunnel ingress (HTTPS):         *.t.uplink.spot -> 127.0.0.1:7070
+#
+# Requirements:
+# - Build/run Caddy with the Cloudflare DNS module.
+# - Set CLOUDFLARE_API_TOKEN in Caddy's environment.
+{
+	# Optional: set your email for ACME notifications
+	# email you@example.com
+}
+
+(cloudflare_tls) {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+}
+
+api.uplink.spot {
+	import cloudflare_tls
+	reverse_proxy 127.0.0.1:4000
+}
+
+# Tunnel ingress: host routing relies on preserving the Host header (<token>.t.uplink.spot)
+*.t.uplink.spot {
+	import cloudflare_tls
+	reverse_proxy 127.0.0.1:7070 {
+		header_up Host {http.request.host}
+	}
+}
+
+# Optional base host (handy for health checks / debugging)
+t.uplink.spot {
+	import cloudflare_tls
+	respond "uplink tunnel ingress ok" 200
+}
+
+

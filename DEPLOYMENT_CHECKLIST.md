@@ -87,3 +87,5 @@ sudo ufw enable
 4. **Consider authentication** for tunnel access
 5. **Set up backups** for control plane database
 
+
+
