@@ -8,6 +8,7 @@ export const devCommand = new Command("dev")
   .option("--tunnel", "Enable tunnel")
   .option("--port <port>", "Local port to expose", "3000")
   .option("--json", "Output JSON", false)
+  .option("--improved", "Use improved client with auto-reconnect and better error handling", false)
   .action(async (opts) => {
     const port = Number(opts.port);
     if (opts.tunnel) {
@@ -29,12 +30,13 @@ export const devCommand = new Command("dev")
         }
       }
 
-      // Spawn tunnel client
+      // Spawn tunnel client (use improved version if requested)
+      const clientFile = opts.improved ? "client-improved.js" : "client.js";
       const clientPath = path.join(
         process.cwd(),
         "scripts",
         "tunnel",
-        "client.js"
+        clientFile
       );
       const ctrlHost = process.env.TUNNEL_CTRL ?? "127.0.0.1:7071";
       const args = [
