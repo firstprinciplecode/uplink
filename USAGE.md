@@ -159,12 +159,38 @@ ssh root@<SERVER_IP> "systemctl status backend-api tunnel-relay caddy"
 
 Currently using a simple token-based auth (`dev-token`). For production, replace with proper authentication middleware.
 
+### 👨‍💼 Admin Commands
+
+View system status and manage resources:
+
+```bash
+# Show system statistics
+npm run dev:cli -- admin status
+
+# List all tunnels
+npm run dev:cli -- admin tunnels
+npm run dev:cli -- admin tunnels --status active --limit 50
+
+# List all databases
+npm run dev:cli -- admin databases
+npm run dev:cli -- admin databases --status ready
+
+# JSON output for scripting
+npm run dev:cli -- admin status --json
+```
+
+**Admin API Endpoints:**
+- `GET /v1/admin/stats` - System statistics
+- `GET /v1/admin/tunnels` - List all tunnels (with filters)
+- `GET /v1/admin/databases` - List all databases (with filters)
+
 ### 📝 Notes
 
 - Tunnels are stored in the database and persist across server restarts
 - Databases are provisioned via Neon API (PostgreSQL)
 - HTTPS is handled automatically by Caddy
 - All operations are idempotent and agent-friendly
+- Admin endpoints require authentication (Bearer token)
 
 
 
