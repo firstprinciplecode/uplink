@@ -252,7 +252,16 @@ ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
 const httpServer = http.createServer(async (req, res) => {
   stats.requests++;
 
-  const host = req.headers.host;
+  const host = req.headers.host || "";
+  const pathname = req.url.split("?")[0]; // Extract pathname before URL parsing
+  
+  // Internal endpoint: list connected tokens (for API to query) - check first, before token extraction
+  if (pathname === "/internal/connected-tokens") {
+    const connectedTokens = Array.from(clients.keys());
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ tokens: connectedTokens }));
+  }
+
   const url = new URL(req.url, `http://${host || "localhost"}`);
 
   // Friendly health endpoint when no Host token is provided
@@ -273,13 +282,6 @@ const httpServer = http.createServer(async (req, res) => {
         },
       })
     );
-  }
-
-  // Internal endpoint: list connected tokens (for API to query)
-  if (url.pathname === "/internal/connected-tokens" && (!host || !host.includes(TUNNEL_DOMAIN))) {
-    const connectedTokens = Array.from(clients.keys());
-    res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ tokens: connectedTokens }));
   }
 
   const token = extractTokenFromHost(host);
