@@ -548,9 +548,16 @@ async function createAndStartTunnel(port: number): Promise<string> {
 
 function findTunnelClients(): Array<{ pid: number; port: number; token: string }> {
   try {
-    // Find processes running client-improved.js
-    const output = execSync("ps aux | grep 'client-improved.js' | grep -v grep", { encoding: "utf-8" });
-    const lines = output.trim().split("\n").filter(Boolean);
+    // Find processes running client-improved.js (current user, match script path to avoid false positives)
+    const user = process.env.USER || "";
+    const psCmd = user
+      ? `ps -u ${user} -o pid=,command=`
+      : "ps -eo pid=,command=";
+    const output = execSync(psCmd, { encoding: "utf-8" });
+    const lines = output
+      .trim()
+      .split("\n")
+      .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
     
     const clients: Array<{ pid: number; port: number; token: string }> = [];
     
