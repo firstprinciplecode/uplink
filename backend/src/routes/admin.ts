@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
+import http from "http";
 
 export const adminRouter = Router();
 
@@ -83,8 +84,47 @@ adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
 });
 
 /**
+ * Query relay for connected tokens
+ * Returns empty set if relay is unreachable (fail gracefully)
+ */
+async function getConnectedTokens(): Promise<Set<string>> {
+  const relayHttpPort = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
+  const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
+  
+  return new Promise((resolve) => {
+    const req = http.get(
+      `http://${relayHost}:${relayHttpPort}/internal/connected-tokens`,
+      { timeout: 2000 },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(new Set(json.tokens || []));
+          } catch {
+            // If we can't parse the response, assume no connections
+            resolve(new Set());
+          }
+        });
+      }
+    );
+    req.on("error", () => {
+      // If relay is unreachable, return empty set (all tunnels show as disconnected)
+      resolve(new Set());
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(new Set());
+    });
+  });
+}
+
+/**
  * GET /v1/admin/tunnels
- * List all tunnels (admin view)
+ * List all tunnels (admin view) with connection status from relay
  */
 adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
   try {
@@ -114,9 +154,18 @@ adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
       []
     );
 
+    // Get connected tokens from relay
+    const connectedTokens = await getConnectedTokens();
+
+    // Add connection status to each tunnel
+    const tunnels = result.rows.map((row: any) => ({
+      ...row,
+      connected: connectedTokens.has(row.token),
+    }));
+
     return res.json({
-      tunnels: result.rows,
-      count: result.rows.length,
+      tunnels,
+      count: tunnels.length,
       total: Number(totalResult.rows[0].count),
       limit,
       offset,

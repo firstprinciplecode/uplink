@@ -293,15 +293,10 @@ export const menuCommand = new Command("menu")
                 return "No tunnels found.";
               }
               
-              // Get list of connected tunnel clients
-              const connectedClients = findTunnelClients();
-              const connectedTokens = new Set(connectedClients.map(c => c.token));
-              
               const lines = result.tunnels.map(
                 (t: any) => {
                   const token = t.token || "";
-                  const isConnected = connectedTokens.has(token);
-                  const connectionStatus = isConnected ? "connected" : "disconnected";
+                  const connectionStatus = t.connected ? "connected" : "disconnected";
                   
                   return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
                     t.target_port ?? t.targetPort ?? "-"

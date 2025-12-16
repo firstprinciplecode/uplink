@@ -275,6 +275,13 @@ const httpServer = http.createServer(async (req, res) => {
     );
   }
 
+  // Internal endpoint: list connected tokens (for API to query)
+  if (url.pathname === "/internal/connected-tokens" && (!host || !host.includes(TUNNEL_DOMAIN))) {
+    const connectedTokens = Array.from(clients.keys());
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ tokens: connectedTokens }));
+  }
+
   const token = extractTokenFromHost(host);
   if (!token) {
     res.statusCode = 404;
