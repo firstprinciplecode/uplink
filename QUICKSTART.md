@@ -30,15 +30,17 @@ python3 -m http.server 3000
 
 ### Step 2: Run Uplink and Start Tunnel
 
+**Important:** Run `uplink` on your **local machine** (where your dev server is running), not on the server!
+
 ```bash
-# Open the interactive menu
+# On your LOCAL machine, open the interactive menu
 uplink
 ```
 
 Then:
 1. Use arrow keys to select **"🚀 Start tunnel (auto-detect port)"**
 2. Press Enter
-3. The system will scan for active servers and show you a list
+3. The system will scan for active servers on your **local machine** and show you a list
 4. Select the port your server is running on (or enter a custom port)
 5. Done! Your tunnel is created and started automatically
 
