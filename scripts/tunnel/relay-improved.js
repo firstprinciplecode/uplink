@@ -15,6 +15,8 @@ const fs = require("fs");
 const { randomUUID } = require("crypto");
 
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
+const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
+const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
 const LISTEN_CTRL = Number(process.env.TUNNEL_RELAY_CTRL || 7071);
 const TUNNEL_DOMAIN = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
 const VALIDATE_TOKENS = process.env.TUNNEL_VALIDATE_TOKENS === "true";
@@ -27,6 +29,10 @@ const CTRL_TLS_INSECURE = process.env.TUNNEL_CTRL_TLS_INSECURE === "true";
 const CTRL_TLS_CA = process.env.TUNNEL_CTRL_CA || "";
 const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
 const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
+const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
+const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
+const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
 // token -> client socket
 const clients = new Map();
@@ -254,7 +260,15 @@ const httpServer = http.createServer(async (req, res) => {
 
   const host = req.headers.host || "";
   const pathname = req.url.split("?")[0]; // Extract pathname before URL parsing
-  
+
+  // Internal endpoints (protected by optional shared secret)
+  if (pathname === "/internal/connected-tokens" || pathname === "/health") {
+    if (INTERNAL_SECRET && req.headers[INTERNAL_SECRET_HEADER] !== INTERNAL_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "forbidden" }));
+    }
+  }
+
   // Internal endpoint: list connected tokens (for API to query) - check first, before token extraction
   if (pathname === "/internal/connected-tokens") {
     const connectedTokens = Array.from(clients.keys());
@@ -371,8 +385,8 @@ const httpServer = http.createServer(async (req, res) => {
 httpServer.keepAliveTimeout = 60000; // 60s
 httpServer.headersTimeout = 65000;   // must be greater than keepAliveTimeout
 
-httpServer.listen(LISTEN_HTTP, "0.0.0.0", () => {
-  log(`Tunnel ingress listening on ${LISTEN_HTTP}`);
+httpServer.listen(LISTEN_HTTP, LISTEN_HTTP_HOST, () => {
+  log(`Tunnel ingress listening on ${LISTEN_HTTP_HOST}:${LISTEN_HTTP}`);
   log(`Domain: ${TUNNEL_DOMAIN}`);
   log(`Expected format: <token>.${TUNNEL_DOMAIN}`);
   log(`Max request size: ${MAX_REQUEST_SIZE / 1024 / 1024}MB`);
