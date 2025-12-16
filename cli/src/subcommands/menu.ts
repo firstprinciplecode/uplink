@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import fetch from "node-fetch";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import readline from "readline";
 import { apiRequest } from "../http";
 import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
@@ -216,6 +216,84 @@ export const menuCommand = new Command("menu")
         },
       },
       {
+        label: "🛑 Stop tunnel client",
+        action: async () => {
+          try {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+            
+            // Find running tunnel client processes
+            const processes = findTunnelClients();
+            
+            if (processes.length === 0) {
+              try {
+                process.stdin.setRawMode(true);
+                process.stdin.resume();
+              } catch {
+                /* ignore */
+              }
+              return "No running tunnel clients found.";
+            }
+            
+            console.log("\nRunning tunnel clients:");
+            processes.forEach((p, idx) => {
+              console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
+            });
+            console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
+            
+            const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
+            const choice = Number(answer) || 1;
+            
+            let killed = 0;
+            if (choice >= 1 && choice <= processes.length) {
+              // Kill specific client
+              const selected = processes[choice - 1];
+              try {
+                execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
+                killed = 1;
+              } catch (err: any) {
+                throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
+              }
+            } else if (choice === processes.length + 1) {
+              // Kill all
+              for (const p of processes) {
+                try {
+                  execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
+                  killed++;
+                } catch {
+                  // Process might have already exited
+                }
+              }
+            } else {
+              // Default to first
+              try {
+                execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
+                killed = 1;
+              } catch (err: any) {
+                throw new Error(`Failed to kill process: ${err.message}`);
+              }
+            }
+            
+            try {
+              process.stdin.setRawMode(true);
+              process.stdin.resume();
+            } catch {
+              /* ignore */
+            }
+            
+            return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+          } catch (err: any) {
+            try {
+              process.stdin.setRawMode(true);
+              process.stdin.resume();
+            } catch {
+              /* ignore */
+            }
+            throw err;
+          }
+        },
+      },
+      {
         label: "Smoke test: tunnel",
         action: async () => {
           await runSmoke("smoke:tunnel");
@@ -362,6 +440,35 @@ async function createAndStartTunnel(port: number): Promise<string> {
     `To stop the tunnel, find and kill the client process:`,
     `  pkill -f "client-improved.js.*${token}"`,
   ].join("\n");
+}
+
+function findTunnelClients(): Array<{ pid: number; port: number; token: string }> {
+  try {
+    // Find processes running client-improved.js
+    const output = execSync("ps aux | grep 'client-improved.js' | grep -v grep", { encoding: "utf-8" });
+    const lines = output.trim().split("\n").filter(Boolean);
+    
+    const clients: Array<{ pid: number; port: number; token: string }> = [];
+    
+    for (const line of lines) {
+      // Parse process line: USER PID ... node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
+      const pidMatch = line.match(/^\S+\s+(\d+)/);
+      const tokenMatch = line.match(/--token\s+(\S+)/);
+      const portMatch = line.match(/--port\s+(\d+)/);
+      
+      if (pidMatch && tokenMatch && portMatch) {
+        clients.push({
+          pid: parseInt(pidMatch[1], 10),
+          port: parseInt(portMatch[1], 10),
+          token: tokenMatch[1],
+        });
+      }
+    }
+    
+    return clients;
+  } catch {
+    return [];
+  }
 }
 
 function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all") {
