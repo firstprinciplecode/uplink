@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import { spawn } from "child_process";
 import readline from "readline";
 import { apiRequest } from "../http";
+import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 
 type Choice = {
   label: string;
@@ -125,7 +126,57 @@ export const menuCommand = new Command("menu")
         },
       },
       {
-        label: "Create tunnel (prompt for port)",
+        label: "🚀 Start tunnel (auto-detect port)",
+        action: async () => {
+          try {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+            
+            // Scan for active ports
+            console.log("Scanning for active servers...");
+            const activePorts = await scanCommonPorts();
+            
+            if (activePorts.length === 0) {
+              // No ports found, prompt for manual entry
+              const answer = await promptLine("\nNo active servers detected. Enter port number (default 3000): ");
+              const port = Number(answer) || 3000;
+              return await createAndStartTunnel(port);
+            }
+            
+            // Show port selection menu
+            console.log("\nFound active servers on these ports:");
+            activePorts.forEach((port, idx) => {
+              console.log(`  ${idx + 1}. Port ${port}`);
+            });
+            console.log(`  ${activePorts.length + 1}. Enter custom port`);
+            
+            const answer = await promptLine(`\nSelect port (1-${activePorts.length + 1}, default 1): `);
+            const choice = Number(answer) || 1;
+            
+            let port: number;
+            if (choice >= 1 && choice <= activePorts.length) {
+              port = activePorts[choice - 1];
+            } else if (choice === activePorts.length + 1) {
+              const customAnswer = await promptLine("Enter port number: ");
+              port = Number(customAnswer) || 3000;
+            } else {
+              port = activePorts[0]; // Default to first found port
+            }
+            
+            return await createAndStartTunnel(port);
+          } catch (err: any) {
+            try {
+              process.stdin.setRawMode(true);
+              process.stdin.resume();
+            } catch {
+              /* ignore */
+            }
+            throw err;
+          }
+        },
+      },
+      {
+        label: "Create tunnel (manual port)",
         action: async () => {
           const answer = await promptLine("Local port to expose (default 3000): ");
           const port = Number(answer) || 3000;
@@ -147,6 +198,9 @@ export const menuCommand = new Command("menu")
               `Created tunnel: ${url}`,
               httpFallback && url !== httpFallback ? `HTTP fallback: ${httpFallback}` : "",
               `Token: ${token}`,
+              "",
+              "To start the tunnel client, run:",
+              `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "178.156.149.124:7071"}`,
             ]
               .filter(Boolean)
               .join("\n");
@@ -266,6 +320,49 @@ export const menuCommand = new Command("menu")
     process.stdin.resume();
     process.stdin.on("data", onKey);
   });
+
+async function createAndStartTunnel(port: number): Promise<string> {
+  // Create tunnel
+  const result = await apiRequest("POST", "/v1/tunnels", { port });
+  const url = result.url || "(no url)";
+  const token = result.token || "(no token)";
+  const ctrl = process.env.TUNNEL_CTRL || "178.156.149.124:7071";
+  
+  // Start tunnel client in background
+  const path = require("path");
+  const projectRoot = path.join(__dirname, "../../..");
+  const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
+  const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
+    stdio: "ignore",
+    detached: true,
+    cwd: projectRoot,
+  });
+  clientProcess.unref();
+  
+  // Wait a moment for client to connect
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  } catch {
+    /* ignore */
+  }
+  
+  return [
+    `✅ Tunnel created and client started!`,
+    ``,
+    `🌐 Public URL: ${url}`,
+    `🔑 Token: ${token}`,
+    `📡 Local port: ${port}`,
+    ``,
+    `The tunnel client is running in the background.`,
+    `Open ${url} in your browser to access your local server!`,
+    ``,
+    `To stop the tunnel, find and kill the client process:`,
+    `  pkill -f "client-improved.js.*${token}"`,
+  ].join("\n");
+}
 
 function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all") {
   return new Promise<void>((resolve, reject) => {
