@@ -353,9 +353,40 @@ export const menuCommand = new Command("menu")
 
     const getCurrentMenu = () => menuStack[menuStack.length - 1];
 
+    const getActiveTunnelsInfo = (): string => {
+      const clients = findTunnelClients();
+      if (clients.length === 0) {
+        return "";
+      }
+      
+      const domain = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
+      const scheme = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
+      
+      const tunnelLines = clients.map((client) => {
+        const url = `${scheme}://${client.token}.${domain}`;
+        return `  🌐 ${url} → localhost:${client.port}`;
+      });
+      
+      return [
+        "",
+        colorYellow("Active Tunnels:"),
+        ...tunnelLines,
+        "",
+      ].join("\n");
+    };
+
     const render = () => {
       clearScreen();
       console.log(colorCyan(ASCII_UPLINK));
+      
+      // Show active tunnels if we're at the main menu
+      if (menuStack.length === 1) {
+        const activeTunnels = getActiveTunnelsInfo();
+        if (activeTunnels) {
+          console.log(activeTunnels);
+        }
+      }
+      
       console.log();
       
       const currentMenu = getCurrentMenu();
