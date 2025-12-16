@@ -254,18 +254,24 @@ function handleRequest(msg) {
     }
   }
 
+  // Clean headers - remove hop-by-hop headers and undefined values
+  const cleanHeaders = { ...msg.headers };
+  delete cleanHeaders.connection;
+  delete cleanHeaders["keep-alive"];
+  delete cleanHeaders["transfer-encoding"];
+  // Remove any undefined values
+  Object.keys(cleanHeaders).forEach(key => {
+    if (cleanHeaders[key] === undefined) {
+      delete cleanHeaders[key];
+    }
+  });
+
   const options = {
     hostname: "127.0.0.1",
     port,
     path: msg.path || "/",
     method: msg.method || "GET",
-    headers: {
-      ...msg.headers,
-      // Remove hop-by-hop headers
-      "connection": undefined,
-      "keep-alive": undefined,
-      "transfer-encoding": undefined,
-    },
+    headers: cleanHeaders,
     timeout: REQUEST_TIMEOUT,
   };
 
