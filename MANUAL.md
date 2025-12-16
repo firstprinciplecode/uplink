@@ -191,6 +191,7 @@ uplink admin tunnels --status active
 
 **Relay Environment Variables:**
 - `TUNNEL_RELAY_HTTP` - HTTP ingress port (default: 7070)
+- `TUNNEL_RELAY_HTTP_HOST` - HTTP bind host (default: 127.0.0.1; keep loopback for safety)
 - `TUNNEL_RELAY_CTRL` - Control channel port (default: 7071)
 - `TUNNEL_DOMAIN` - Tunnel domain (default: t.uplink.spot)
 - `TUNNEL_VALIDATE_TOKENS` - Enable token validation (default: false)
@@ -201,6 +202,14 @@ uplink admin tunnels --status active
 - `TUNNEL_CTRL_CA` - CA bundle for control TLS (optional)
 - `TUNNEL_CTRL_CERT` / `TUNNEL_CTRL_KEY` - Cert/key for control TLS (optional)
 - `TUNNEL_CTRL_TLS_INSECURE` - Allow self-signed (default: false; set true for dev)
+- `RELAY_INTERNAL_SECRET` - Optional shared secret required on `/health` and `/internal/connected-tokens` (set the same value on backend service env)
+
+**Backend requirement:**
+- If `RELAY_INTERNAL_SECRET` is set on the relay, set the same `RELAY_INTERNAL_SECRET` in the backend environment so admin tunnel status can read `/internal/connected-tokens`.
+
+**CLI (optional relay banner):**
+- `RELAY_HEALTH_URL` - If set, the menu shows relay status (e.g., `http://t.uplink.spot:7070/health` or `http://127.0.0.1:7070/health` when port-forwarded)
+- `RELAY_INTERNAL_SECRET` - Provide if the relay protects internal endpoints
 
 ---
 
