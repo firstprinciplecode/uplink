@@ -1,16 +1,46 @@
 import net from "net";
 
 /**
- * Check if a port is in use
+ * Check if a port is in use by trying to connect to it
+ * More reliable than trying to bind to the port
  */
 export async function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.once("close", () => resolve(false));
-      server.close();
+    // Try to connect to the port - if we can connect, something is listening
+    const socket = new net.Socket();
+    let resolved = false;
+    
+    const cleanup = () => {
+      if (!resolved) {
+        resolved = true;
+        socket.destroy();
+      }
+    };
+    
+    socket.setTimeout(500);
+    
+    socket.once("connect", () => {
+      cleanup();
+      resolve(true); // Port is in use (we connected)
     });
-    server.on("error", () => resolve(true));
+    
+    socket.once("timeout", () => {
+      cleanup();
+      resolve(false); // Port is not in use (timeout)
+    });
+    
+    socket.once("error", (err: any) => {
+      // ECONNREFUSED means nothing is listening
+      if (err.code === "ECONNREFUSED") {
+        cleanup();
+        resolve(false);
+      } else {
+        cleanup();
+        resolve(true); // Other error might mean port is in use
+      }
+    });
+    
+    socket.connect(port, "127.0.0.1");
   });
 }
 
