@@ -292,16 +292,26 @@ export const menuCommand = new Command("menu")
               if (!result.tunnels || result.tunnels.length === 0) {
                 return "No tunnels found.";
               }
+              
+              // Get list of connected tunnel clients
+              const connectedClients = findTunnelClients();
+              const connectedTokens = new Set(connectedClients.map(c => c.token));
+              
               const lines = result.tunnels.map(
-                (t: any) =>
-                  `${truncate(t.id, 12)}  ${truncate(t.token, 10).padEnd(12)}  ${String(
+                (t: any) => {
+                  const token = t.token || "";
+                  const isConnected = connectedTokens.has(token);
+                  const connectionStatus = isConnected ? "connected" : "disconnected";
+                  
+                  return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
                     t.target_port ?? t.targetPort ?? "-"
-                  ).padEnd(5)}  ${String(t.status ?? "unknown").padEnd(9)}  ${truncate(
+                  ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
                     t.created_at ?? t.createdAt ?? "",
                     19
-                  )}`
+                  )}`;
+                }
               );
-              return ["ID           Token         Port   Status     Created", "-".repeat(60), ...lines].join(
+              return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
                 "\n"
               );
             },
