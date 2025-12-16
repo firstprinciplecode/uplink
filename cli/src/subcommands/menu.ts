@@ -5,9 +5,10 @@ import readline from "readline";
 import { apiRequest } from "../http";
 import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 
-type Choice = {
+type MenuChoice = {
   label: string;
-  action: () => Promise<string>;
+  action?: () => Promise<string>;
+  subMenu?: MenuChoice[];
 };
 
 const ASCII_UPLINK = [
@@ -55,264 +56,281 @@ export const menuCommand = new Command("menu")
   .description("Interactive terminal menu (arrow keys + enter)")
   .action(async () => {
     const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-    const choices: Choice[] = [
+    
+    // Build menu structure
+    const mainMenu: MenuChoice[] = [
       {
-        label: "System status",
-        action: async () => {
-          let health = "unknown";
-          try {
-            const res = await fetch(`${apiBase}/health`);
-            const json = await res.json().catch(() => ({}));
-            health = json.status || res.statusText || "unknown";
-          } catch {
-            health = "unreachable";
-          }
-
-          const stats = await apiRequest("GET", "/v1/admin/stats");
-          return [
-            `API health: ${health}`,
-            "Tunnels:",
-            `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
-            `  Created last 24h: ${stats.tunnels.createdLast24h}`,
-            "Databases:",
-            `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
-            `  Created last 24h: ${stats.databases.createdLast24h}`,
-          ].join("\n");
-        },
-      },
-      {
-        label: "List tunnels (limit 20)",
-        action: async () => {
-          const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
-          if (!result.tunnels || result.tunnels.length === 0) {
-            return "No tunnels found.";
-          }
-          const lines = result.tunnels.map(
-            (t: any) =>
-              `${truncate(t.id, 12)}  ${truncate(t.token, 10).padEnd(12)}  ${String(
-                t.target_port ?? t.targetPort ?? "-"
-              ).padEnd(5)}  ${String(t.status ?? "unknown").padEnd(9)}  ${truncate(
-                t.created_at ?? t.createdAt ?? "",
-                19
-              )}`
-          );
-          return ["ID           Token         Port   Status     Created", "-".repeat(60), ...lines].join(
-            "\n"
-          );
-        },
-      },
-      {
-        label: "List databases (limit 20)",
-        action: async () => {
-          const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
-          if (!result.databases || result.databases.length === 0) {
-            return "No databases found.";
-          }
-          const lines = result.databases.map(
-            (db: any) =>
-              `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
-                db.provider ?? "-",
-                8
-              ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
-                db.status ?? "unknown",
-                10
-              ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
-          );
-          return [
-            "ID           Name            Prov     Region     Status      Created",
-            "-".repeat(80),
-            ...lines,
-          ].join("\n");
-        },
-      },
-      {
-        label: "🚀 Start tunnel (auto-detect port)",
-        action: async () => {
-          try {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-            
-            // Scan for active ports
-            console.log("Scanning for active servers...");
-            const activePorts = await scanCommonPorts();
-            
-            if (activePorts.length === 0) {
-              // No ports found, prompt for manual entry
-              const answer = await promptLine("\nNo active servers detected. Enter port number (default 3000): ");
-              const port = Number(answer) || 3000;
-              return await createAndStartTunnel(port);
-            }
-            
-            // Show port selection menu
-            console.log("\nFound active servers on these ports:");
-            activePorts.forEach((port, idx) => {
-              console.log(`  ${idx + 1}. Port ${port}`);
-            });
-            console.log(`  ${activePorts.length + 1}. Enter custom port`);
-            
-            const answer = await promptLine(`\nSelect port (1-${activePorts.length + 1}, default 1): `);
-            const choice = Number(answer) || 1;
-            
-            let port: number;
-            if (choice >= 1 && choice <= activePorts.length) {
-              port = activePorts[choice - 1];
-            } else if (choice === activePorts.length + 1) {
-              const customAnswer = await promptLine("Enter port number: ");
-              port = Number(customAnswer) || 3000;
-            } else {
-              port = activePorts[0]; // Default to first found port
-            }
-            
-            return await createAndStartTunnel(port);
-          } catch (err: any) {
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            throw err;
-          }
-        },
-      },
-      {
-        label: "Create tunnel (manual port)",
-        action: async () => {
-          const answer = await promptLine("Local port to expose (default 3000): ");
-          const port = Number(answer) || 3000;
-          try {
-            const result = await apiRequest("POST", "/v1/tunnels", { port });
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            const url = result.url || "(no url)";
-            const token = result.token || "(no token)";
-            const httpFallback =
-              typeof url === "string" && url.startsWith("https://")
-                ? url.replace(/^https:\/\//, "http://")
-                : "";
-            return [
-              `Created tunnel: ${url}`,
-              httpFallback && url !== httpFallback ? `HTTP fallback: ${httpFallback}` : "",
-              `Token: ${token}`,
-              "",
-              "To start the tunnel client, run:",
-              `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "178.156.149.124:7071"}`,
-            ]
-              .filter(Boolean)
-              .join("\n");
-          } catch (err: any) {
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            throw err;
-          }
-        },
-      },
-      {
-        label: "🛑 Stop tunnel client",
-        action: async () => {
-          try {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-            
-            // Find running tunnel client processes
-            const processes = findTunnelClients();
-            
-            if (processes.length === 0) {
+        label: "System Status",
+        subMenu: [
+          {
+            label: "View Status",
+            action: async () => {
+              let health = "unknown";
               try {
-                process.stdin.setRawMode(true);
-                process.stdin.resume();
+                const res = await fetch(`${apiBase}/health`);
+                const json = await res.json().catch(() => ({}));
+                health = json.status || res.statusText || "unknown";
               } catch {
-                /* ignore */
+                health = "unreachable";
               }
-              return "No running tunnel clients found.";
-            }
-            
-            console.log("\nRunning tunnel clients:");
-            processes.forEach((p, idx) => {
-              console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
-            });
-            console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
-            
-            const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
-            const choice = Number(answer) || 1;
-            
-            let killed = 0;
-            if (choice >= 1 && choice <= processes.length) {
-              // Kill specific client
-              const selected = processes[choice - 1];
+
+              const stats = await apiRequest("GET", "/v1/admin/stats");
+              return [
+                `API health: ${health}`,
+                "Tunnels:",
+                `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
+                `  Created last 24h: ${stats.tunnels.createdLast24h}`,
+                "Databases:",
+                `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
+                `  Created last 24h: ${stats.databases.createdLast24h}`,
+              ].join("\n");
+            },
+          },
+          {
+            label: "Test: Tunnel",
+            action: async () => {
+              await runSmoke("smoke:tunnel");
+              return "smoke:tunnel completed";
+            },
+          },
+          {
+            label: "Test: Database",
+            action: async () => {
+              await runSmoke("smoke:db");
+              return "smoke:db completed";
+            },
+          },
+          {
+            label: "Test: All",
+            action: async () => {
+              await runSmoke("smoke:all");
+              return "smoke:all completed";
+            },
+          },
+        ],
+      },
+      {
+        label: "Manage Tunnels",
+        subMenu: [
+          {
+            label: "Start (Auto)",
+            action: async () => {
               try {
-                execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
-                killed = 1;
-              } catch (err: any) {
-                throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
-              }
-            } else if (choice === processes.length + 1) {
-              // Kill all
-              for (const p of processes) {
-                try {
-                  execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
-                  killed++;
-                } catch {
-                  // Process might have already exited
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                
+                // Scan for active ports
+                console.log("Scanning for active servers...");
+                const activePorts = await scanCommonPorts();
+                
+                if (activePorts.length === 0) {
+                  // No ports found, prompt for manual entry
+                  const answer = await promptLine("\nNo active servers detected. Enter port number (default 3000): ");
+                  const port = Number(answer) || 3000;
+                  return await createAndStartTunnel(port);
                 }
-              }
-            } else {
-              // Default to first
-              try {
-                execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
-                killed = 1;
+                
+                // Show port selection menu
+                console.log("\nFound active servers on these ports:");
+                activePorts.forEach((port, idx) => {
+                  console.log(`  ${idx + 1}. Port ${port}`);
+                });
+                console.log(`  ${activePorts.length + 1}. Enter custom port`);
+                
+                const answer = await promptLine(`\nSelect port (1-${activePorts.length + 1}, default 1): `);
+                const choice = Number(answer) || 1;
+                
+                let port: number;
+                if (choice >= 1 && choice <= activePorts.length) {
+                  port = activePorts[choice - 1];
+                } else if (choice === activePorts.length + 1) {
+                  const customAnswer = await promptLine("Enter port number: ");
+                  port = Number(customAnswer) || 3000;
+                } else {
+                  port = activePorts[0]; // Default to first found port
+                }
+                
+                return await createAndStartTunnel(port);
               } catch (err: any) {
-                throw new Error(`Failed to kill process: ${err.message}`);
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                throw err;
               }
-            }
-            
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            
-            return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
-          } catch (err: any) {
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            throw err;
-          }
-        },
+            },
+          },
+          {
+            label: "Start (Manual)",
+            action: async () => {
+              const answer = await promptLine("Local port to expose (default 3000): ");
+              const port = Number(answer) || 3000;
+              try {
+                const result = await apiRequest("POST", "/v1/tunnels", { port });
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                const url = result.url || "(no url)";
+                const token = result.token || "(no token)";
+                const httpFallback =
+                  typeof url === "string" && url.startsWith("https://")
+                    ? url.replace(/^https:\/\//, "http://")
+                    : "";
+                return [
+                  `Created tunnel: ${url}`,
+                  httpFallback && url !== httpFallback ? `HTTP fallback: ${httpFallback}` : "",
+                  `Token: ${token}`,
+                  "",
+                  "To start the tunnel client, run:",
+                  `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "178.156.149.124:7071"}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+              } catch (err: any) {
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                throw err;
+              }
+            },
+          },
+          {
+            label: "Stop Tunnel",
+            action: async () => {
+              try {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                
+                // Find running tunnel client processes
+                const processes = findTunnelClients();
+                
+                if (processes.length === 0) {
+                  try {
+                    process.stdin.setRawMode(true);
+                    process.stdin.resume();
+                  } catch {
+                    /* ignore */
+                  }
+                  return "No running tunnel clients found.";
+                }
+                
+                console.log("\nRunning tunnel clients:");
+                processes.forEach((p, idx) => {
+                  console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
+                });
+                console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
+                
+                const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
+                const choice = Number(answer) || 1;
+                
+                let killed = 0;
+                if (choice >= 1 && choice <= processes.length) {
+                  // Kill specific client
+                  const selected = processes[choice - 1];
+                  try {
+                    execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
+                    killed = 1;
+                  } catch (err: any) {
+                    throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
+                  }
+                } else if (choice === processes.length + 1) {
+                  // Kill all
+                  for (const p of processes) {
+                    try {
+                      execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
+                      killed++;
+                    } catch {
+                      // Process might have already exited
+                    }
+                  }
+                } else {
+                  // Default to first
+                  try {
+                    execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
+                    killed = 1;
+                  } catch (err: any) {
+                    throw new Error(`Failed to kill process: ${err.message}`);
+                  }
+                }
+                
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                
+                return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+              } catch (err: any) {
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                throw err;
+              }
+            },
+          },
+        ],
       },
       {
-        label: "Smoke test: tunnel",
-        action: async () => {
-          await runSmoke("smoke:tunnel");
-          return "smoke:tunnel completed";
-        },
-      },
-      {
-        label: "Smoke test: db",
-        action: async () => {
-          await runSmoke("smoke:db");
-          return "smoke:db completed";
-        },
-      },
-      {
-        label: "Smoke test: all",
-        action: async () => {
-          await runSmoke("smoke:all");
-          return "smoke:all completed";
-        },
+        label: "Usage",
+        subMenu: [
+          {
+            label: "List Tunnels",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
+              if (!result.tunnels || result.tunnels.length === 0) {
+                return "No tunnels found.";
+              }
+              const lines = result.tunnels.map(
+                (t: any) =>
+                  `${truncate(t.id, 12)}  ${truncate(t.token, 10).padEnd(12)}  ${String(
+                    t.target_port ?? t.targetPort ?? "-"
+                  ).padEnd(5)}  ${String(t.status ?? "unknown").padEnd(9)}  ${truncate(
+                    t.created_at ?? t.createdAt ?? "",
+                    19
+                  )}`
+              );
+              return ["ID           Token         Port   Status     Created", "-".repeat(60), ...lines].join(
+                "\n"
+              );
+            },
+          },
+          {
+            label: "List Databases",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
+              if (!result.databases || result.databases.length === 0) {
+                return "No databases found.";
+              }
+              const lines = result.databases.map(
+                (db: any) =>
+                  `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
+                    db.provider ?? "-",
+                    8
+                  ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
+                    db.status ?? "unknown",
+                    10
+                  ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
+              );
+              return [
+                "ID           Name            Prov     Region     Status      Created",
+                "-".repeat(80),
+                ...lines,
+              ].join("\n");
+            },
+          },
+        ],
       },
       {
         label: "Exit",
@@ -320,28 +338,42 @@ export const menuCommand = new Command("menu")
       },
     ];
 
+    // Menu navigation state
+    const menuStack: MenuChoice[][] = [mainMenu];
+    const menuPath: string[] = [];
     let selected = 0;
-    let message = "Use ↑/↓ and Enter. Ctrl+C to quit.";
+    let message = "Use ↑/↓ and Enter. ← to go back. Ctrl+C to quit.";
     let exiting = false;
     let busy = false;
+
+    const getCurrentMenu = () => menuStack[menuStack.length - 1];
 
     const render = () => {
       clearScreen();
       console.log(colorCyan(ASCII_UPLINK));
       console.log();
-      console.log("Interactive menu");
-      console.log("───────────────");
-      choices.forEach((choice, idx) => {
+      
+      const currentMenu = getCurrentMenu();
+      const menuTitle = menuPath.length > 0 
+        ? menuPath.join(" > ")
+        : "Interactive menu";
+      
+      console.log(menuTitle);
+      console.log("─".repeat(menuTitle.length));
+      
+      currentMenu.forEach((choice, idx) => {
         const pointer = idx === selected ? colorYellow("›") : " ";
         const label = idx === selected ? colorYellow(choice.label) : choice.label;
-        console.log(`${pointer} ${label}`);
+        const indicator = choice.subMenu ? " →" : "";
+        console.log(`${pointer} ${label}${indicator}`);
       });
+      
       if (busy) {
         console.log("\nWorking...");
       } else if (message) {
         console.log("\n" + message);
       }
-      console.log("\nCtrl+C to exit");
+      console.log("\nCtrl+C to exit" + (menuStack.length > 1 ? " | ← to go back" : ""));
     };
 
     const cleanup = () => {
@@ -354,12 +386,28 @@ export const menuCommand = new Command("menu")
     };
 
     const handleAction = async () => {
+      const currentMenu = getCurrentMenu();
+      const choice = currentMenu[selected];
+      
+      if (choice.subMenu) {
+        // Navigate into sub-menu
+        menuStack.push(choice.subMenu);
+        menuPath.push(choice.label);
+        selected = 0;
+        render();
+        return;
+      }
+      
+      if (!choice.action) {
+        return;
+      }
+      
       busy = true;
       render();
       try {
-        const result = await choices[selected].action();
+        const result = await choice.action();
         message = result;
-        if (choices[selected].label === "Exit") {
+        if (choice.label === "Exit") {
           exiting = true;
         }
       } catch (err: any) {
@@ -377,16 +425,26 @@ export const menuCommand = new Command("menu")
     const onKey = async (key: Buffer) => {
       if (busy) return;
       const str = key.toString();
+      const currentMenu = getCurrentMenu();
+      
       if (str === "\u0003") {
         cleanup();
         process.exit(0);
+      } else if (str === "\u001b[D") {
+        // Left arrow - go back
+        if (menuStack.length > 1) {
+          menuStack.pop();
+          menuPath.pop();
+          selected = 0;
+          render();
+        }
       } else if (str === "\u001b[A") {
         // Up
-        selected = (selected - 1 + choices.length) % choices.length;
+        selected = (selected - 1 + currentMenu.length) % currentMenu.length;
         render();
       } else if (str === "\u001b[B") {
         // Down
-        selected = (selected + 1) % choices.length;
+        selected = (selected + 1) % currentMenu.length;
         render();
       } else if (str === "\r") {
         await handleAction();
@@ -489,4 +547,3 @@ function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all") {
     child.on("error", (err) => reject(err));
   });
 }
-
