@@ -351,37 +351,30 @@ export const menuCommand = new Command("menu")
     let exiting = false;
     let busy = false;
     
-    // Cache active tunnels info to avoid scanning on every render
+    // Cache active tunnels info - only update at start or when returning to main menu
     let cachedActiveTunnels = "";
-    let lastTunnelScan = 0;
-    const TUNNEL_SCAN_INTERVAL = 2000; // Update cache every 2 seconds
 
     const getCurrentMenu = () => menuStack[menuStack.length - 1];
 
     const updateActiveTunnelsCache = () => {
-      const now = Date.now();
-      // Only scan if cache is stale or empty
-      if (cachedActiveTunnels === "" || (now - lastTunnelScan) > TUNNEL_SCAN_INTERVAL) {
-        const clients = findTunnelClients();
-        if (clients.length === 0) {
-          cachedActiveTunnels = "";
-        } else {
-          const domain = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
-          const scheme = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
-          
-          const tunnelLines = clients.map((client) => {
-            const url = `${scheme}://${client.token}.${domain}`;
-            return `  🌐 ${url} → localhost:${client.port}`;
-          });
-          
-          cachedActiveTunnels = [
-            "",
-            colorYellow("Active Tunnels:"),
-            ...tunnelLines,
-            "",
-          ].join("\n");
-        }
-        lastTunnelScan = now;
+      const clients = findTunnelClients();
+      if (clients.length === 0) {
+        cachedActiveTunnels = "";
+      } else {
+        const domain = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
+        const scheme = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
+        
+        const tunnelLines = clients.map((client) => {
+          const url = `${scheme}://${client.token}.${domain}`;
+          return `  🌐 ${url} → localhost:${client.port}`;
+        });
+        
+        cachedActiveTunnels = [
+          "",
+          colorYellow("Active Tunnels:"),
+          ...tunnelLines,
+          "",
+        ].join("\n");
       }
     };
 
@@ -389,12 +382,9 @@ export const menuCommand = new Command("menu")
       clearScreen();
       console.log(colorCyan(ASCII_UPLINK));
       
-      // Show active tunnels if we're at the main menu (use cached value)
-      if (menuStack.length === 1) {
-        updateActiveTunnelsCache();
-        if (cachedActiveTunnels) {
-          console.log(cachedActiveTunnels);
-        }
+      // Show active tunnels if we're at the main menu (use cached value, no scanning)
+      if (menuStack.length === 1 && cachedActiveTunnels) {
+        console.log(cachedActiveTunnels);
       }
       
       console.log();
@@ -488,7 +478,7 @@ export const menuCommand = new Command("menu")
           selected = 0;
           // Refresh cache when returning to main menu
           if (menuStack.length === 1) {
-            cachedActiveTunnels = "";
+            updateActiveTunnelsCache();
           }
           render();
         }
@@ -505,6 +495,8 @@ export const menuCommand = new Command("menu")
       }
     };
 
+    // Initial scan for active tunnels at startup
+    updateActiveTunnelsCache();
     render();
     process.stdin.setRawMode(true);
     process.stdin.resume();
