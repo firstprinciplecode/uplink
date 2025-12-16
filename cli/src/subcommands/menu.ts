@@ -54,7 +54,7 @@ function truncate(text: string, max: number) {
 export const menuCommand = new Command("menu")
   .description("Interactive terminal menu (arrow keys + enter)")
   .action(async () => {
-    const apiBase = process.env.AGENTCLOUD_API_BASE || "http://localhost:4000";
+    const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
     const choices: Choice[] = [
       {
         label: "System status",
