@@ -155,7 +155,19 @@ export TUNNEL_CTRL=178.156.149.124:7071
 
 # Tunnel domain (default: t.uplink.spot)
 export TUNNEL_DOMAIN=t.uplink.spot
+
+# Optional: show relay status in the menu (set if you want the banner)
+# Set these before running `uplink` locally:
+# RELAY_HEALTH_URL points to the relay /health endpoint
+# RELAY_INTERNAL_SECRET must match the relay/backend secret if set
+export RELAY_HEALTH_URL=http://t.uplink.spot:7070/health
+# export RELAY_INTERNAL_SECRET=<your-relay-secret>
 ```
+
+### Ops notes (relay/backend)
+- Relay binds HTTP ingress to loopback by default: `TUNNEL_RELAY_HTTP_HOST=127.0.0.1`
+- Protect internal endpoints with a shared secret: `RELAY_INTERNAL_SECRET=<same-secret-on-backend>`
+- Set the same `RELAY_INTERNAL_SECRET` on the backend service so admin tunnel status works.
 
 ---
 
