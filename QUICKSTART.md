@@ -6,7 +6,12 @@ This guide shows you how to expose a local development server to the internet us
 
 - Node.js installed
 - A local server running on a port (e.g., `localhost:3000`)
-- An API token (default: `dev-token` for development)
+- An API token (default: `dev-token`)
+
+**Note:** The CLI connects to `https://api.uplink.spot` by default. To use a local API server, set:
+```bash
+export AGENTCLOUD_API_BASE=http://localhost:4000
+```
 
 ## The Simplest Way (Recommended)
 

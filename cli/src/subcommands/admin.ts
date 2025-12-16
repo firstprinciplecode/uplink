@@ -28,7 +28,7 @@ adminCommand
   .action(async (opts) => {
     try {
       // Check health
-      const apiBase = process.env.AGENTCLOUD_API_BASE || "http://localhost:4000";
+      const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
       let health = { status: "unknown" };
       try {
         const fetch = (await import("node-fetch")).default;

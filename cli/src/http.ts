@@ -1,13 +1,14 @@
 import fetch from "node-fetch";
 
-const API_BASE = process.env.AGENTCLOUD_API_BASE ?? "http://localhost:4000";
+// Default to production API if not specified
+const API_BASE = process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot";
 const isLocalApiBase =
   API_BASE.includes("://localhost") ||
   API_BASE.includes("://127.0.0.1") ||
   API_BASE.includes("://0.0.0.0");
 const API_TOKEN =
   process.env.AGENTCLOUD_TOKEN ??
-  (isLocalApiBase ? process.env.AGENTCLOUD_TOKEN_DEV || "dev-token" : undefined);
+  (isLocalApiBase ? process.env.AGENTCLOUD_TOKEN_DEV || "dev-token" : "dev-token");
 
 export async function apiRequest(
   method: string,
