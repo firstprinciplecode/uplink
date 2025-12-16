@@ -90,11 +90,18 @@ adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
 async function getConnectedTokens(): Promise<Set<string>> {
   const relayHttpPort = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
   const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
+  const relaySecret = process.env.RELAY_INTERNAL_SECRET || "";
+  const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
   
   return new Promise((resolve) => {
     const req = http.get(
-      `http://${relayHost}:${relayHttpPort}/internal/connected-tokens`,
-      { timeout: 2000 },
+      {
+        host: relayHost,
+        port: relayHttpPort,
+        path: "/internal/connected-tokens",
+        timeout: 2000,
+        headers: relaySecret ? { [INTERNAL_SECRET_HEADER]: relaySecret } : undefined,
+      },
       (res) => {
         let data = "";
         res.on("data", (chunk) => {
