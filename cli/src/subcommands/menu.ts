@@ -353,6 +353,7 @@ export const menuCommand = new Command("menu")
     
     // Cache active tunnels info - only update at start or when returning to main menu
     let cachedActiveTunnels = "";
+    let cachedRelayStatus = "";
 
     const getCurrentMenu = () => menuStack[menuStack.length - 1];
 
@@ -378,10 +379,46 @@ export const menuCommand = new Command("menu")
       }
     };
 
+    const updateRelayStatusCache = async () => {
+      const relayHealthUrl = process.env.RELAY_HEALTH_URL || "";
+      if (!relayHealthUrl) {
+        cachedRelayStatus = "";
+        return;
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      try {
+        const headers: Record<string, string> = {};
+        if (process.env.RELAY_INTERNAL_SECRET) {
+          headers["x-relay-internal-secret"] = process.env.RELAY_INTERNAL_SECRET;
+        }
+        const res = await fetch(relayHealthUrl, { signal: controller.signal, headers });
+        if (res.ok) {
+          cachedRelayStatus = "Relay: ok";
+        } else {
+          cachedRelayStatus = `Relay: unreachable (HTTP ${res.status})`;
+        }
+      } catch {
+        cachedRelayStatus = "Relay: unreachable";
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const refreshMainMenuCaches = async () => {
+      updateActiveTunnelsCache();
+      await updateRelayStatusCache();
+      render();
+    };
+
     const render = () => {
       clearScreen();
       console.log(colorCyan(ASCII_UPLINK));
       
+      if (menuStack.length === 1 && cachedRelayStatus) {
+        console.log(cachedRelayStatus);
+      }
+
       // Show active tunnels if we're at the main menu (use cached value, no scanning)
       if (menuStack.length === 1 && cachedActiveTunnels) {
         console.log(cachedActiveTunnels);
@@ -430,10 +467,9 @@ export const menuCommand = new Command("menu")
         menuStack.push(choice.subMenu);
         menuPath.push(choice.label);
         selected = 0;
-        // Invalidate cache when navigating (will refresh when returning to main menu)
-        if (menuStack.length === 1) {
-          cachedActiveTunnels = "";
-        }
+        // Invalidate caches when leaving main menu
+        cachedActiveTunnels = "";
+        cachedRelayStatus = "";
         render();
         return;
       }
@@ -476,9 +512,10 @@ export const menuCommand = new Command("menu")
           menuStack.pop();
           menuPath.pop();
           selected = 0;
-          // Refresh cache when returning to main menu
+          // Refresh caches when returning to main menu
           if (menuStack.length === 1) {
-            updateActiveTunnelsCache();
+            await refreshMainMenuCaches();
+            return;
           }
           render();
         }
@@ -495,9 +532,8 @@ export const menuCommand = new Command("menu")
       }
     };
 
-    // Initial scan for active tunnels at startup
-    updateActiveTunnelsCache();
-    render();
+    // Initial scans for active tunnels and relay status at startup
+    await refreshMainMenuCaches();
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", onKey);
