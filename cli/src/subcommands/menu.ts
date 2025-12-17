@@ -198,6 +198,37 @@ export const menuCommand = new Command("menu")
           {
             label: "Revoke Token",
             action: async () => {
+              // Show a quick list first
+              const list = await apiRequest("GET", "/v1/admin/tokens?limit=50");
+              const tokens = list.tokens || [];
+              if (!tokens.length) {
+                restoreRawMode();
+                return "No tokens found.";
+              }
+
+              const header =
+                "ID".padEnd(18) +
+                "Role".padEnd(8) +
+                "Prefix".padEnd(10) +
+                "User ID".padEnd(26) +
+                "Status".padEnd(10) +
+                "Created";
+              console.log("\n" + header);
+              console.log("-".repeat(90));
+              tokens.forEach((t: any) => {
+                const id = String(t.id || "").slice(0, 16);
+                const role = String(t.role || "-").slice(0, 6);
+                const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
+                const userId = String(t.user_id || t.userId || "-").slice(0, 24);
+                const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
+                const created = (t.created_at || t.createdAt || "").slice(0, 19);
+                console.log(
+                  `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
+                    26
+                  )} ${status.padEnd(10)} ${created}`
+                );
+              });
+
               const id = (await promptLine("Token ID to revoke: ")).trim();
               restoreRawMode();
               if (!id) return "No token id provided.";
