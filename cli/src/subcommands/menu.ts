@@ -44,6 +44,75 @@ function restoreRawMode() {
   }
 }
 
+async function stopTunnelInteractive(): Promise<string> {
+  try {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    
+    const processes = findTunnelClients();
+    if (processes.length === 0) {
+      restoreRawMode();
+      return "No running tunnel clients found.";
+    }
+    
+    console.log("\nRunning tunnel clients:");
+    processes.forEach((p, idx) => {
+      console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
+    });
+    console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
+    
+    const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
+    const choice = Number(answer) || 1;
+    
+    let killed = 0;
+    if (choice >= 1 && choice <= processes.length) {
+      const selected = processes[choice - 1];
+      try {
+        execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
+        killed = 1;
+      } catch (err: any) {
+        throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
+      }
+    } else if (choice === processes.length + 1) {
+      for (const p of processes) {
+        try {
+          execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
+          killed++;
+        } catch {
+          /* already exited */
+        }
+      }
+    } else {
+      try {
+        execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
+        killed = 1;
+      } catch (err: any) {
+        throw new Error(`Failed to kill process: ${err.message}`);
+      }
+    }
+    
+    restoreRawMode();
+    return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+  } catch (err: any) {
+    restoreRawMode();
+    throw err;
+  }
+}
+
+async function stopAllTunnels(): Promise<string> {
+  try {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    // Kill all matching clients for current user
+    execSync(`pkill -f "scripts/tunnel/client-improved.js"`, { stdio: "ignore" });
+    restoreRawMode();
+    return "✅ Stopped all tunnel clients (kill switch).";
+  } catch (err: any) {
+    restoreRawMode();
+    return `Failed to stop all tunnel clients: ${err.message || err}`;
+  }
+}
+
 function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
@@ -335,81 +404,11 @@ export const menuCommand = new Command("menu")
           },
           {
             label: "Stop Tunnel",
-            action: async () => {
-              try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
-                // Find running tunnel client processes
-                const processes = findTunnelClients();
-                
-                if (processes.length === 0) {
-                  try {
-                    process.stdin.setRawMode(true);
-                    process.stdin.resume();
-                  } catch {
-                    /* ignore */
-                  }
-                  return "No running tunnel clients found.";
-                }
-                
-                console.log("\nRunning tunnel clients:");
-                processes.forEach((p, idx) => {
-                  console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
-                });
-                console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
-                
-                const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
-                const choice = Number(answer) || 1;
-                
-                let killed = 0;
-                if (choice >= 1 && choice <= processes.length) {
-                  // Kill specific client
-                  const selected = processes[choice - 1];
-                  try {
-                    execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
-                    killed = 1;
-                  } catch (err: any) {
-                    throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
-                  }
-                } else if (choice === processes.length + 1) {
-                  // Kill all
-                  for (const p of processes) {
-                    try {
-                      execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
-                      killed++;
-                    } catch {
-                      // Process might have already exited
-                    }
-                  }
-                } else {
-                  // Default to first
-                  try {
-                    execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
-                    killed = 1;
-                  } catch (err: any) {
-                    throw new Error(`Failed to kill process: ${err.message}`);
-                  }
-                }
-                
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                
-                return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
-              } catch (err: any) {
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                throw err;
-              }
-            },
+            action: async () => stopTunnelInteractive(),
+          },
+          {
+            label: "Stop ALL Tunnel Clients (kill switch)",
+            action: async () => stopAllTunnels(),
           },
         ],
       });
