@@ -322,3 +322,30 @@ tokensCommand
     }
   });
 
+// Cleanup command
+adminCommand
+  .command("cleanup")
+  .description("Cleanup old data")
+  .option("--dev-user-tunnels", "Clean up tunnels owned by dev-user", false)
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      if (opts.devUserTunnels) {
+        const result = await apiRequest("POST", "/v1/admin/cleanup/dev-user-tunnels", {});
+
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`✅ ${result.message || `Cleaned up ${result.deleted || 0} dev-user tunnels`}`);
+        }
+      } else {
+        console.error("Specify what to cleanup: --dev-user-tunnels");
+        process.exit(1);
+      }
+    } catch (error: any) {
+      const errorMsg = error.message || error.toString() || JSON.stringify(error);
+      console.error("Error during cleanup:", errorMsg);
+      process.exit(1);
+    }
+  });
+

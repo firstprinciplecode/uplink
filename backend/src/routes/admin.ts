@@ -403,4 +403,39 @@ adminRouter.post("/tokens/revoke", async (req: AuthedRequest, res: Response) => 
   }
 });
 
+/**
+ * POST /v1/admin/cleanup/dev-user-tunnels
+ * Clean up old tunnels owned by dev-user (from before token system)
+ */
+adminRouter.post("/cleanup/dev-user-tunnels", async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    // Mark all dev-user tunnels as deleted
+    const result = await pool.query(
+      `UPDATE tunnels 
+       SET status = 'deleted', updated_at = NOW() 
+       WHERE owner_user_id = 'dev-user' AND status <> 'deleted'`,
+      []
+    );
+
+    return res.json({
+      ok: true,
+      deleted: result.rowCount || 0,
+      message: `Marked ${result.rowCount || 0} dev-user tunnels as deleted`,
+    });
+  } catch (error: any) {
+    console.error("Error cleaning up dev-user tunnels:", error);
+    return res
+      .status(500)
+      .json(makeError("INTERNAL_ERROR", "Failed to cleanup tunnels", { error: error.message }));
+  }
+});
+
 
