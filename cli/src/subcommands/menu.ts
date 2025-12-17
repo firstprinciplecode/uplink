@@ -120,6 +120,82 @@ export const menuCommand = new Command("menu")
           },
         ],
       });
+
+      mainMenu.push({
+        label: "Manage Tokens (admin)",
+        subMenu: [
+          {
+            label: "List Tokens",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/tokens?limit=50");
+              const tokens = result.tokens || [];
+              if (!tokens.length) return "No tokens found.";
+
+              const lines = tokens.map((t: any) => {
+                const id = String(t.id || "").slice(0, 16);
+                const role = String(t.role || "-").slice(0, 6);
+                const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
+                const userId = String(t.user_id || t.userId || "-").slice(0, 24);
+                const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
+                const created = (t.created_at || t.createdAt || "").slice(0, 19);
+                return `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
+                  26
+                )} ${status.padEnd(10)} ${created}`;
+              });
+
+              return [
+                "ID".padEnd(18) +
+                  "Role".padEnd(8) +
+                  "Prefix".padEnd(10) +
+                  "User ID".padEnd(26) +
+                  "Status".padEnd(10) +
+                  "Created",
+                "-".repeat(90),
+                ...lines,
+              ].join("\n");
+            },
+          },
+          {
+            label: "Create Token",
+            action: async () => {
+              const roleInput = (await promptLine("Role (admin/user, default admin): ")).trim();
+              const role = roleInput === "user" ? "user" : "admin";
+              const label = (await promptLine("Label (optional): ")).trim();
+              const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
+              const expiresDays = expiresInput ? Number(expiresInput) : undefined;
+
+              const result = await apiRequest("POST", "/v1/admin/tokens", {
+                role,
+                label: label || undefined,
+                expiresInDays: Number.isFinite(expiresDays as any) ? expiresDays : undefined,
+              });
+
+              return [
+                "🔑 Token created (shown once)",
+                `Role:    ${result.role}`,
+                `User ID: ${result.userId}`,
+                `Token ID:${result.id}`,
+                `Prefix:  ${result.tokenPrefix}`,
+                result.label ? `Label:  ${result.label}` : "",
+                result.expiresAt ? `Expires: ${result.expiresAt}` : "",
+                "",
+                result.token || "",
+              ]
+                .filter(Boolean)
+                .join("\n");
+            },
+          },
+          {
+            label: "Revoke Token",
+            action: async () => {
+              const id = (await promptLine("Token ID to revoke: ")).trim();
+              if (!id) return "No token id provided.";
+              const result = await apiRequest("POST", "/v1/admin/tokens/revoke", { id });
+              return `✅ Revoked ${id} at ${result.revokedAt || ""}`;
+            },
+          },
+        ],
+      });
     }
 
     mainMenu.push({
