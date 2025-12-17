@@ -35,6 +35,15 @@ function promptLine(question: string): Promise<string> {
   });
 }
 
+function restoreRawMode() {
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  } catch {
+    /* ignore */
+  }
+}
+
 function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
@@ -169,6 +178,7 @@ export const menuCommand = new Command("menu")
                 label: label || undefined,
                 expiresInDays: Number.isFinite(expiresDays as any) ? expiresDays : undefined,
               });
+              restoreRawMode();
 
               return [
                 "🔑 Token created (shown once)",
@@ -189,6 +199,7 @@ export const menuCommand = new Command("menu")
             label: "Revoke Token",
             action: async () => {
               const id = (await promptLine("Token ID to revoke: ")).trim();
+              restoreRawMode();
               if (!id) return "No token id provided.";
               const result = await apiRequest("POST", "/v1/admin/tokens/revoke", { id });
               return `✅ Revoked ${id} at ${result.revokedAt || ""}`;
