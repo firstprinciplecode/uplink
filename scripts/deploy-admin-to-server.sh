@@ -32,3 +32,4 @@ echo "Test with:"
 echo "  AGENTCLOUD_API_BASE=https://api.uplink.spot AGENTCLOUD_TOKEN=dev-token npm run dev:cli -- admin status"
 
 
+

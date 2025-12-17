@@ -7,6 +7,33 @@ This guide shows you how to expose a local development server to the internet us
 - Node.js installed
 - A local server running on a port (e.g., `localhost:3000`)
 - An API token (default: `dev-token`)
+- Install the user CLI (pick one):
+  - Public npm (best UX once published):
+    ```bash
+    npm install -g uplink-cli
+    # or run without global install:
+    npx uplink-cli
+    ```
+  - Private repo via SSH (requires GitHub SSH access):
+    ```bash
+    npm install -g git+ssh://git@github.com/firstprinciplecode/agentcloud.git#master
+    ```
+  - Private repo via HTTPS with token in env (safer than embedding in URL):
+    ```bash
+    GITHUB_TOKEN=<your-github-pat-with-repo-scope> \
+      npm install -g https://github.com/firstprinciplecode/agentcloud.git#master
+    ```
+  - Prebuilt tarball (no git, no token):
+    ```bash
+    npm install -g ./uplink-cli-0.1.0.tgz
+    ```
+  Then set your user token before running `uplink`:
+  ```bash
+  export AGENTCLOUD_TOKEN=<your-user-token>
+  uplink
+  ```
+
+**Security note:** do not paste tokens into command lines/URLs (they land in shell history). Use `GITHUB_TOKEN` env for private installs and rotate any PAT that was previously pasted.
 
 **Note:** The CLI connects to `https://api.uplink.spot` by default. To use a local API server, set:
 ```bash
@@ -168,6 +195,7 @@ export RELAY_HEALTH_URL=http://t.uplink.spot:7070/health
 - Relay binds HTTP ingress to loopback by default: `TUNNEL_RELAY_HTTP_HOST=127.0.0.1`
 - Protect internal endpoints with a shared secret: `RELAY_INTERNAL_SECRET=<same-secret-on-backend>`
 - Set the same `RELAY_INTERNAL_SECRET` on the backend service so admin tunnel status works.
+- Admin-only menus/features require an admin token. Users with normal tokens only see their own tunnels/databases by default.
 
 ---
 

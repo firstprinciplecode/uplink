@@ -4,6 +4,7 @@ import bodyParser from "body-parser";
 import { dbRouter } from "./routes/dbs";
 import { tunnelRouter, tunnelTokenExists } from "./routes/tunnels";
 import { adminRouter } from "./routes/admin";
+import { meRouter } from "./routes/me";
 import { authMiddleware } from "./middleware/auth";
 
 const app = express();
@@ -40,6 +41,7 @@ app.use("/v1", authMiddleware);
 app.use("/v1/dbs", dbRouter);
 app.use("/v1/tunnels", tunnelRouter);
 app.use("/v1/admin", adminRouter);
+app.use("/v1/me", meRouter);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {

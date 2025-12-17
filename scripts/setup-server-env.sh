@@ -96,3 +96,4 @@ echo "  ssh ${SERVER_USER}@${SERVER_IP} 'journalctl -u backend-api -f'"
 
 
 
+

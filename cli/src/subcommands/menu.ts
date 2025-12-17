@@ -57,9 +57,20 @@ export const menuCommand = new Command("menu")
   .action(async () => {
     const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
     
-    // Build menu structure
-    const mainMenu: MenuChoice[] = [
-      {
+    // Determine role (admin or user) via /v1/me; default to user on failure
+    let isAdmin = false;
+    try {
+      const me = await apiRequest("GET", "/v1/me");
+      isAdmin = me?.role === "admin";
+    } catch {
+      isAdmin = false;
+    }
+
+    // Build menu structure dynamically by role
+    const mainMenu: MenuChoice[] = [];
+
+    if (isAdmin) {
+      mainMenu.push({
         label: "System Status",
         subMenu: [
           {
@@ -108,10 +119,12 @@ export const menuCommand = new Command("menu")
             },
           },
         ],
-      },
-      {
-        label: "Manage Tunnels",
-        subMenu: [
+      });
+    }
+
+    mainMenu.push({
+      label: "Manage Tunnels",
+      subMenu: [
           {
             label: "Start (Auto)",
             action: async () => {
@@ -281,67 +294,77 @@ export const menuCommand = new Command("menu")
             },
           },
         ],
-      },
-      {
-        label: "Usage",
-        subMenu: [
-          {
-            label: "List Tunnels",
-            action: async () => {
-              const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
-              if (!result.tunnels || result.tunnels.length === 0) {
-                return "No tunnels found.";
+      });
+
+    mainMenu.push({
+      label: "Usage",
+      subMenu: [
+        {
+          label: isAdmin ? "List Tunnels (admin)" : "List My Tunnels",
+          action: async () => {
+            const runningClients = findTunnelClients();
+            const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
+            const result = await apiRequest("GET", path);
+            const tunnels = result.tunnels || result?.items || [];
+            if (!tunnels || tunnels.length === 0) {
+              return "No tunnels found.";
+            }
+            
+            const lines = tunnels.map(
+              (t: any) => {
+                const token = t.token || "";
+                const connectedFromApi = t.connected ?? false;
+                const connectedLocal = runningClients.some((c) => c.token === token);
+                const connectionStatus = isAdmin
+                  ? (connectedFromApi ? "connected" : "disconnected")
+                  : (connectedLocal ? "connected" : "unknown");
+                
+                return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
+                  t.target_port ?? t.targetPort ?? "-"
+                ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
+                  t.created_at ?? t.createdAt ?? "",
+                  19
+                )}`;
               }
-              
-              const lines = result.tunnels.map(
-                (t: any) => {
-                  const token = t.token || "";
-                  const connectionStatus = t.connected ? "connected" : "disconnected";
-                  
-                  return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
-                    t.target_port ?? t.targetPort ?? "-"
-                  ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
-                    t.created_at ?? t.createdAt ?? "",
-                    19
-                  )}`;
-                }
-              );
-              return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
-                "\n"
-              );
-            },
+            );
+            return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
+              "\n"
+            );
           },
-          {
-            label: "List Databases",
-            action: async () => {
-              const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
-              if (!result.databases || result.databases.length === 0) {
-                return "No databases found.";
-              }
-              const lines = result.databases.map(
-                (db: any) =>
-                  `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
-                    db.provider ?? "-",
-                    8
-                  ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
-                    db.status ?? "unknown",
-                    10
-                  ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
-              );
-              return [
-                "ID           Name            Prov     Region     Status      Created",
-                "-".repeat(80),
-                ...lines,
-              ].join("\n");
-            },
+        },
+        {
+          label: isAdmin ? "List Databases (admin)" : "List My Databases",
+          action: async () => {
+            const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
+            const result = await apiRequest("GET", path);
+            const databases = result.databases || result.items || [];
+            if (!databases || databases.length === 0) {
+              return "No databases found.";
+            }
+            const lines = databases.map(
+              (db: any) =>
+                `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
+                  db.provider ?? "-",
+                  8
+                ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
+                  db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
+                  10
+                ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
+            );
+            return [
+              "ID           Name            Prov     Region     Status      Created",
+              "-".repeat(80),
+              ...lines,
+            ].join("\n");
           },
-        ],
-      },
-      {
-        label: "Exit",
-        action: async () => "Goodbye!",
-      },
-    ];
+        },
+      ],
+    });
+
+    mainMenu.push({
+      label: "Exit",
+      action: async () => "Goodbye!",
+    });
 
     // Menu navigation state
     const menuStack: MenuChoice[][] = [mainMenu];

@@ -5,13 +5,13 @@ import http from "http";
 
 export const adminRouter = Router();
 
-// Simple auth stub – replace with real auth middleware
 interface AuthedRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
-// Admin endpoints - currently accessible to any authenticated user
-// TODO: Add proper admin role checking
+function requireAdmin(user?: { id: string; role?: string }) {
+  return user && user.role === "admin";
+}
 
 /**
  * GET /v1/admin/stats
@@ -22,6 +22,9 @@ adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
     const user = req.user;
     if (!user) {
       return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
     }
 
     // Get tunnel stats
@@ -139,6 +142,9 @@ adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
     if (!user) {
       return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
     }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
 
     const status = req.query.status as string | undefined;
     const limit = Number(req.query.limit) || 50;
@@ -194,6 +200,9 @@ adminRouter.get("/databases", async (req: AuthedRequest, res: Response) => {
     const user = req.user;
     if (!user) {
       return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
     }
 
     const status = req.query.status as string | undefined;
