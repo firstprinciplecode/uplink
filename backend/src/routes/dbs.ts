@@ -17,7 +17,7 @@ export const dbRouter = Router();
 
 // Simple auth stub – replace with real auth middleware
 interface AuthedRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
 // POST /v1/dbs

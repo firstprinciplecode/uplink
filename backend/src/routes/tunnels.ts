@@ -8,7 +8,7 @@ export const tunnelRouter = Router();
 
 // Simple auth stub – replace with real auth middleware
 interface AuthedRequest extends Request {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
 const TUNNEL_DOMAIN = process.env.TUNNEL_DOMAIN || "dev.uplink.spot";

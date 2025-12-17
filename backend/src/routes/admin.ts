@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
 import http from "http";
+import { randomUUID, randomBytes } from "crypto";
+import { hashToken, tokenPrefix } from "../utils/token-hash";
 
 export const adminRouter = Router();
 
@@ -238,6 +240,166 @@ adminRouter.get("/databases", async (req: AuthedRequest, res: Response) => {
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to list databases", { error: error.message })
     );
+  }
+});
+
+/**
+ * GET /v1/admin/tokens
+ * List tokens (does NOT return raw tokens, only metadata)
+ */
+adminRouter.get("/tokens", async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+
+    const result = await pool.query(
+      `SELECT id, token_prefix, role, user_id, label, created_by_user_id, created_at, revoked_at, expires_at
+       FROM tokens
+       ORDER BY created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    const totalResult = await pool.query("SELECT COUNT(*) as count FROM tokens", []);
+
+    return res.json({
+      tokens: result.rows,
+      count: result.rows.length,
+      total: Number(totalResult.rows[0]?.count || 0),
+      limit,
+      offset,
+    });
+  } catch (error: any) {
+    console.error("Error listing tokens:", error);
+    return res
+      .status(500)
+      .json(makeError("INTERNAL_ERROR", "Failed to list tokens", { error: error.message }));
+  }
+});
+
+/**
+ * POST /v1/admin/tokens
+ * Mint a new token (returns the raw token once)
+ */
+adminRouter.post("/tokens", async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const role = (req.body?.role as string) || "user";
+    if (role !== "user" && role !== "admin") {
+      return res
+        .status(400)
+        .json(makeError("INVALID_INPUT", "role must be 'user' or 'admin'"));
+    }
+
+    const label = typeof req.body?.label === "string" ? req.body.label.slice(0, 200) : null;
+    const expiresInDaysRaw = req.body?.expiresInDays;
+    const expiresInDays =
+      typeof expiresInDaysRaw === "number" && Number.isFinite(expiresInDaysRaw)
+        ? Math.floor(expiresInDaysRaw)
+        : null;
+
+    const id = `tok_${randomUUID()}`;
+    const rawToken = randomBytes(32).toString("hex"); // 64-char high-entropy token
+    const tokHash = hashToken(rawToken);
+    const prefix = tokenPrefix(rawToken, 8);
+    const userId = role === "admin" ? `admin_${randomUUID()}` : `user_${randomUUID()}`;
+
+    const now = new Date();
+    const expiresAt =
+      expiresInDays && expiresInDays > 0
+        ? new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000)
+        : null;
+
+    await pool.query(
+      `INSERT INTO tokens (id, token_hash, token_prefix, role, user_id, label, created_by_user_id, created_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        tokHash,
+        prefix,
+        role,
+        userId,
+        label,
+        user.id,
+        now.toISOString(),
+        expiresAt ? expiresAt.toISOString() : null,
+      ]
+    );
+
+    return res.status(201).json({
+      id,
+      token: rawToken, // return once
+      tokenPrefix: prefix,
+      role,
+      userId,
+      label,
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt ? expiresAt.toISOString() : null,
+    });
+  } catch (error: any) {
+    console.error("Error minting token:", error);
+    return res
+      .status(500)
+      .json(makeError("INTERNAL_ERROR", "Failed to mint token", { error: error.message }));
+  }
+});
+
+/**
+ * POST /v1/admin/tokens/revoke
+ * Revoke by id (preferred) or by raw token (supported but avoid if possible).
+ */
+adminRouter.post("/tokens/revoke", async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const id = typeof req.body?.id === "string" ? req.body.id : "";
+    const rawToken = typeof req.body?.token === "string" ? req.body.token : "";
+
+    if (!id && !rawToken) {
+      return res
+        .status(400)
+        .json(makeError("INVALID_INPUT", "Provide id or token to revoke"));
+    }
+
+    const now = new Date().toISOString();
+
+    if (id) {
+      await pool.query("UPDATE tokens SET revoked_at = $1 WHERE id = $2", [now, id]);
+      return res.json({ ok: true, revokedAt: now, id });
+    }
+
+    const tokHash = hashToken(rawToken);
+    await pool.query("UPDATE tokens SET revoked_at = $1 WHERE token_hash = $2", [
+      now,
+      tokHash,
+    ]);
+    return res.json({ ok: true, revokedAt: now });
+  } catch (error: any) {
+    console.error("Error revoking token:", error);
+    return res
+      .status(500)
+      .json(makeError("INTERNAL_ERROR", "Failed to revoke token", { error: error.message }));
   }
 });
 
