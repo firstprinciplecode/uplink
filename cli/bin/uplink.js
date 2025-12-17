@@ -22,20 +22,25 @@ if (args.length === 0) {
   args.push("menu");
 }
 
-// Find tsx - try local first, then global
-let tsxPath;
+// Find tsx - prefer project-local, otherwise fall back to PATH
+let tsxPath = "tsx";
 try {
-  tsxPath = require.resolve("tsx/cli");
+  // Newer tsx exposes a CLI entry at dist/cli.cjs
+  tsxPath = require.resolve("tsx/dist/cli.cjs", { paths: [projectRoot] });
 } catch (e) {
-  // Try global tsx
-  tsxPath = "tsx";
+  try {
+    tsxPath = require.resolve("tsx/cli", { paths: [projectRoot] });
+  } catch (_) {
+    // keep fallback to PATH
+  }
 }
 
-// Run the CLI
-const child = spawn("node", [tsxPath, cliPath, ...args], {
+// Run the CLI via tsx (no extra node wrapper so PATH/global tsx works)
+const child = spawn(tsxPath, [cliPath, ...args], {
   stdio: "inherit",
   cwd: projectRoot,
   env: process.env,
+  shell: false,
 });
 
 child.on("error", (err) => {

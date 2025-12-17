@@ -8,7 +8,7 @@ import { menuCommand } from "./subcommands/menu";
 const program = new Command();
 
 program
-  .name("agentcloud")
+  .name("uplink")
   .description("Agent-friendly cloud CLI")
   .version("0.1.0");
 

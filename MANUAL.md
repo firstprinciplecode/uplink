@@ -211,6 +211,10 @@ uplink admin tunnels --status active
 - `RELAY_HEALTH_URL` - If set, the menu shows relay status (e.g., `http://t.uplink.spot:7070/health` or `http://127.0.0.1:7070/health` when port-forwarded)
 - `RELAY_INTERNAL_SECRET` - Provide if the relay protects internal endpoints
 
+**Roles and tokens:**
+- User tokens see only their own tunnels/databases; the CLI defaults to user mode and hides admin menus.
+- Admin endpoints/menus require an admin token; do not distribute admin tokens to customers.
+
 ---
 
 ## Database Service
