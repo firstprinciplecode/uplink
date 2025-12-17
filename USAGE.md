@@ -105,6 +105,8 @@ curl -X DELETE https://api.uplink.spot/v1/dbs/<db-id> \
 #### Environment Variables (on server):
 
 - `CONTROL_PLANE_DATABASE_URL`: Postgres connection for control plane
+- `CONTROL_PLANE_TOKEN_PEPPER`: Optional HMAC pepper for token hashing (set in prod)
+- `ADMIN_TOKENS`: Comma-separated break-glass admin tokens (env-only; bypass DB)
 - `NEON_API_KEY`: Neon API key for database provisioning
 - `NEON_PROJECT_ID`: Neon project ID
 - `PORT`: Backend API port (default: 4000)
@@ -114,7 +116,7 @@ curl -X DELETE https://api.uplink.spot/v1/dbs/<db-id> \
 
 Set in your local `.env`:
 - `AGENTCLOUD_API_BASE`: API base URL (default: http://localhost:4000)
-- `AGENTCLOUD_TOKEN`: Auth token (default: dev-token for local)
+- `AGENTCLOUD_TOKEN`: Auth token (use a minted token; dev-token only for local sqlite)
 - `TUNNEL_CTRL`: Tunnel control channel (default: 127.0.0.1:7071)
 
 ### 📊 Service Status
@@ -155,9 +157,41 @@ ssh root@<SERVER_IP> "systemctl status backend-api tunnel-relay caddy"
 
 6. **Use connection string**: The CLI will output connection details
 
-### 🔐 Authentication
+### 🔐 Authentication & Tokens (DB-backed)
 
-Currently using a simple token-based auth (`dev-token`). For production, replace with proper authentication middleware.
+- Tokens are stored hashed in the database and can be revoked or set to expire.
+- Admin vs user roles are enforced by the backend.
+- Break-glass `ADMIN_TOKENS` (env-only) remain as emergency access during transition.
+- Local dev with SQLite can still use `AGENTCLOUD_TOKEN_DEV=dev-token`; production should use minted tokens.
+
+**Mint an admin token (one-time raw value shown):**
+```bash
+uplink admin tokens create --role admin --label "my-admin-laptop"
+```
+Save the printed token securely, then set locally:
+```bash
+export AGENTCLOUD_TOKEN=<minted-admin-token>
+```
+
+**Mint a user token:**
+```bash
+uplink admin tokens create --role user --label "teammate"
+```
+
+**List tokens (metadata only, no raw tokens):**
+```bash
+uplink admin tokens list
+```
+
+**Revoke a token:**
+```bash
+uplink admin tokens revoke --id <token-id>
+```
+
+**Cleanup legacy tunnels (dev-user):**
+```bash
+uplink admin cleanup --dev-user-tunnels
+```
 
 ### 👨‍💼 Admin Commands
 
@@ -175,6 +209,14 @@ npm run dev:cli -- admin tunnels --status active --limit 50
 npm run dev:cli -- admin databases
 npm run dev:cli -- admin databases --status ready
 
+# Token management (DB-backed)
+npm run dev:cli -- admin tokens create --role admin --label "ops"
+npm run dev:cli -- admin tokens list
+npm run dev:cli -- admin tokens revoke --id <token-id>
+
+# Cleanup legacy dev-user tunnels
+npm run dev:cli -- admin cleanup --dev-user-tunnels
+
 # JSON output for scripting
 npm run dev:cli -- admin status --json
 ```
@@ -183,6 +225,10 @@ npm run dev:cli -- admin status --json
 - `GET /v1/admin/stats` - System statistics
 - `GET /v1/admin/tunnels` - List all tunnels (with filters)
 - `GET /v1/admin/databases` - List all databases (with filters)
+- `GET /v1/admin/tokens` - List tokens (metadata only)
+- `POST /v1/admin/tokens` - Mint token (returns raw token once)
+- `POST /v1/admin/tokens/revoke` - Revoke by id or raw token
+- `POST /v1/admin/cleanup/dev-user-tunnels` - Soft-delete legacy dev-user tunnels
 
 ### 📝 Notes
 

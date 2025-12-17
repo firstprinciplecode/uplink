@@ -6,7 +6,7 @@ This guide shows you how to expose a local development server to the internet us
 
 - Node.js installed
 - A local server running on a port (e.g., `localhost:3000`)
-- An API token (default: `dev-token`)
+- An API token (minted admin/user token; dev-token only for local SQLite dev)
 - Install the user CLI (pick one):
   - Public npm (best UX once published):
     ```bash
@@ -27,11 +27,25 @@ This guide shows you how to expose a local development server to the internet us
     ```bash
     npm install -g ./uplink-cli-0.1.0.tgz
     ```
-  Then set your user token before running `uplink`:
+  
+## Get an API token
+
+- If you are an admin and have break-glass `ADMIN_TOKENS` on the server, mint a proper token and use that going forward:
   ```bash
-  export AGENTCLOUD_TOKEN=<your-user-token>
-  uplink
+  uplink admin tokens create --role admin --label "my-laptop"
+  export AGENTCLOUD_TOKEN=<printed-admin-token>
   ```
+- If you are not an admin, ask an admin to mint a user token for you:
+  ```bash
+  uplink admin tokens create --role user --label "teammate"
+  ```
+- Keep tokens out of shell history; prefer env vars over inline CLI args.
+  
+Then set your token before running `uplink`:
+```bash
+export AGENTCLOUD_TOKEN=<your-token>
+uplink
+```
 
 **Security note:** do not paste tokens into command lines/URLs (they land in shell history). Use `GITHUB_TOKEN` env for private installs and rotate any PAT that was previously pasted.
 
