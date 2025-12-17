@@ -20,6 +20,7 @@ async function migrate() {
   const migrations = [
     "001_create_databases.sql",
     "002_create_tunnels.sql",
+    "003_create_tokens.sql",
   ];
 
   if (isSqlite) {

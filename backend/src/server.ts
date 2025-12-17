@@ -19,12 +19,19 @@ app.get("/health", (req, res) => {
 app.get("/internal/allow-tls", async (req, res) => {
   try {
     const domain = (req.query.domain as string) || (req.query.host as string) || "";
-    // Expect <token>.dev.uplink.spot
-    const match = domain.match(/^([a-zA-Z0-9]+)\.dev\.uplink\.spot$/);
-    if (!match) {
+    const host = domain.split(":")[0].trim().toLowerCase();
+
+    // Expect <token>.<TUNNEL_DOMAIN>
+    const tunnelDomain = (process.env.TUNNEL_DOMAIN || "t.uplink.spot").toLowerCase();
+    if (!host.endsWith(`.${tunnelDomain}`)) {
       return res.status(403).json({ allow: false });
     }
-    const token = match[1];
+
+    const token = host.slice(0, -(tunnelDomain.length + 1));
+    if (!/^[a-zA-Z0-9]{3,64}$/.test(token)) {
+      return res.status(403).json({ allow: false });
+    }
+
     const exists = await tunnelTokenExists(token);
     if (exists) {
       return res.json({ allow: true });
