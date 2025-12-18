@@ -35,84 +35,6 @@ function promptLine(question: string): Promise<string> {
   });
 }
 
-function restoreRawMode() {
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-}
-
-async function stopTunnelInteractive(): Promise<string> {
-  try {
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
-    
-    const processes = findTunnelClients();
-    if (processes.length === 0) {
-      restoreRawMode();
-      return "No running tunnel clients found.";
-    }
-    
-    console.log("\nRunning tunnel clients:");
-    processes.forEach((p, idx) => {
-      console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
-    });
-    console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
-    
-    const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
-    const choice = Number(answer) || 1;
-    
-    let killed = 0;
-    if (choice >= 1 && choice <= processes.length) {
-      const selected = processes[choice - 1];
-      try {
-        execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
-        killed = 1;
-      } catch (err: any) {
-        throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
-      }
-    } else if (choice === processes.length + 1) {
-      for (const p of processes) {
-        try {
-          execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
-          killed++;
-        } catch {
-          /* already exited */
-        }
-      }
-    } else {
-      try {
-        execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
-        killed = 1;
-      } catch (err: any) {
-        throw new Error(`Failed to kill process: ${err.message}`);
-      }
-    }
-    
-    restoreRawMode();
-    return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
-  } catch (err: any) {
-    restoreRawMode();
-    throw err;
-  }
-}
-
-async function stopAllTunnels(): Promise<string> {
-  try {
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
-    // Kill all matching clients for current user
-    execSync(`pkill -f "scripts/tunnel/client-improved.js"`, { stdio: "ignore" });
-    restoreRawMode();
-    return "✅ Stopped all tunnel clients (kill switch).";
-  } catch (err: any) {
-    restoreRawMode();
-    return `Failed to stop all tunnel clients: ${err.message || err}`;
-  }
-}
-
 function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
@@ -194,115 +116,6 @@ export const menuCommand = new Command("menu")
             action: async () => {
               await runSmoke("smoke:all");
               return "smoke:all completed";
-            },
-          },
-        ],
-      });
-
-      mainMenu.push({
-        label: "Manage Tokens (admin)",
-        subMenu: [
-          {
-            label: "List Tokens",
-            action: async () => {
-              const result = await apiRequest("GET", "/v1/admin/tokens?limit=50");
-              const tokens = result.tokens || [];
-              if (!tokens.length) return "No tokens found.";
-
-              const lines = tokens.map((t: any) => {
-                const id = String(t.id || "").slice(0, 16);
-                const role = String(t.role || "-").slice(0, 6);
-                const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
-                const userId = String(t.user_id || t.userId || "-").slice(0, 24);
-                const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
-                const created = (t.created_at || t.createdAt || "").slice(0, 19);
-                return `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
-                  26
-                )} ${status.padEnd(10)} ${created}`;
-              });
-
-              return [
-                "ID".padEnd(18) +
-                  "Role".padEnd(8) +
-                  "Prefix".padEnd(10) +
-                  "User ID".padEnd(26) +
-                  "Status".padEnd(10) +
-                  "Created",
-                "-".repeat(90),
-                ...lines,
-              ].join("\n");
-            },
-          },
-          {
-            label: "Create Token",
-            action: async () => {
-              const roleInput = (await promptLine("Role (admin/user, default admin): ")).trim();
-              const role = roleInput === "user" ? "user" : "admin";
-              const label = (await promptLine("Label (optional): ")).trim();
-              const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
-              const expiresDays = expiresInput ? Number(expiresInput) : undefined;
-
-              const result = await apiRequest("POST", "/v1/admin/tokens", {
-                role,
-                label: label || undefined,
-                expiresInDays: Number.isFinite(expiresDays as any) ? expiresDays : undefined,
-              });
-              restoreRawMode();
-
-              return [
-                "🔑 Token created (shown once)",
-                `Role:    ${result.role}`,
-                `User ID: ${result.userId}`,
-                `Token ID:${result.id}`,
-                `Prefix:  ${result.tokenPrefix}`,
-                result.label ? `Label:  ${result.label}` : "",
-                result.expiresAt ? `Expires: ${result.expiresAt}` : "",
-                "",
-                result.token || "",
-              ]
-                .filter(Boolean)
-                .join("\n");
-            },
-          },
-          {
-            label: "Revoke Token",
-            action: async () => {
-              // Show a quick list first
-              const list = await apiRequest("GET", "/v1/admin/tokens?limit=50");
-              const tokens = list.tokens || [];
-              if (!tokens.length) {
-                restoreRawMode();
-                return "No tokens found.";
-              }
-
-              const header =
-                "ID".padEnd(18) +
-                "Role".padEnd(8) +
-                "Prefix".padEnd(10) +
-                "User ID".padEnd(26) +
-                "Status".padEnd(10) +
-                "Created";
-              console.log("\n" + header);
-              console.log("-".repeat(90));
-              tokens.forEach((t: any) => {
-                const id = String(t.id || "").slice(0, 16);
-                const role = String(t.role || "-").slice(0, 6);
-                const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
-                const userId = String(t.user_id || t.userId || "-").slice(0, 24);
-                const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
-                const created = (t.created_at || t.createdAt || "").slice(0, 19);
-                console.log(
-                  `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
-                    26
-                  )} ${status.padEnd(10)} ${created}`
-                );
-              });
-
-              const id = (await promptLine("Token ID to revoke: ")).trim();
-              restoreRawMode();
-              if (!id) return "No token id provided.";
-              const result = await apiRequest("POST", "/v1/admin/tokens/revoke", { id });
-              return `✅ Revoked ${id} at ${result.revokedAt || ""}`;
             },
           },
         ],
@@ -404,11 +217,81 @@ export const menuCommand = new Command("menu")
           },
           {
             label: "Stop Tunnel",
-            action: async () => stopTunnelInteractive(),
-          },
-          {
-            label: "Stop ALL Tunnel Clients (kill switch)",
-            action: async () => stopAllTunnels(),
+            action: async () => {
+              try {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                
+                // Find running tunnel client processes
+                const processes = findTunnelClients();
+                
+                if (processes.length === 0) {
+                  try {
+                    process.stdin.setRawMode(true);
+                    process.stdin.resume();
+                  } catch {
+                    /* ignore */
+                  }
+                  return "No running tunnel clients found.";
+                }
+                
+                console.log("\nRunning tunnel clients:");
+                processes.forEach((p, idx) => {
+                  console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
+                });
+                console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
+                
+                const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
+                const choice = Number(answer) || 1;
+                
+                let killed = 0;
+                if (choice >= 1 && choice <= processes.length) {
+                  // Kill specific client
+                  const selected = processes[choice - 1];
+                  try {
+                    execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
+                    killed = 1;
+                  } catch (err: any) {
+                    throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
+                  }
+                } else if (choice === processes.length + 1) {
+                  // Kill all
+                  for (const p of processes) {
+                    try {
+                      execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
+                      killed++;
+                    } catch {
+                      // Process might have already exited
+                    }
+                  }
+                } else {
+                  // Default to first
+                  try {
+                    execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
+                    killed = 1;
+                  } catch (err: any) {
+                    throw new Error(`Failed to kill process: ${err.message}`);
+                  }
+                }
+                
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                
+                return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+              } catch (err: any) {
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                throw err;
+              }
+            },
           },
         ],
       });
@@ -726,23 +609,22 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
   try {
     // Find processes running client-improved.js (current user, match script path to avoid false positives)
     const user = process.env.USER || "";
-    const psCmd = user
-      ? `ps -u ${user} -o pid=,command=`
-      : "ps -eo pid=,command=";
+    const psCmd = user ? `ps -u ${user} -o pid=,command=` : "ps -eo pid=,command=";
     const output = execSync(psCmd, { encoding: "utf-8" });
     const lines = output
       .trim()
       .split("\n")
       .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
-    
+
     const clients: Array<{ pid: number; port: number; token: string }> = [];
-    
+
     for (const line of lines) {
-      // Parse process line: PID COMMAND (e.g., "12345 node scripts/tunnel/client-improved.js --token TOKEN --port PORT")
+      // macOS ps output starts with PID when using "-o pid=,command=",
+      // so capture the leading number rather than assuming a USER column.
       const pidMatch = line.match(/^\s*(\d+)/);
       const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
-      
+
       if (pidMatch && tokenMatch && portMatch) {
         clients.push({
           pid: parseInt(pidMatch[1], 10),
@@ -751,7 +633,7 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
         });
       }
     }
-    
+
     return clients;
   } catch {
     return [];
