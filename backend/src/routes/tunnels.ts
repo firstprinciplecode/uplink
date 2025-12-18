@@ -3,15 +3,15 @@ import { randomUUID } from "crypto";
 import { makeError } from "../schemas/error";
 import { pool } from "../db/pool";
 import { TunnelRecord, TunnelStatus, toTunnelResponse } from "../models/tunnel";
+import { validateBody } from "../middleware/validate";
+import { createTunnelSchema } from "../schemas/validation";
+import { tunnelCreationRateLimiter } from "../middleware/rate-limit";
+import { logger, auditLog } from "../utils/logger";
+import { config } from "../utils/config";
 
 export const tunnelRouter = Router();
 
-// Simple auth stub – replace with real auth middleware
-interface AuthedRequest extends Request {
-  user?: { id: string; role?: string };
-}
-
-const TUNNEL_DOMAIN = process.env.TUNNEL_DOMAIN || "dev.uplink.spot";
+const TUNNEL_DOMAIN = config.tunnelDomain;
 const USE_HOST_ROUTING = process.env.TUNNEL_USE_HOST !== "false"; // Default to host-based
 
 // Helper to check if a token exists (for on-demand TLS ask endpoint)
@@ -23,7 +23,7 @@ export async function tunnelTokenExists(token: string): Promise<boolean> {
     );
     return result.rowCount > 0;
   } catch (error) {
-    console.error("Error checking tunnel token:", error);
+    logger.error({ event: "tunnel_token_check.error", error });
     return false;
   }
 }
@@ -32,62 +32,65 @@ export async function tunnelTokenExists(token: string): Promise<boolean> {
  * POST /v1/tunnels
  * Create a new tunnel
  */
-tunnelRouter.post("/", async (req: AuthedRequest, res: Response) => {
-  try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
-    }
+tunnelRouter.post(
+  "/",
+  tunnelCreationRateLimiter,
+  validateBody(createTunnelSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+      }
 
-    const { port, project } = req.body;
-    
-    if (!port || typeof port !== "number") {
-      return res.status(400).json(
-        makeError("INVALID_INPUT", "port is required and must be a number")
+      const { port } = req.body;
+      const project = (req.body as { project?: string }).project;
+
+      const id = `tun_${randomUUID()}`;
+      const token = randomUUID().replace(/-/g, "").slice(0, 12); // Shorter token for subdomain
+      const projectId = project || null;
+      const status: TunnelStatus = "active";
+      const now = new Date().toISOString();
+
+      // Insert into database
+      await pool.query(
+        `INSERT INTO tunnels (id, owner_user_id, project_id, token, target_port, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, user.id, projectId, token, port, status, now, now]
+      );
+
+      const tunnelRecord: TunnelRecord = {
+        id,
+        ownerUserId: user.id,
+        projectId,
+        token,
+        targetPort: port,
+        status,
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: null,
+      };
+
+      auditLog.tunnelCreated(user.id, id, token, port);
+
+      const response = toTunnelResponse(tunnelRecord, TUNNEL_DOMAIN, USE_HOST_ROUTING);
+
+      return res.status(201).json(response);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ event: "tunnel.create.error", error: err.message, stack: err.stack });
+      return res.status(500).json(
+        makeError("INTERNAL_ERROR", "Failed to create tunnel", { error: err.message })
       );
     }
-
-    const id = `tun_${randomUUID()}`;
-    const token = randomUUID().replace(/-/g, "").slice(0, 12); // Shorter token for subdomain
-    const projectId = project || null;
-    const status: TunnelStatus = "active";
-    const now = new Date().toISOString();
-
-    // Insert into database
-    await pool.query(
-      `INSERT INTO tunnels (id, owner_user_id, project_id, token, target_port, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, user.id, projectId, token, port, status, now, now]
-    );
-
-    const tunnelRecord: TunnelRecord = {
-      id,
-      ownerUserId: user.id,
-      projectId,
-      token,
-      targetPort: port,
-      status,
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: null,
-    };
-
-    const response = toTunnelResponse(tunnelRecord, TUNNEL_DOMAIN, USE_HOST_ROUTING);
-
-    return res.status(201).json(response);
-  } catch (error: any) {
-    console.error("Error creating tunnel:", error);
-    return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to create tunnel", { error: error.message })
-    );
   }
-});
+);
 
 /**
  * GET /v1/tunnels/:id
  * Get tunnel information
  */
-tunnelRouter.get("/:id", async (req: AuthedRequest, res: Response) => {
+tunnelRouter.get("/:id", async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -117,10 +120,11 @@ tunnelRouter.get("/:id", async (req: AuthedRequest, res: Response) => {
 
     const response = toTunnelResponse(record, TUNNEL_DOMAIN, USE_HOST_ROUTING);
     return res.json(response);
-  } catch (error: any) {
-    console.error("Error getting tunnel:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "tunnel.get.error", error: err.message, stack: err.stack });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to get tunnel", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to get tunnel", { error: err.message })
     );
   }
 });
@@ -129,7 +133,7 @@ tunnelRouter.get("/:id", async (req: AuthedRequest, res: Response) => {
  * DELETE /v1/tunnels/:id
  * Delete a tunnel
  */
-tunnelRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
+tunnelRouter.delete("/:id", async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -161,14 +165,17 @@ tunnelRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
       [new Date().toISOString(), id]
     );
 
+    auditLog.tunnelDeleted(user.id, id);
+
     return res.json({
       id,
       status: "deleted",
     });
-  } catch (error: any) {
-    console.error("Error deleting tunnel:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "tunnel.delete.error", error: err.message, stack: err.stack });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to delete tunnel", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to delete tunnel", { error: err.message })
     );
   }
 });
@@ -177,7 +184,7 @@ tunnelRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
  * GET /v1/tunnels
  * List all tunnels for the authenticated user
  */
-tunnelRouter.get("/", async (req: AuthedRequest, res: Response) => {
+tunnelRouter.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -197,10 +204,11 @@ tunnelRouter.get("/", async (req: AuthedRequest, res: Response) => {
       tunnels,
       count: tunnels.length,
     });
-  } catch (error: any) {
-    console.error("Error listing tunnels:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "tunnel.list.error", error: err.message, stack: err.stack });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: err.message })
     );
   }
 });

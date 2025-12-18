@@ -12,35 +12,28 @@ import {
 } from "../schemas/database";
 import { createNeonDatabase, deleteNeonDatabase } from "../providers/neon";
 import { toDatabaseResponse } from "../models/database";
+import { validateBody } from "../middleware/validate";
+import { createDatabaseSchema } from "../schemas/validation";
+import { logger, auditLog } from "../utils/logger";
+import { config } from "../utils/config";
 
 export const dbRouter = Router();
 
-// Simple auth stub – replace with real auth middleware
-interface AuthedRequest extends Request {
-  user?: { id: string; role?: string };
-}
-
 // POST /v1/dbs
-dbRouter.post("/", async (req: AuthedRequest, res: Response) => {
+dbRouter.post("/", validateBody(createDatabaseSchema), async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
   }
 
   const body = req.body as CreateDbRequestBody;
-  if (!body.name || !body.project) {
-    return res
-      .status(400)
-      .json(makeError("INVALID_INPUT", "name and project are required"));
-  }
-
   const provider = body.provider ?? "neon";
   const region = body.region ?? "eu-central-1";
   const plan = body.plan ?? "dev";
   const projectId = body.project;
 
   // Quota guard per user
-  const limitPerUser = Number(process.env.DB_LIMIT_PER_USER ?? "5");
+  const limitPerUser = config.dbLimitPerUser;
   const countRes = await pool.query(
     "SELECT COUNT(*) AS count FROM databases WHERE owner_user_id = $1 AND status <> 'deleted'",
     [user.id]
@@ -122,9 +115,12 @@ dbRouter.post("/", async (req: AuthedRequest, res: Response) => {
       neon.directConnectionString,
       neon.pooledConnectionString
     );
+    
+    auditLog.databaseCreated(user.id, dbId, body.name, provider);
+    
     return res.status(201).json(response);
   } catch (err) {
-    console.error("Error creating DB:", err);
+    logger.error({ event: "database.create.error", error: err.message, stack: err.stack });
     return res
       .status(500)
       .json(
@@ -134,7 +130,7 @@ dbRouter.post("/", async (req: AuthedRequest, res: Response) => {
 });
 
 // GET /v1/dbs
-dbRouter.get("/", async (req: AuthedRequest, res: Response) => {
+dbRouter.get("/", async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
@@ -168,7 +164,7 @@ dbRouter.get("/", async (req: AuthedRequest, res: Response) => {
 });
 
 // GET /v1/dbs/:id
-dbRouter.get("/:id", async (req: AuthedRequest, res: Response) => {
+dbRouter.get("/:id", async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
@@ -197,7 +193,7 @@ dbRouter.get("/:id", async (req: AuthedRequest, res: Response) => {
 });
 
 // DELETE /v1/dbs/:id
-dbRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
+dbRouter.delete("/:id", async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
@@ -220,7 +216,7 @@ dbRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
   try {
     await deleteNeonDatabase({ providerDatabaseId: row.provider_database_id });
   } catch (err) {
-    console.error("Error deleting Neon DB:", err);
+    logger.error({ event: "database.delete.error", error: err.message, stack: err.stack });
   }
 
   await pool.query(
@@ -228,12 +224,14 @@ dbRouter.delete("/:id", async (req: AuthedRequest, res: Response) => {
     [id]
   );
 
+  auditLog.databaseDeleted(user.id, id);
+
   const response: DeleteDbResponse = { id, status: "deleted" };
   return res.json(response);
 });
 
 // POST /v1/dbs/:id/link-service
-dbRouter.post("/:id/link-service", async (req: AuthedRequest, res: Response) => {
+dbRouter.post("/:id/link-service", async (req: Request, res: Response) => {
   const user = req.user;
   if (!user) {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
