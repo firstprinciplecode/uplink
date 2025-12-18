@@ -1,33 +1,75 @@
 import "dotenv/config";
 import express from "express";
 import bodyParser from "body-parser";
+import helmet from "helmet";
 import { dbRouter } from "./routes/dbs";
 import { tunnelRouter, tunnelTokenExists } from "./routes/tunnels";
 import { adminRouter } from "./routes/admin";
 import { meRouter } from "./routes/me";
 import { authMiddleware } from "./middleware/auth";
+import { apiRateLimiter } from "./middleware/rate-limit";
+import { logger } from "./utils/logger";
+import { config } from "./utils/config";
+import { makeError } from "./schemas/error";
 
 const app = express();
-app.use(bodyParser.json());
 
-// Health check (no auth)
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+// Security headers
+app.use(helmet());
+
+// Body parsing
+app.use(bodyParser.json({ limit: "10mb" }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    logger.info({
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration,
+      ip: req.ip,
+    });
+  });
+  next();
 });
 
-// Allow on-demand TLS (Caddy ask endpoint) - no auth
+// Health check (no auth, no rate limit)
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Health check endpoints for Kubernetes/Docker
+app.get("/health/live", (req, res) => {
+  res.json({ status: "alive" });
+});
+
+app.get("/health/ready", async (req, res) => {
+  try {
+    // Check database connection
+    const { pool } = await import("./db/pool");
+    await pool.query("SELECT 1");
+    res.json({ status: "ready" });
+  } catch (error) {
+    logger.error({ event: "health_check.failed", error });
+    res.status(503).json({ status: "not ready" });
+  }
+});
+
+// Allow on-demand TLS (Caddy ask endpoint) - no auth, no rate limit
 app.get("/internal/allow-tls", async (req, res) => {
   try {
     const domain = (req.query.domain as string) || (req.query.host as string) || "";
     const host = domain.split(":")[0].trim().toLowerCase();
 
     // Expect <token>.<TUNNEL_DOMAIN>
-    const tunnelDomain = (process.env.TUNNEL_DOMAIN || "t.uplink.spot").toLowerCase();
-    if (!host.endsWith(`.${tunnelDomain}`)) {
+    if (!host.endsWith(`.${config.tunnelDomain}`)) {
       return res.status(403).json({ allow: false });
     }
 
-    const token = host.slice(0, -(tunnelDomain.length + 1));
+    const token = host.slice(0, -(config.tunnelDomain.length + 1));
     if (!/^[a-zA-Z0-9]{3,64}$/.test(token)) {
       return res.status(403).json({ allow: false });
     }
@@ -38,10 +80,13 @@ app.get("/internal/allow-tls", async (req, res) => {
     }
     return res.status(403).json({ allow: false });
   } catch (error) {
-    console.error("Error in allow-tls:", error);
+    logger.error({ event: "allow_tls.error", error });
     return res.status(500).json({ allow: false });
   }
 });
+
+// Global rate limiting for all /v1 routes
+app.use("/v1", apiRateLimiter);
 
 // Auth middleware for all /v1 routes
 app.use("/v1", authMiddleware);
@@ -50,10 +95,44 @@ app.use("/v1/tunnels", tunnelRouter);
 app.use("/v1/admin", adminRouter);
 app.use("/v1/me", meRouter);
 
-const port = process.env.PORT || 4000;
-app.listen(port, () => {
-  console.log(`Control plane listening on :${port}`);
-  console.log(`Neon API Key: ${process.env.NEON_API_KEY ? "set" : "missing"}`);
-  console.log(`Neon Project ID: ${process.env.NEON_PROJECT_ID || "missing"}`);
+// Error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  logger.error({
+    event: "error.unhandled",
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+  });
+  res.status(500).json(makeError("INTERNAL_ERROR", "An unexpected error occurred"));
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json(makeError("NOT_FOUND", "Route not found"));
+});
+
+// Graceful shutdown
+const server = app.listen(config.port, () => {
+  logger.info({
+    event: "server.started",
+    port: config.port,
+    env: process.env.NODE_ENV || "development",
+  });
+});
+
+process.on("SIGTERM", () => {
+  logger.info({ event: "server.shutdown", signal: "SIGTERM" });
+  server.close(() => {
+    logger.info({ event: "server.closed" });
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", () => {
+  logger.info({ event: "server.shutdown", signal: "SIGINT" });
+  server.close(() => {
+    logger.info({ event: "server.closed" });
+    process.exit(0);
+  });
 });
 

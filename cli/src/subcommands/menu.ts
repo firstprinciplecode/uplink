@@ -141,6 +141,65 @@ export const menuCommand = new Command("menu")
               return "smoke:all completed";
             },
           },
+          {
+            label: "Test: New Features",
+            action: async () => {
+              try {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                
+                const { spawn } = require("child_process");
+                const path = require("path");
+                const projectRoot = path.join(__dirname, "../../..");
+                const testScript = path.join(projectRoot, "scripts/test-new-features.sh");
+                
+                return new Promise<string>((resolve, reject) => {
+                  const child = spawn("bash", [testScript], {
+                    stdio: "inherit",
+                    cwd: projectRoot,
+                    env: {
+                      ...process.env,
+                      AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE || apiBase,
+                      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN || "dev-token",
+                    },
+                  });
+                  
+                  child.on("close", (code) => {
+                    try {
+                      process.stdin.setRawMode(true);
+                      process.stdin.resume();
+                    } catch {
+                      /* ignore */
+                    }
+                    if (code === 0) {
+                      resolve("✅ New features test completed successfully!");
+                    } else {
+                      resolve(`⚠️  Test completed with exit code ${code}. Check output above for details.`);
+                    }
+                  });
+                  
+                  child.on("error", (err) => {
+                    try {
+                      process.stdin.setRawMode(true);
+                      process.stdin.resume();
+                    } catch {
+                      /* ignore */
+                    }
+                    reject(new Error(`Failed to run test: ${err.message}`));
+                  });
+                });
+              } catch (err: unknown) {
+                try {
+                  process.stdin.setRawMode(true);
+                  process.stdin.resume();
+                } catch {
+                  /* ignore */
+                }
+                const error = err instanceof Error ? err : new Error(String(err));
+                throw error;
+              }
+            },
+          },
         ],
       });
 

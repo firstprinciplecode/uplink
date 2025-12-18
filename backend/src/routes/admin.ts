@@ -4,12 +4,12 @@ import { makeError } from "../schemas/error";
 import http from "http";
 import { randomUUID, randomBytes } from "crypto";
 import { hashToken, tokenPrefix } from "../utils/token-hash";
+import { validateBody, validateQuery } from "../middleware/validate";
+import { createTokenSchema, revokeTokenSchema, listQuerySchema } from "../schemas/validation";
+import { tokenCreationRateLimiter } from "../middleware/rate-limit";
+import { logger, auditLog } from "../utils/logger";
 
 export const adminRouter = Router();
-
-interface AuthedRequest extends Request {
-  user?: { id: string; role?: string };
-}
 
 function requireAdmin(user?: { id: string; role?: string }) {
   return user && user.role === "admin";
@@ -19,7 +19,7 @@ function requireAdmin(user?: { id: string; role?: string }) {
  * GET /v1/admin/stats
  * Get system statistics
  */
-adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
+adminRouter.get("/stats", async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -80,10 +80,11 @@ adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
         createdLast24h: Number(recentDbs.rows[0].count),
       },
     });
-  } catch (error: any) {
-    console.error("Error getting admin stats:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.stats.error", error: err.message, stack: err.stack });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to get stats", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to get stats", { error: err.message })
     );
   }
 });
@@ -138,7 +139,7 @@ async function getConnectedTokens(): Promise<Set<string>> {
  * GET /v1/admin/tunnels
  * List all tunnels (admin view) with connection status from relay
  */
-adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
+adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -185,8 +186,9 @@ adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
       limit,
       offset,
     });
-  } catch (error: any) {
-    console.error("Error listing admin tunnels:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.tunnels.list.error", error: err.message, stack: err.stack });
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: error.message })
     );
@@ -197,7 +199,7 @@ adminRouter.get("/tunnels", async (req: AuthedRequest, res: Response) => {
  * GET /v1/admin/databases
  * List all databases (admin view)
  */
-adminRouter.get("/databases", async (req: AuthedRequest, res: Response) => {
+adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -235,8 +237,9 @@ adminRouter.get("/databases", async (req: AuthedRequest, res: Response) => {
       limit,
       offset,
     });
-  } catch (error: any) {
-    console.error("Error listing admin databases:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.databases.list.error", error: err.message, stack: err.stack });
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to list databases", { error: error.message })
     );
@@ -247,7 +250,7 @@ adminRouter.get("/databases", async (req: AuthedRequest, res: Response) => {
  * GET /v1/admin/tokens
  * List tokens (does NOT return raw tokens, only metadata)
  */
-adminRouter.get("/tokens", async (req: AuthedRequest, res: Response) => {
+adminRouter.get("/tokens", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -277,11 +280,12 @@ adminRouter.get("/tokens", async (req: AuthedRequest, res: Response) => {
       limit,
       offset,
     });
-  } catch (error: any) {
-    console.error("Error listing tokens:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.tokens.list.error", error: err.message, stack: err.stack });
     return res
       .status(500)
-      .json(makeError("INTERNAL_ERROR", "Failed to list tokens", { error: error.message }));
+      .json(makeError("INTERNAL_ERROR", "Failed to list tokens", { error: err.message }));
   }
 });
 
@@ -289,29 +293,21 @@ adminRouter.get("/tokens", async (req: AuthedRequest, res: Response) => {
  * POST /v1/admin/tokens
  * Mint a new token (returns the raw token once)
  */
-adminRouter.post("/tokens", async (req: AuthedRequest, res: Response) => {
-  try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
-    }
-    if (!requireAdmin(user)) {
-      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
-    }
+adminRouter.post(
+  "/tokens",
+  tokenCreationRateLimiter,
+  validateBody(createTokenSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+      }
+      if (!requireAdmin(user)) {
+        return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+      }
 
-    const role = (req.body?.role as string) || "user";
-    if (role !== "user" && role !== "admin") {
-      return res
-        .status(400)
-        .json(makeError("INVALID_INPUT", "role must be 'user' or 'admin'"));
-    }
-
-    const label = typeof req.body?.label === "string" ? req.body.label.slice(0, 200) : null;
-    const expiresInDaysRaw = req.body?.expiresInDays;
-    const expiresInDays =
-      typeof expiresInDaysRaw === "number" && Number.isFinite(expiresInDaysRaw)
-        ? Math.floor(expiresInDaysRaw)
-        : null;
+      const { role, label, expiresInDays } = req.body;
 
     const id = `tok_${randomUUID()}`;
     const rawToken = randomBytes(32).toString("hex"); // 64-char high-entropy token
@@ -341,6 +337,8 @@ adminRouter.post("/tokens", async (req: AuthedRequest, res: Response) => {
       ]
     );
 
+    auditLog.tokenCreated(userId, id, role);
+
     return res.status(201).json({
       id,
       token: rawToken, // return once
@@ -351,11 +349,12 @@ adminRouter.post("/tokens", async (req: AuthedRequest, res: Response) => {
       createdAt: now.toISOString(),
       expiresAt: expiresAt ? expiresAt.toISOString() : null,
     });
-  } catch (error: any) {
-    console.error("Error minting token:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.tokens.create.error", error: err.message, stack: err.stack });
     return res
       .status(500)
-      .json(makeError("INTERNAL_ERROR", "Failed to mint token", { error: error.message }));
+      .json(makeError("INTERNAL_ERROR", "Failed to mint token", { error: err.message }));
   }
 });
 
@@ -363,30 +362,26 @@ adminRouter.post("/tokens", async (req: AuthedRequest, res: Response) => {
  * POST /v1/admin/tokens/revoke
  * Revoke by id (preferred) or by raw token (supported but avoid if possible).
  */
-adminRouter.post("/tokens/revoke", async (req: AuthedRequest, res: Response) => {
-  try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
-    }
-    if (!requireAdmin(user)) {
-      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
-    }
+adminRouter.post(
+  "/tokens/revoke",
+  validateBody(revokeTokenSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+      }
+      if (!requireAdmin(user)) {
+        return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+      }
 
-    const id = typeof req.body?.id === "string" ? req.body.id : "";
-    const rawToken = typeof req.body?.token === "string" ? req.body.token : "";
+      const { id, token: rawToken } = req.body;
+      const now = new Date().toISOString();
 
-    if (!id && !rawToken) {
-      return res
-        .status(400)
-        .json(makeError("INVALID_INPUT", "Provide id or token to revoke"));
-    }
-
-    const now = new Date().toISOString();
-
-    if (id) {
-      await pool.query("UPDATE tokens SET revoked_at = $1 WHERE id = $2", [now, id]);
-      return res.json({ ok: true, revokedAt: now, id });
+      if (id) {
+        await pool.query("UPDATE tokens SET revoked_at = $1 WHERE id = $2", [now, id]);
+        auditLog.tokenRevoked("", id, user.id);
+        return res.json({ ok: true, revokedAt: now, id });
     }
 
     const tokHash = hashToken(rawToken);
@@ -394,12 +389,14 @@ adminRouter.post("/tokens/revoke", async (req: AuthedRequest, res: Response) => 
       now,
       tokHash,
     ]);
+    auditLog.tokenRevoked("", "", user.id);
     return res.json({ ok: true, revokedAt: now });
-  } catch (error: any) {
-    console.error("Error revoking token:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.tokens.revoke.error", error: err.message, stack: err.stack });
     return res
       .status(500)
-      .json(makeError("INTERNAL_ERROR", "Failed to revoke token", { error: error.message }));
+      .json(makeError("INTERNAL_ERROR", "Failed to revoke token", { error: err.message }));
   }
 });
 
@@ -407,7 +404,7 @@ adminRouter.post("/tokens/revoke", async (req: AuthedRequest, res: Response) => 
  * POST /v1/admin/cleanup/dev-user-tunnels
  * Clean up old tunnels owned by dev-user (from before token system)
  */
-adminRouter.post("/cleanup/dev-user-tunnels", async (req: AuthedRequest, res: Response) => {
+adminRouter.post("/cleanup/dev-user-tunnels", async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -430,8 +427,9 @@ adminRouter.post("/cleanup/dev-user-tunnels", async (req: AuthedRequest, res: Re
       deleted: result.rowCount || 0,
       message: `Marked ${result.rowCount || 0} dev-user tunnels as deleted`,
     });
-  } catch (error: any) {
-    console.error("Error cleaning up dev-user tunnels:", error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.cleanup.error", error: err.message, stack: err.stack });
     return res
       .status(500)
       .json(makeError("INTERNAL_ERROR", "Failed to cleanup tunnels", { error: error.message }));
