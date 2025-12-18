@@ -44,6 +44,20 @@ function restoreRawMode() {
   }
 }
 
+async function stopAllTunnels(): Promise<string> {
+  try {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    // Kill all matching clients for current user
+    execSync(`pkill -f "scripts/tunnel/client-improved.js"`, { stdio: "ignore" });
+    restoreRawMode();
+    return "✅ Stopped all tunnel clients (kill switch).";
+  } catch (err: any) {
+    restoreRawMode();
+    return `Failed to stop all tunnel clients: ${err.message || err}`;
+  }
+}
+
 function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
@@ -427,6 +441,10 @@ export const menuCommand = new Command("menu")
                 throw err;
               }
             },
+          },
+          {
+            label: "Stop ALL Tunnel Clients (kill switch)",
+            action: async () => stopAllTunnels(),
           },
         ],
       });
