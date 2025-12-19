@@ -140,18 +140,34 @@ export const menuCommand = new Command("menu")
             }
 
             console.log("\nCreating your token...");
-            const result = await unauthenticatedRequest("POST", "/v1/signup", {
-              label: label || undefined,
-              expiresInDays: expiresDays || undefined,
-            });
+            let result;
+            try {
+              result = await unauthenticatedRequest("POST", "/v1/signup", {
+                label: label || undefined,
+                expiresInDays: expiresDays || undefined,
+              });
+            } catch (err: any) {
+              restoreRawMode();
+              const errorMsg = err?.message || String(err);
+              if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
+                return "⚠️  Too many signup attempts. Please try again later.";
+              }
+              return `❌ Error creating account: ${errorMsg}`;
+            }
 
             // Don't restore raw mode yet - we need it OFF for prompts
             // restoreRawMode() will be called after all prompts are done
+
+            if (!result || !result.token) {
+              restoreRawMode();
+              return "❌ Error: Invalid response from server. Token not received.";
+            }
 
             const token = result.token;
             const tokenId = result.id;
             const userId = result.userId;
 
+            // Clear screen and show token info
             console.log("\n" + "=".repeat(60));
             console.log("✅ Account created successfully!");
             console.log("=".repeat(60) + "\n");
