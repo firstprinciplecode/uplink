@@ -199,26 +199,48 @@ export const menuCommand = new Command("menu")
                 tokenExists = configContent.includes("AGENTCLOUD_TOKEN");
               }
 
-              if (!tokenExists) {
-                const addToken = (await promptLine(`\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `)).trim().toLowerCase();
-                if (addToken !== "n" && addToken !== "no") {
-                  try {
+              // Always prompt, even if token exists (to allow updating)
+              const promptText = tokenExists
+                ? `\n💡 AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc. Update it with the new token? (Y/n): `
+                : `\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `;
+              
+              const addToken = (await promptLine(promptText)).trim().toLowerCase();
+              if (addToken !== "n" && addToken !== "no") {
+                try {
+                  if (tokenExists) {
+                    // Update existing token: read file, replace the line, write back
+                    const configContent = readFileSync(configFile, "utf-8");
+                    const lines = configContent.split("\n");
+                    const updatedLines = lines.map((line) => {
+                      // Match export AGENTCLOUD_TOKEN=... (with or without quotes)
+                      if (line.match(/^\s*export\s+AGENTCLOUD_TOKEN=/)) {
+                        return `export AGENTCLOUD_TOKEN=${token}`;
+                      }
+                      return line;
+                    });
+                    // If no line was replaced, append it
+                    const wasReplaced = updatedLines.some((line, idx) => line !== lines[idx]);
+                    if (!wasReplaced) {
+                      updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
+                    }
+                    writeFileSync(configFile, updatedLines.join("\n"), { flag: "w" });
+                    tokenAdded = true;
+                    console.log(`\n✅ Token updated in ~/.${shellName}rc`);
+                  } else {
+                    // Add new token
                     const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
                     writeFileSync(configFile, exportLine, { flag: "a" });
                     tokenAdded = true;
                     console.log(`\n✅ Token added to ~/.${shellName}rc`);
-                    console.log(`\n📝 To use it in this session, run:`);
-                    console.log(`   export AGENTCLOUD_TOKEN=${token}`);
-                    console.log(`\n   Or restart your terminal to load it automatically.`);
-                  } catch (err: any) {
-                    console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
-                    console.log(`\n   Please add manually:`);
-                    console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
                   }
+                  console.log(`\n📝 To use it in this session, run:`);
+                  console.log(`   export AGENTCLOUD_TOKEN=${token}`);
+                  console.log(`\n   Or restart your terminal to load it automatically.`);
+                } catch (err: any) {
+                  console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
+                  console.log(`\n   Please add manually:`);
+                  console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
                 }
-              } else {
-                console.log(`\n⚠️  AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc`);
-                console.log(`   You may want to update it with the new token.`);
               }
             } else {
               // If we couldn't detect shell, still offer to add manually
