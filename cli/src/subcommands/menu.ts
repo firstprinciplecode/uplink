@@ -956,15 +956,17 @@ export const menuCommand = new Command("menu")
       
       busy = true;
       render();
+      let actionResult: string | undefined = undefined;
       try {
-        const result = await choice.action();
+        actionResult = await choice.action();
         // If action returns undefined, it's handling its own exit (e.g., signup flow)
-        if (result === undefined) {
+        if (actionResult === undefined) {
+          busy = false;
           return; // Don't render menu, action is handling everything
         }
-        // Only set message if action returned a string (not undefined/null)
-        if (result) {
-          message = result;
+        // Only set message if action returned a string
+        if (actionResult) {
+          message = actionResult;
         }
         if (choice.label === "Exit") {
           exiting = true;
@@ -973,18 +975,14 @@ export const menuCommand = new Command("menu")
         message = `Error: ${err?.message || String(err)}`;
       } finally {
         busy = false;
-        // Only render if we're not exiting and action didn't return undefined
-        // (undefined means action is handling its own output/exit)
-        const result = await Promise.resolve().then(() => {
-          // Check if we're exiting
-          if (exiting) {
-            cleanup();
-            process.exit(0);
-            return;
-          }
-          // Only render if action completed normally
+        // Only render if we're not exiting (exiting actions handle their own cleanup)
+        if (!exiting && actionResult !== undefined) {
           render();
-        });
+        }
+        if (exiting) {
+          cleanup();
+          process.exit(0);
+        }
       }
     };
 
