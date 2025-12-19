@@ -278,10 +278,15 @@ export const menuCommand = new Command("menu")
               console.log("   Exiting menu - please run 'uplink' again to see all menu options.\n");
               
               // Give user a moment to read the message
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              await new Promise(resolve => setTimeout(resolve, 1500));
               
-              // Exit the menu - user needs to restart it to see full menu
-              process.exit(0);
+              // Force exit - use setTimeout to ensure it happens after all async operations
+              setTimeout(() => {
+                process.exit(0);
+              }, 100);
+              
+              // Return a message that will be shown briefly before exit
+              return "Token saved! Menu will exit in a moment...";
             }
 
             console.log("\nPress Enter to continue...");
