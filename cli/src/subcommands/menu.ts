@@ -140,10 +140,13 @@ export const menuCommand = new Command("menu")
             const expiresDays = expiresInput ? Number(expiresInput) : undefined;
 
             if (expiresDays && (isNaN(expiresDays) || expiresDays <= 0)) {
+              restoreRawMode();
               return "Invalid expiration days. Please enter a positive number or leave empty.";
             }
 
-            console.log("\nCreating your token...");
+            // Ensure output is flushed before making request
+            process.stdout.write("\nCreating your token...\n");
+            process.stdout.write(""); // Force flush
             let result;
             try {
               result = await unauthenticatedRequest("POST", "/v1/signup", {
@@ -177,21 +180,22 @@ export const menuCommand = new Command("menu")
             const tokenId = result.id;
             const userId = result.userId;
 
-            // Clear screen and show token info
-            console.log("\n" + "=".repeat(60));
-            console.log("✅ Account created successfully!");
-            console.log("=".repeat(60) + "\n");
-            console.log("🔑 YOUR TOKEN (save this securely - shown only once):");
-            console.log("─".repeat(60));
-            console.log(token);
-            console.log("─".repeat(60) + "\n");
-            console.log("📋 Token Details:");
-            console.log(`   ID: ${tokenId}`);
-            console.log(`   User ID: ${userId}`);
-            console.log(`   Role: ${result.role}`);
+            // Show token info - use process.stdout.write to ensure it's not buffered
+            process.stdout.write("\n" + "=".repeat(60) + "\n");
+            process.stdout.write("✅ Account created successfully!\n");
+            process.stdout.write("=".repeat(60) + "\n\n");
+            process.stdout.write("🔑 YOUR TOKEN (save this securely - shown only once):\n");
+            process.stdout.write("─".repeat(60) + "\n");
+            process.stdout.write(token + "\n");
+            process.stdout.write("─".repeat(60) + "\n\n");
+            process.stdout.write("📋 Token Details:\n");
+            process.stdout.write(`   ID: ${tokenId}\n`);
+            process.stdout.write(`   User ID: ${userId}\n`);
+            process.stdout.write(`   Role: ${result.role}\n`);
             if (result.expiresAt) {
-              console.log(`   Expires: ${result.expiresAt}`);
+              process.stdout.write(`   Expires: ${result.expiresAt}\n`);
             }
+            process.stdout.write(""); // Force flush
             // Try to automatically add token to shell config
             const shell = process.env.SHELL || "";
             const homeDir = homedir();
