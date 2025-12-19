@@ -961,7 +961,11 @@ export const menuCommand = new Command("menu")
       }
       
       busy = true;
-      render();
+      // Don't render menu for signup action - it handles its own output
+      const isSignupAction = choice.label === "🚀 Get Started (Create Account)";
+      if (!isSignupAction) {
+        render();
+      }
       let actionResult: string | undefined = undefined;
       try {
         actionResult = await choice.action();
