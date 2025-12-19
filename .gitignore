@@ -36,6 +36,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+*.code-workspace
 
 # Deployment
 /tmp/agentcloud-deploy.tar.gz
@@ -43,6 +44,9 @@ Thumbs.db
 # Test coverage
 coverage/
 .nyc_output/
+
+# Documentation (keep private for now)
+docs/
 
 
 
