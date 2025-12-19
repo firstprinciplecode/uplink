@@ -263,9 +263,8 @@ export const menuCommand = new Command("menu")
                     tokenAdded = true;
                     console.log(`\n✅ Token added to ~/.${shellName}rc`);
                   }
-                  console.log(`\n📝 To use it in this session, run:`);
-                  console.log(`   export AGENTCLOUD_TOKEN=${token}`);
-                  console.log(`\n   Or restart your terminal to load it automatically.`);
+                  // Don't show manual export instructions since it's already in the config file
+                  // The user just needs to restart their terminal or run 'source ~/.zshrc'
                 } catch (err: any) {
                   console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
                   console.log(`\n   Please add manually:`);
