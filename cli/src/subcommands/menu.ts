@@ -257,15 +257,25 @@ export const menuCommand = new Command("menu")
                     if (!wasReplaced) {
                       updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
                     }
-                    writeFileSync(configFile, updatedLines.join("\n"), { flag: "w" });
+                    writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
                     tokenAdded = true;
                     console.log(`\n✅ Token updated in ~/.${shellName}rc`);
+                    // Verify it was written
+                    const verifyContent = readFileSync(configFile, "utf-8");
+                    if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
+                      console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
+                    }
                   } else {
                     // Add new token
                     const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
-                    writeFileSync(configFile, exportLine, { flag: "a" });
+                    writeFileSync(configFile, exportLine, { flag: "a", mode: 0o644 });
                     tokenAdded = true;
                     console.log(`\n✅ Token added to ~/.${shellName}rc`);
+                    // Verify it was written
+                    const verifyContent = readFileSync(configFile, "utf-8");
+                    if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
+                      console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
+                    }
                   }
                   // Don't show manual export instructions since it's already in the config file
                   // The user just needs to restart their terminal or run 'source ~/.zshrc'
