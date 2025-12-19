@@ -266,11 +266,17 @@ export const menuCommand = new Command("menu")
             console.log("\nPress Enter to continue...");
             await promptLine("");
 
-            // If token was added to shell config, exit menu so it can restart with new token
+            // If token was added to shell config, set it in current process and exit
             if (tokenAdded) {
-              console.log("\n✅ Token saved! Restarting menu with your new token...");
-              console.log("   (If the token doesn't work, restart your terminal first)\n");
-              // Exit the menu so it can restart with the new token
+              // Set token in current process environment so it's available immediately
+              process.env.AGENTCLOUD_TOKEN = token;
+              console.log("\n✅ Token saved to ~/.zshrc and set in current session!");
+              console.log("   Exiting menu - please run 'uplink' again to see all menu options.\n");
+              
+              // Give user a moment to read the message
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              
+              // Exit the menu - user needs to restart it to see full menu
               process.exit(0);
             }
 
