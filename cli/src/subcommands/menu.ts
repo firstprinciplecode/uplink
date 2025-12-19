@@ -145,7 +145,8 @@ export const menuCommand = new Command("menu")
               expiresInDays: expiresDays || undefined,
             });
 
-            restoreRawMode();
+            // Don't restore raw mode yet - we need it OFF for prompts
+            // restoreRawMode() will be called after all prompts are done
 
             const token = result.token;
             const tokenId = result.id;
@@ -192,19 +193,32 @@ export const menuCommand = new Command("menu")
             let tokenAdded = false;
             let tokenExists = false;
 
+            // Always try to prompt, even if configFile wasn't detected
             if (configFile) {
               // Check if token already exists in config file
               if (existsSync(configFile)) {
                 const configContent = readFileSync(configFile, "utf-8");
                 tokenExists = configContent.includes("AGENTCLOUD_TOKEN");
               }
+            }
 
-              // Always prompt, even if token exists (to allow updating)
+            // Always prompt to add/update token
+            if (configFile) {
+              // Ensure we're not in raw mode for the prompt
+              try {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+              } catch {
+                /* ignore */
+              }
+              
               const promptText = tokenExists
                 ? `\n💡 AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc. Update it with the new token? (Y/n): `
                 : `\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `;
               
-              const addToken = (await promptLine(promptText)).trim().toLowerCase();
+              // Force output to ensure prompt is visible
+              process.stdout.write(promptText);
+              const addToken = (await promptLine("")).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
                 try {
                   if (tokenExists) {
@@ -263,8 +277,8 @@ export const menuCommand = new Command("menu")
               console.log("=".repeat(60) + "\n");
             }
 
-            console.log("\nPress Enter to continue...");
-            await promptLine("");
+            // Restore raw mode now that all prompts are done
+            restoreRawMode();
 
             // If token was added to shell config, set it in current process and exit
             if (tokenAdded) {
@@ -279,6 +293,10 @@ export const menuCommand = new Command("menu")
               // Exit the menu - user needs to restart it to see full menu
               process.exit(0);
             }
+
+            console.log("\nPress Enter to continue...");
+            await promptLine("");
+            restoreRawMode();
 
             return "Token created! Please set AGENTCLOUD_TOKEN environment variable and restart the menu.";
           } catch (err: any) {
