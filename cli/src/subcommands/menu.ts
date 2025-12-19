@@ -125,6 +125,8 @@ export const menuCommand = new Command("menu")
       mainMenu.push({
         label: "🚀 Get Started (Create Account)",
         action: async () => {
+          // Disable menu rendering while we're doing signup flow
+          // We'll handle all output ourselves
           restoreRawMode();
           try {
             console.log("\n" + "=".repeat(60));
@@ -294,10 +296,13 @@ export const menuCommand = new Command("menu")
               console.log("   Exiting menu - please run 'uplink' again to see all menu options.\n");
               
               // Give user a moment to read the message, then exit immediately
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              // Use setTimeout so we can return undefined to prevent menu render
+              setTimeout(() => {
+                process.exit(0);
+              }, 2000);
               
-              // Exit immediately - don't return to menu
-              process.exit(0);
+              // Return undefined so menu doesn't try to render
+              return undefined as any;
             }
 
             // If token wasn't added, show instructions and wait for user
@@ -953,6 +958,10 @@ export const menuCommand = new Command("menu")
       render();
       try {
         const result = await choice.action();
+        // If action returns undefined, it's handling its own exit (e.g., signup flow)
+        if (result === undefined) {
+          return; // Don't render menu, action is handling everything
+        }
         // Only set message if action returned a string (not undefined/null)
         if (result) {
           message = result;
@@ -964,14 +973,18 @@ export const menuCommand = new Command("menu")
         message = `Error: ${err?.message || String(err)}`;
       } finally {
         busy = false;
-        // Only render if we're not exiting (exiting actions handle their own cleanup)
-        if (!exiting) {
+        // Only render if we're not exiting and action didn't return undefined
+        // (undefined means action is handling its own output/exit)
+        const result = await Promise.resolve().then(() => {
+          // Check if we're exiting
+          if (exiting) {
+            cleanup();
+            process.exit(0);
+            return;
+          }
+          // Only render if action completed normally
           render();
-        }
-        if (exiting) {
-          cleanup();
-          process.exit(0);
-        }
+        });
       }
     };
 
