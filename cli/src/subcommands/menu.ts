@@ -171,12 +171,22 @@ export const menuCommand = new Command("menu")
             let configFile: string | null = null;
             let shellName = "";
 
+            // Detect shell and config file
             if (shell.includes("zsh")) {
               configFile = join(homeDir, ".zshrc");
               shellName = "zsh";
             } else if (shell.includes("bash")) {
               configFile = join(homeDir, ".bashrc");
               shellName = "bash";
+            } else {
+              // Fallback: try common shells
+              if (existsSync(join(homeDir, ".zshrc"))) {
+                configFile = join(homeDir, ".zshrc");
+                shellName = "zsh";
+              } else if (existsSync(join(homeDir, ".bashrc"))) {
+                configFile = join(homeDir, ".bashrc");
+                shellName = "bash";
+              }
             }
 
             let tokenAdded = false;
@@ -210,6 +220,11 @@ export const menuCommand = new Command("menu")
                 console.log(`\n⚠️  AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc`);
                 console.log(`   You may want to update it with the new token.`);
               }
+            } else {
+              // If we couldn't detect shell, still offer to add manually
+              console.log(`\n💡 Could not detect your shell. You can add the token manually:`);
+              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`);
+              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`);
             }
 
             if (!tokenAdded) {
