@@ -204,21 +204,11 @@ export const menuCommand = new Command("menu")
 
             // Always prompt to add/update token
             if (configFile) {
-              // Ensure we're not in raw mode for the prompt
-              try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-              } catch {
-                /* ignore */
-              }
-              
               const promptText = tokenExists
                 ? `\n💡 AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc. Update it with the new token? (Y/n): `
                 : `\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `;
               
-              // Force output to ensure prompt is visible
-              process.stdout.write(promptText);
-              const addToken = (await promptLine("")).trim().toLowerCase();
+              const addToken = (await promptLine(promptText)).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
                 try {
                   if (tokenExists) {
