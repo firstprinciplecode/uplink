@@ -79,3 +79,22 @@ export const tunnelCreationRateLimiter = rateLimit({
   },
 });
 
+// Stricter rate limiter for public signup (to prevent abuse)
+export const signupRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // Limit to 5 signups per hour per IP (stricter than admin token creation)
+  message: "Too many signup requests, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    logger.warn({
+      event: "rate_limit.signup_exceeded",
+      ip: req.ip,
+      path: req.path,
+    });
+    res.status(429).json(
+      makeError("RATE_LIMIT_EXCEEDED", "Too many signup requests, please try again later.")
+    );
+  },
+});
+

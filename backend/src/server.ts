@@ -6,6 +6,7 @@ import { dbRouter } from "./routes/dbs";
 import { tunnelRouter, tunnelTokenExists } from "./routes/tunnels";
 import { adminRouter } from "./routes/admin";
 import { meRouter } from "./routes/me";
+import { signupRouter } from "./routes/signup";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rate-limit";
 import { logger } from "./utils/logger";
@@ -88,7 +89,10 @@ app.get("/internal/allow-tls", async (req, res) => {
 // Global rate limiting for all /v1 routes
 app.use("/v1", apiRateLimiter);
 
-// Auth middleware for all /v1 routes
+// Public signup endpoint (no auth required)
+app.use("/v1/signup", signupRouter);
+
+// Auth middleware for all other /v1 routes
 app.use("/v1", authMiddleware);
 app.use("/v1/dbs", dbRouter);
 app.use("/v1/tunnels", tunnelRouter);

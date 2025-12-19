@@ -13,6 +13,11 @@ export function authMiddleware(
   res: Response,
   next: NextFunction
 ) {
+  // Skip auth for public signup endpoint
+  if (req.path === "/v1/signup" || req.path.startsWith("/v1/signup/")) {
+    return next();
+  }
+
   // Do async work in an IIFE so the middleware signature stays non-async.
   void (async () => {
     const auth = req.headers.authorization;
