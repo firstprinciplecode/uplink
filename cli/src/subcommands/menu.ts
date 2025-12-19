@@ -957,7 +957,10 @@ export const menuCommand = new Command("menu")
       render();
       try {
         const result = await choice.action();
-        message = result;
+        // Only set message if action returned a string (not undefined/null)
+        if (result) {
+          message = result;
+        }
         if (choice.label === "Exit") {
           exiting = true;
         }
@@ -965,7 +968,10 @@ export const menuCommand = new Command("menu")
         message = `Error: ${err?.message || String(err)}`;
       } finally {
         busy = false;
-        render();
+        // Only render if we're not exiting (exiting actions handle their own cleanup)
+        if (!exiting) {
+          render();
+        }
         if (exiting) {
           cleanup();
           process.exit(0);
