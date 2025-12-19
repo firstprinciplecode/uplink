@@ -293,18 +293,14 @@ export const menuCommand = new Command("menu")
               console.log("\n✅ Token saved to ~/.zshrc and set in current session!");
               console.log("   Exiting menu - please run 'uplink' again to see all menu options.\n");
               
-              // Give user a moment to read the message
-              await new Promise(resolve => setTimeout(resolve, 1500));
+              // Give user a moment to read the message, then exit immediately
+              await new Promise(resolve => setTimeout(resolve, 2000));
               
-              // Force exit - use setTimeout to ensure it happens after all async operations
-              setTimeout(() => {
-                process.exit(0);
-              }, 100);
-              
-              // Return a message that will be shown briefly before exit
-              return "Token saved! Menu will exit in a moment...";
+              // Exit immediately - don't return to menu
+              process.exit(0);
             }
 
+            // If token wasn't added, show instructions and wait for user
             console.log("\nPress Enter to continue...");
             await promptLine("");
             restoreRawMode();
