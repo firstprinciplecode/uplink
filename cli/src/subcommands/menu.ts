@@ -128,6 +128,8 @@ export const menuCommand = new Command("menu")
           // Disable menu rendering while we're doing signup flow
           // We'll handle all output ourselves
           restoreRawMode();
+          // Clear screen at the start
+          clearScreen();
           try {
             console.log("\n" + "=".repeat(60));
             console.log("Welcome to Uplink! Let's create your account.");
