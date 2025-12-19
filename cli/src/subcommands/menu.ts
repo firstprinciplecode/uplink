@@ -229,6 +229,14 @@ export const menuCommand = new Command("menu")
             console.log("\nPress Enter to continue...");
             await promptLine("");
 
+            // If token was added to shell config, exit menu so it can restart with new token
+            if (tokenAdded) {
+              console.log("\n✅ Token saved! Restarting menu with your new token...");
+              console.log("   (If the token doesn't work, restart your terminal first)\n");
+              // Exit the menu so it can restart with the new token
+              process.exit(0);
+            }
+
             return "Token created! Please set AGENTCLOUD_TOKEN environment variable and restart the menu.";
           } catch (err: any) {
             restoreRawMode();
