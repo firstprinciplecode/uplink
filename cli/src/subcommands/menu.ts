@@ -2,11 +2,11 @@ import { Command } from "commander";
 import fetch from "node-fetch";
 import { spawn, execSync } from "child_process";
 import readline from "readline";
-import { writeFileSync, readFileSync, existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import { apiRequest } from "../http";
 import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
+import { homedir } from "os";
+import { join } from "path";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 
 type MenuChoice = {
   label: string;
@@ -38,29 +38,6 @@ function promptLine(question: string): Promise<string> {
   });
 }
 
-function restoreRawMode() {
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-}
-
-async function stopAllTunnels(): Promise<string> {
-  try {
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
-    // Kill all matching clients for current user
-    execSync(`pkill -f "scripts/tunnel/client-improved.js"`, { stdio: "ignore" });
-    restoreRawMode();
-    return "✅ Stopped all tunnel clients (kill switch).";
-  } catch (err: any) {
-    restoreRawMode();
-    return `Failed to stop all tunnel clients: ${err.message || err}`;
-  }
-}
-
 function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
@@ -78,6 +55,15 @@ function truncate(text: string, max: number) {
   return text.slice(0, max - 1) + "…";
 }
 
+function restoreRawMode() {
+  try {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  } catch {
+    /* ignore */
+  }
+}
+
 // Helper function to make unauthenticated requests (for signup)
 async function unauthenticatedRequest(method: string, path: string, body?: unknown): Promise<any> {
   const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
@@ -93,7 +79,6 @@ async function unauthenticatedRequest(method: string, path: string, body?: unkno
   if (!response.ok) {
     throw new Error(JSON.stringify(json, null, 2));
   }
-
   return json;
 }
 
@@ -109,34 +94,33 @@ export const menuCommand = new Command("menu")
       const me = await apiRequest("GET", "/v1/me");
       isAdmin = me?.role === "admin";
     } catch (err: any) {
-      // Check if it's an authentication error (401) vs other errors
-      const errorStr = String(err?.message || "");
-      if (errorStr.includes("UNAUTHORIZED") || errorStr.includes("401") || errorStr.includes("Missing") || errorStr.includes("Invalid token")) {
-        authFailed = true;
-      }
+      // Check if it's an authentication error
+      const errorMsg = err?.message || String(err);
+      authFailed =
+        errorMsg.includes("UNAUTHORIZED") ||
+        errorMsg.includes("401") ||
+        errorMsg.includes("Missing or invalid token") ||
+        errorMsg.includes("Missing AGENTCLOUD_TOKEN");
       isAdmin = false;
     }
 
-    // Build menu structure dynamically by role
+    // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
-
+    
     // If authentication failed, show ONLY "Get Started" and "Exit"
     if (authFailed) {
       mainMenu.push({
         label: "🚀 Get Started (Create Account)",
         action: async () => {
-          // Disable menu rendering while we're doing signup flow
-          // We'll handle all output ourselves
           restoreRawMode();
-          // Clear screen at the start
           clearScreen();
           try {
-            console.log("\n" + "=".repeat(60));
-            console.log("Welcome to Uplink! Let's create your account.");
-            console.log("=".repeat(60) + "\n");
+            process.stdout.write("\n" + "=".repeat(60) + "\n");
+            process.stdout.write("Welcome to Uplink! Let's create your account.\n");
+            process.stdout.write("=".repeat(60) + "\n\n");
 
-            const label = (await promptLine("Label for this token (optional, e.g., 'my-laptop'): ")).trim();
-            const expiresInput = (await promptLine("Expires in days (optional, press Enter for no expiration): ")).trim();
+            const label = (await promptLine("Label (optional): ")).trim();
+            const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
             const expiresDays = expiresInput ? Number(expiresInput) : undefined;
 
             if (expiresDays && (isNaN(expiresDays) || expiresDays <= 0)) {
@@ -144,16 +128,14 @@ export const menuCommand = new Command("menu")
               return "Invalid expiration days. Please enter a positive number or leave empty.";
             }
 
-            // Ensure output is flushed before making request
             process.stdout.write("\nCreating your token...\n");
-            process.stdout.write(""); // Force flush
+            process.stdout.write("");
             let result;
             try {
               result = await unauthenticatedRequest("POST", "/v1/signup", {
                 label: label || undefined,
                 expiresInDays: expiresDays || undefined,
               });
-              // Debug: log if we got a result
               if (!result) {
                 restoreRawMode();
                 return "❌ Error: No response from server.";
@@ -168,9 +150,6 @@ export const menuCommand = new Command("menu")
               return `❌ Error creating account: ${errorMsg}`;
             }
 
-            // Don't restore raw mode yet - we need it OFF for prompts
-            // restoreRawMode() will be called after all prompts are done
-
             if (!result || !result.token) {
               restoreRawMode();
               return "❌ Error: Invalid response from server. Token not received.";
@@ -180,7 +159,6 @@ export const menuCommand = new Command("menu")
             const tokenId = result.id;
             const userId = result.userId;
 
-            // Show token info - use process.stdout.write to ensure it's not buffered
             process.stdout.write("\n" + "=".repeat(60) + "\n");
             process.stdout.write("✅ Account created successfully!\n");
             process.stdout.write("=".repeat(60) + "\n\n");
@@ -195,14 +173,14 @@ export const menuCommand = new Command("menu")
             if (result.expiresAt) {
               process.stdout.write(`   Expires: ${result.expiresAt}\n`);
             }
-            process.stdout.write(""); // Force flush
+            process.stdout.write("");
+
             // Try to automatically add token to shell config
             const shell = process.env.SHELL || "";
             const homeDir = homedir();
             let configFile: string | null = null;
             let shellName = "";
 
-            // Detect shell and config file
             if (shell.includes("zsh")) {
               configFile = join(homeDir, ".zshrc");
               shellName = "zsh";
@@ -210,7 +188,6 @@ export const menuCommand = new Command("menu")
               configFile = join(homeDir, ".bashrc");
               shellName = "bash";
             } else {
-              // Fallback: try common shells
               if (existsSync(join(homeDir, ".zshrc"))) {
                 configFile = join(homeDir, ".zshrc");
                 shellName = "zsh";
@@ -223,36 +200,30 @@ export const menuCommand = new Command("menu")
             let tokenAdded = false;
             let tokenExists = false;
 
-            // Always try to prompt, even if configFile wasn't detected
             if (configFile) {
-              // Check if token already exists in config file
               if (existsSync(configFile)) {
                 const configContent = readFileSync(configFile, "utf-8");
                 tokenExists = configContent.includes("AGENTCLOUD_TOKEN");
               }
             }
 
-            // Always prompt to add/update token
             if (configFile) {
               const promptText = tokenExists
-                ? `\n💡 AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc. Update it with the new token? (Y/n): `
-                : `\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `;
+                ? `\n💡 Update existing token in ~/.${shellName}rc? (Y/n): `
+                : `\n💡 Add token to ~/.${shellName}rc? (Y/n): `;
               
               const addToken = (await promptLine(promptText)).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
                 try {
                   if (tokenExists) {
-                    // Update existing token: read file, replace the line, write back
                     const configContent = readFileSync(configFile, "utf-8");
                     const lines = configContent.split("\n");
                     const updatedLines = lines.map((line) => {
-                      // Match export AGENTCLOUD_TOKEN=... (with or without quotes)
                       if (line.match(/^\s*export\s+AGENTCLOUD_TOKEN=/)) {
                         return `export AGENTCLOUD_TOKEN=${token}`;
                       }
                       return line;
                     });
-                    // If no line was replaced, append it
                     const wasReplaced = updatedLines.some((line, idx) => line !== lines[idx]);
                     if (!wasReplaced) {
                       updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
@@ -260,25 +231,20 @@ export const menuCommand = new Command("menu")
                     writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
                     tokenAdded = true;
                     console.log(`\n✅ Token updated in ~/.${shellName}rc`);
-                    // Verify it was written
                     const verifyContent = readFileSync(configFile, "utf-8");
                     if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
                       console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
                     }
                   } else {
-                    // Add new token
                     const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
                     writeFileSync(configFile, exportLine, { flag: "a", mode: 0o644 });
                     tokenAdded = true;
                     console.log(`\n✅ Token added to ~/.${shellName}rc`);
-                    // Verify it was written
                     const verifyContent = readFileSync(configFile, "utf-8");
                     if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
                       console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
                     }
                   }
-                  // Don't show manual export instructions since it's already in the config file
-                  // The user just needs to restart their terminal or run 'source ~/.zshrc'
                 } catch (err: any) {
                   console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
                   console.log(`\n   Please add manually:`);
@@ -286,53 +252,44 @@ export const menuCommand = new Command("menu")
                 }
               }
             } else {
-              // If we couldn't detect shell, still offer to add manually
               console.log(`\n💡 Could not detect your shell. You can add the token manually:`);
               console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`);
               console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`);
             }
 
             if (!tokenAdded) {
-              console.log("\n" + "=".repeat(60));
-              console.log("⚠️  IMPORTANT: Set this token as an environment variable:");
-              console.log("=".repeat(60) + "\n");
-              console.log("   export AGENTCLOUD_TOKEN=" + token);
+              process.stdout.write("\n" + "=".repeat(60) + "\n");
+              process.stdout.write("⚠️  IMPORTANT: Set this token as an environment variable:\n");
+              process.stdout.write("=".repeat(60) + "\n\n");
+              process.stdout.write("   export AGENTCLOUD_TOKEN=" + token + "\n");
               if (configFile) {
-                console.log(`\n   Or add it to your ~/.${shellName}rc:`);
-                console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
-                console.log(`   source ~/.${shellName}rc`);
+                process.stdout.write(`\n   Or add it to your ~/.${shellName}rc:\n`);
+                process.stdout.write(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc\n`);
+                process.stdout.write(`   source ~/.${shellName}rc\n`);
               }
-              console.log("\n   Then restart this menu to use your new token.");
-              console.log("=".repeat(60) + "\n");
+              process.stdout.write("\n   Then restart this menu to use your new token.\n");
+              process.stdout.write("=".repeat(60) + "\n\n");
             }
 
-            // Restore raw mode now that all prompts are done
             restoreRawMode();
 
-            // If token was added to shell config, set it in current process and exit
             if (tokenAdded) {
-              // Set token in current process environment so it's available immediately
               process.env.AGENTCLOUD_TOKEN = token;
-              console.log("\n✅ Token saved to ~/.zshrc!");
-              console.log("\n💡 To use it in this terminal session, run:");
-              console.log(`   source ~/.${shellName}rc`);
-              console.log("\n   Or restart your terminal, then run 'uplink' again to see all menu options.\n");
+              // Use stdout writes to avoid buffering/race with process.exit()
+              process.stdout.write(`\n✅ Token saved to ~/.${shellName}rc!\n`);
+              process.stdout.write(`\n💡 Next: copy/paste and run in your terminal:\n`);
+              process.stdout.write(`   source ~/.${shellName}rc && uplink\n\n`);
               
-              // Give user a moment to read the message, then exit immediately
-              // Use setTimeout so we can return undefined to prevent menu render
               setTimeout(() => {
                 process.exit(0);
               }, 3000);
               
-              // Return undefined so menu doesn't try to render
               return undefined as any;
             }
 
-            // If token wasn't added, show instructions and wait for user
             console.log("\nPress Enter to continue...");
             await promptLine("");
             restoreRawMode();
-
             return "Token created! Please set AGENTCLOUD_TOKEN environment variable and restart the menu.";
           } catch (err: any) {
             restoreRawMode();
@@ -345,7 +302,6 @@ export const menuCommand = new Command("menu")
         },
       });
       
-      // Only show "Exit" when auth failed - don't show other menu items
       mainMenu.push({
         label: "Exit",
         action: async () => {
@@ -354,8 +310,9 @@ export const menuCommand = new Command("menu")
       });
     } else {
       // Only show other menu items if authentication succeeded
-      if (isAdmin) {
-        mainMenu.push({
+
+    if (isAdmin) {
+      mainMenu.push({
         label: "System Status",
         subMenu: [
           {
@@ -403,197 +360,12 @@ export const menuCommand = new Command("menu")
               return "smoke:all completed";
             },
           },
-          {
-            label: "Test: New Features",
-            action: async () => {
-              try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
-                const { spawn } = require("child_process");
-                const path = require("path");
-                const projectRoot = path.join(__dirname, "../../..");
-                const testScript = path.join(projectRoot, "scripts/test-new-features.sh");
-                
-                return new Promise<string>((resolve, reject) => {
-                  const child = spawn("bash", [testScript], {
-                    stdio: "inherit",
-                    cwd: projectRoot,
-                    env: {
-                      ...process.env,
-                      AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE || apiBase,
-                      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN || "dev-token",
-                    },
-                  });
-                  
-                  child.on("close", (code) => {
-                    try {
-                      process.stdin.setRawMode(true);
-                      process.stdin.resume();
-                    } catch {
-                      /* ignore */
-                    }
-                    if (code === 0) {
-                      resolve("✅ New features test completed successfully!");
-                    } else {
-                      resolve(`⚠️  Test completed with exit code ${code}. Check output above for details.`);
-                    }
-                  });
-                  
-                  child.on("error", (err) => {
-                    try {
-                      process.stdin.setRawMode(true);
-                      process.stdin.resume();
-                    } catch {
-                      /* ignore */
-                    }
-                    reject(new Error(`Failed to run test: ${err.message}`));
-                  });
-                });
-              } catch (err: unknown) {
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                const error = err instanceof Error ? err : new Error(String(err));
-                throw error;
-              }
-            },
-          },
         ],
       });
+    }
 
-      mainMenu.push({
-        label: "Manage Tokens (admin)",
-        subMenu: [
-          {
-            label: "List Tokens",
-            action: async () => {
-              const result = await apiRequest("GET", "/v1/admin/tokens?limit=50");
-              const tokens = result.tokens || [];
-              if (!tokens.length) return "No tokens found.";
-
-              const lines = tokens.map((t: any) => {
-                const id = String(t.id || "").slice(0, 16);
-                const role = String(t.role || "-").slice(0, 6);
-                const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
-                const userId = String(t.user_id || t.userId || "-").slice(0, 24);
-                const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
-                const created = (t.created_at || t.createdAt || "").slice(0, 19);
-                return `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
-                  26
-                )} ${status.padEnd(10)} ${created}`;
-              });
-
-              return [
-                "ID".padEnd(18) +
-                  "Role".padEnd(8) +
-                  "Prefix".padEnd(10) +
-                  "User ID".padEnd(26) +
-                  "Status".padEnd(10) +
-                  "Created",
-                "-".repeat(90),
-                ...lines,
-              ].join("\n");
-            },
-          },
-          {
-            label: "Create Token",
-            action: async () => {
-              try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
-                const roleInput = (await promptLine("Role (admin/user, default admin): ")).trim();
-                const role = roleInput === "user" ? "user" : "admin";
-                const label = (await promptLine("Label (optional): ")).trim();
-                const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
-                const expiresDays = expiresInput ? Number(expiresInput) : undefined;
-
-                const result = await apiRequest("POST", "/v1/admin/tokens", {
-                  role,
-                  label: label || undefined,
-                  expiresInDays: Number.isFinite(expiresDays as any) ? expiresDays : undefined,
-                });
-                
-                restoreRawMode();
-
-                return [
-                  "🔑 Token created (shown once)",
-                  `Role:    ${result.role}`,
-                  `User ID: ${result.userId}`,
-                  `Token ID:${result.id}`,
-                  `Prefix:  ${result.tokenPrefix}`,
-                  result.label ? `Label:  ${result.label}` : "",
-                  result.expiresAt ? `Expires: ${result.expiresAt}` : "",
-                  "",
-                  result.token || "",
-                ]
-                  .filter(Boolean)
-                  .join("\n");
-              } catch (err: any) {
-                restoreRawMode();
-                throw err;
-              }
-            },
-          },
-          {
-            label: "Revoke Token",
-            action: async () => {
-              try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
-                // Show a quick list first
-                const list = await apiRequest("GET", "/v1/admin/tokens?limit=50");
-                const tokens = list.tokens || [];
-                if (!tokens.length) {
-                  restoreRawMode();
-                  return "No tokens found.";
-                }
-
-                const header =
-                  "ID".padEnd(18) +
-                  "Role".padEnd(8) +
-                  "Prefix".padEnd(10) +
-                  "User ID".padEnd(26) +
-                  "Status".padEnd(10) +
-                  "Created";
-                console.log("\n" + header);
-                console.log("-".repeat(90));
-                tokens.forEach((t: any) => {
-                  const id = String(t.id || "").slice(0, 16);
-                  const role = String(t.role || "-").slice(0, 6);
-                  const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
-                  const userId = String(t.user_id || t.userId || "-").slice(0, 24);
-                  const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
-                  const created = (t.created_at || t.createdAt || "").slice(0, 19);
-                  console.log(
-                    `${id.padEnd(18)} ${role.padEnd(8)} ${prefix.padEnd(10)} ${userId.padEnd(
-                      26
-                    )} ${status.padEnd(10)} ${created}`
-                  );
-                });
-
-                const id = (await promptLine("Token ID to revoke: ")).trim();
-                restoreRawMode();
-                if (!id) return "No token id provided.";
-                const result = await apiRequest("POST", "/v1/admin/tokens/revoke", { id });
-                return `✅ Revoked ${id} at ${result.revokedAt || ""}`;
-              } catch (err: any) {
-                restoreRawMode();
-                throw err;
-              }
-            },
-          },
-        ],
-      });
-      }
-
-      mainMenu.push({
-        label: "Manage Tunnels",
+    mainMenu.push({
+      label: "Manage Tunnels",
       subMenu: [
           {
             label: "Start (Auto)",
@@ -670,7 +442,7 @@ export const menuCommand = new Command("menu")
                   `Token: ${token}`,
                   "",
                   "To start the tunnel client, run:",
-                  `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "178.156.149.124:7071"}`,
+                  `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071"}`,
                 ]
                   .filter(Boolean)
                   .join("\n");
@@ -763,10 +535,6 @@ export const menuCommand = new Command("menu")
               }
             },
           },
-          {
-            label: "Stop ALL Tunnel Clients (kill switch)",
-            action: async () => stopAllTunnels(),
-          },
         ],
       });
 
@@ -835,7 +603,101 @@ export const menuCommand = new Command("menu")
       ],
     });
 
-      // Add Exit option for authenticated users
+    // Admin-only: Manage Tokens
+    if (isAdmin) {
+      mainMenu.push({
+        label: "Manage Tokens (admin)",
+        subMenu: [
+          {
+            label: "List Tokens",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/tokens");
+              const tokens = result.tokens || [];
+              if (!tokens.length) return "No tokens found.";
+              const lines = tokens.map(
+                (t: any) =>
+                  `${truncate(t.id, 12)}  ${truncate(t.token_prefix || t.tokenPrefix || "-", 10).padEnd(12)}  ${truncate(
+                    t.role ?? "-",
+                    6
+                  ).padEnd(8)}  ${truncate(t.label ?? "-", 20).padEnd(22)}  ${truncate(
+                    t.created_at ?? t.createdAt ?? "",
+                    19
+                  )}`
+              );
+              return [
+                "ID           Prefix        Role     Label                   Created",
+                "-".repeat(90),
+                ...lines,
+              ].join("\n");
+            },
+          },
+          {
+            label: "Create Token",
+            action: async () => {
+              const roleAnswer = await promptLine("Role (admin/user, default user): ");
+              const role = roleAnswer.trim().toLowerCase() === "admin" ? "admin" : "user";
+              const labelAnswer = await promptLine("Label (optional): ");
+              const label = labelAnswer.trim() || undefined;
+              const expiresAnswer = await promptLine("Expires in days (optional): ");
+              const expiresDays = expiresAnswer.trim() ? Number(expiresAnswer) : undefined;
+
+              restoreRawMode();
+
+              const body: Record<string, unknown> = { role };
+              if (label) body.label = label;
+              if (expiresDays && expiresDays > 0) body.expiresInDays = expiresDays;
+
+              const result = await apiRequest("POST", "/v1/admin/tokens", body);
+              const rawToken = result.token || "(no token returned)";
+              return [
+                "✅ Token created successfully!",
+                "",
+                `🔑 Token (save this - shown only once): ${rawToken}`,
+                `   ID: ${result.id}`,
+                `   Role: ${result.role}`,
+                `   Label: ${result.label || "-"}`,
+                result.expiresAt ? `   Expires: ${result.expiresAt}` : "",
+              ]
+                .filter(Boolean)
+                .join("\n");
+            },
+          },
+          {
+            label: "Revoke Token",
+            action: async () => {
+              const tokenIdAnswer = await promptLine("Token ID to revoke: ");
+              const tokenId = tokenIdAnswer.trim();
+              restoreRawMode();
+              if (!tokenId) return "No token ID provided.";
+              await apiRequest("DELETE", `/v1/admin/tokens/${tokenId}`);
+              return `✅ Token ${tokenId} revoked.`;
+            },
+          },
+        ],
+      });
+
+      // Admin-only: Stop ALL Tunnel Clients (kill switch)
+      mainMenu.push({
+        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
+        action: async () => {
+          const clients = findTunnelClients();
+          if (clients.length === 0) {
+            return "No running tunnel clients found.";
+          }
+          let killed = 0;
+          for (const client of clients) {
+            try {
+              execSync(`kill -TERM ${client.pid}`, { stdio: "ignore" });
+              killed++;
+            } catch {
+              // Process might have already exited
+            }
+          }
+          return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+        },
+      });
+    }
+
       mainMenu.push({
         label: "Exit",
         action: async () => "Goodbye!",
@@ -978,23 +840,14 @@ export const menuCommand = new Command("menu")
       }
       
       busy = true;
-      // Don't render menu for signup action - it handles its own output
-      const isSignupAction = choice.label === "🚀 Get Started (Create Account)";
-      if (!isSignupAction) {
-        render();
-      }
-      let actionResult: string | undefined = undefined;
+      render();
       try {
-        actionResult = await choice.action();
-        // If action returns undefined, it's handling its own exit (e.g., signup flow)
-        if (actionResult === undefined) {
-          busy = false;
-          return; // Don't render menu, action is handling everything
+        const result = await choice.action();
+        // If action returns undefined, it handled its own output/exit (e.g., signup flow)
+        if (result === undefined) {
+          return;
         }
-        // Only set message if action returned a string
-        if (actionResult) {
-          message = actionResult;
-        }
+        message = result;
         if (choice.label === "Exit") {
           exiting = true;
         }
@@ -1002,10 +855,7 @@ export const menuCommand = new Command("menu")
         message = `Error: ${err?.message || String(err)}`;
       } finally {
         busy = false;
-        // Only render if we're not exiting (exiting actions handle their own cleanup)
-        if (!exiting && actionResult !== undefined) {
-          render();
-        }
+        render();
         if (exiting) {
           cleanup();
           process.exit(0);
@@ -1059,7 +909,7 @@ async function createAndStartTunnel(port: number): Promise<string> {
   const result = await apiRequest("POST", "/v1/tunnels", { port });
   const url = result.url || "(no url)";
   const token = result.token || "(no token)";
-  const ctrl = process.env.TUNNEL_CTRL || "178.156.149.124:7071";
+  const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
   
   // Start tunnel client in background
   const path = require("path");
@@ -1101,22 +951,23 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
   try {
     // Find processes running client-improved.js (current user, match script path to avoid false positives)
     const user = process.env.USER || "";
-    const psCmd = user ? `ps -u ${user} -o pid=,command=` : "ps -eo pid=,command=";
+    const psCmd = user
+      ? `ps -u ${user} -o pid=,command=`
+      : "ps -eo pid=,command=";
     const output = execSync(psCmd, { encoding: "utf-8" });
     const lines = output
       .trim()
       .split("\n")
       .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
-
+    
     const clients: Array<{ pid: number; port: number; token: string }> = [];
-
+    
     for (const line of lines) {
-      // macOS ps output starts with PID when using "-o pid=,command=",
-      // so capture the leading number rather than assuming a USER column.
-      const pidMatch = line.match(/^\s*(\d+)/);
+      // Parse process line: USER PID ... node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
+      const pidMatch = line.match(/^\S+\s+(\d+)/);
       const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
-
+      
       if (pidMatch && tokenMatch && portMatch) {
         clients.push({
           pid: parseInt(pidMatch[1], 10),
@@ -1125,7 +976,7 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
         });
       }
     }
-
+    
     return clients;
   } catch {
     return [];
