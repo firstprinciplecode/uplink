@@ -148,9 +148,15 @@ export const menuCommand = new Command("menu")
                 label: label || undefined,
                 expiresInDays: expiresDays || undefined,
               });
+              // Debug: log if we got a result
+              if (!result) {
+                restoreRawMode();
+                return "❌ Error: No response from server.";
+              }
             } catch (err: any) {
               restoreRawMode();
               const errorMsg = err?.message || String(err);
+              console.error("\n❌ Signup error:", errorMsg);
               if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
                 return "⚠️  Too many signup attempts. Please try again later.";
               }
