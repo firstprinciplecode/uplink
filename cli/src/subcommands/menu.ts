@@ -299,14 +299,16 @@ export const menuCommand = new Command("menu")
             if (tokenAdded) {
               // Set token in current process environment so it's available immediately
               process.env.AGENTCLOUD_TOKEN = token;
-              console.log("\n✅ Token saved to ~/.zshrc and set in current session!");
-              console.log("   Exiting menu - please run 'uplink' again to see all menu options.\n");
+              console.log("\n✅ Token saved to ~/.zshrc!");
+              console.log("\n💡 To use it in this terminal session, run:");
+              console.log(`   source ~/.${shellName}rc`);
+              console.log("\n   Or restart your terminal, then run 'uplink' again to see all menu options.\n");
               
               // Give user a moment to read the message, then exit immediately
               // Use setTimeout so we can return undefined to prevent menu render
               setTimeout(() => {
                 process.exit(0);
-              }, 2000);
+              }, 3000);
               
               // Return undefined so menu doesn't try to render
               return undefined as any;
