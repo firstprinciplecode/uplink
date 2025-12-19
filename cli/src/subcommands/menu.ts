@@ -120,7 +120,7 @@ export const menuCommand = new Command("menu")
     // Build menu structure dynamically by role
     const mainMenu: MenuChoice[] = [];
 
-    // If authentication failed, add "Get Started" option at the top
+    // If authentication failed, show ONLY "Get Started" and "Exit"
     if (authFailed) {
       mainMenu.push({
         label: "🚀 Get Started (Create Account)",
@@ -240,10 +240,18 @@ export const menuCommand = new Command("menu")
           }
         },
       });
-    }
-
-    if (isAdmin) {
+      
+      // Only show "Exit" when auth failed - don't show other menu items
       mainMenu.push({
+        label: "Exit",
+        action: async () => {
+          return "Goodbye!";
+        },
+      });
+    } else {
+      // Only show other menu items if authentication succeeded
+      if (isAdmin) {
+        mainMenu.push({
         label: "System Status",
         subMenu: [
           {
@@ -478,10 +486,10 @@ export const menuCommand = new Command("menu")
           },
         ],
       });
-    }
+      }
 
-    mainMenu.push({
-      label: "Manage Tunnels",
+      mainMenu.push({
+        label: "Manage Tunnels",
       subMenu: [
           {
             label: "Start (Auto)",
@@ -723,10 +731,12 @@ export const menuCommand = new Command("menu")
       ],
     });
 
-    mainMenu.push({
-      label: "Exit",
-      action: async () => "Goodbye!",
-    });
+      // Add Exit option for authenticated users
+      mainMenu.push({
+        label: "Exit",
+        action: async () => "Goodbye!",
+      });
+    }
 
     // Menu navigation state
     const menuStack: MenuChoice[][] = [mainMenu];
