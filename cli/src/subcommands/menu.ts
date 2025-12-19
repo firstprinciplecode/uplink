@@ -2,6 +2,9 @@ import { Command } from "commander";
 import fetch from "node-fetch";
 import { spawn, execSync } from "child_process";
 import readline from "readline";
+import { writeFileSync, readFileSync, existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { apiRequest } from "../http";
 import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 
@@ -162,25 +165,65 @@ export const menuCommand = new Command("menu")
             if (result.expiresAt) {
               console.log(`   Expires: ${result.expiresAt}`);
             }
-            console.log("\n" + "=".repeat(60));
-            console.log("⚠️  IMPORTANT: Set this token as an environment variable:");
-            console.log("=".repeat(60) + "\n");
-            console.log("   export AGENTCLOUD_TOKEN=" + token);
-            console.log("\n   Or add it to your ~/.bashrc or ~/.zshrc:");
-            console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc`);
-            console.log("\n   Then restart this menu to use your new token.");
-            console.log("=".repeat(60) + "\n");
-
-            // Try to detect shell and suggest the right command
+            // Try to automatically add token to shell config
             const shell = process.env.SHELL || "";
+            const homeDir = homedir();
+            let configFile: string | null = null;
+            let shellName = "";
+
             if (shell.includes("zsh")) {
-              console.log("💡 Quick setup (zsh):");
-              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc`);
-              console.log(`   source ~/.zshrc`);
+              configFile = join(homeDir, ".zshrc");
+              shellName = "zsh";
             } else if (shell.includes("bash")) {
-              console.log("💡 Quick setup (bash):");
-              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc`);
-              console.log(`   source ~/.bashrc`);
+              configFile = join(homeDir, ".bashrc");
+              shellName = "bash";
+            }
+
+            let tokenAdded = false;
+            let tokenExists = false;
+
+            if (configFile) {
+              // Check if token already exists in config file
+              if (existsSync(configFile)) {
+                const configContent = readFileSync(configFile, "utf-8");
+                tokenExists = configContent.includes("AGENTCLOUD_TOKEN");
+              }
+
+              if (!tokenExists) {
+                const addToken = (await promptLine(`\n💡 Add token to ~/.${shellName}rc automatically? (Y/n): `)).trim().toLowerCase();
+                if (addToken !== "n" && addToken !== "no") {
+                  try {
+                    const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
+                    writeFileSync(configFile, exportLine, { flag: "a" });
+                    tokenAdded = true;
+                    console.log(`\n✅ Token added to ~/.${shellName}rc`);
+                    console.log(`\n📝 To use it in this session, run:`);
+                    console.log(`   export AGENTCLOUD_TOKEN=${token}`);
+                    console.log(`\n   Or restart your terminal to load it automatically.`);
+                  } catch (err: any) {
+                    console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
+                    console.log(`\n   Please add manually:`);
+                    console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
+                  }
+                }
+              } else {
+                console.log(`\n⚠️  AGENTCLOUD_TOKEN already exists in ~/.${shellName}rc`);
+                console.log(`   You may want to update it with the new token.`);
+              }
+            }
+
+            if (!tokenAdded) {
+              console.log("\n" + "=".repeat(60));
+              console.log("⚠️  IMPORTANT: Set this token as an environment variable:");
+              console.log("=".repeat(60) + "\n");
+              console.log("   export AGENTCLOUD_TOKEN=" + token);
+              if (configFile) {
+                console.log(`\n   Or add it to your ~/.${shellName}rc:`);
+                console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
+                console.log(`   source ~/.${shellName}rc`);
+              }
+              console.log("\n   Then restart this menu to use your new token.");
+              console.log("=".repeat(60) + "\n");
             }
 
             console.log("\nPress Enter to continue...");
