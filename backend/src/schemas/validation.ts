@@ -7,6 +7,12 @@ export const createTokenSchema = z.object({
   expiresInDays: z.number().int().positive().max(365).optional(),
 });
 
+// Public signup schema (user role only, no admin option)
+export const signupSchema = z.object({
+  label: z.string().max(200).optional(),
+  expiresInDays: z.number().int().positive().max(365).optional(),
+});
+
 export const revokeTokenSchema = z.object({
   id: z.string().optional(),
   token: z.string().optional(),
@@ -39,6 +45,7 @@ export const listQuerySchema = z.object({
 
 // Type exports for use in routes
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
+export type SignupInput = z.infer<typeof signupSchema>;
 export type RevokeTokenInput = z.infer<typeof revokeTokenSchema>;
 export type CreateTunnelInput = z.infer<typeof createTunnelSchema>;
 export type CreateDatabaseInput = z.infer<typeof createDatabaseSchema>;

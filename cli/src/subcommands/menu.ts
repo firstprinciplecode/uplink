@@ -75,22 +75,129 @@ function truncate(text: string, max: number) {
   return text.slice(0, max - 1) + "…";
 }
 
+// Helper function to make unauthenticated requests (for signup)
+async function unauthenticatedRequest(method: string, path: string, body?: unknown): Promise<any> {
+  const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+  const response = await fetch(`${apiBase}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(json, null, 2));
+  }
+
+  return json;
+}
+
 export const menuCommand = new Command("menu")
   .description("Interactive terminal menu (arrow keys + enter)")
   .action(async () => {
     const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
     
-    // Determine role (admin or user) via /v1/me; default to user on failure
+    // Determine role (admin or user) via /v1/me; check if auth failed
     let isAdmin = false;
+    let authFailed = false;
     try {
       const me = await apiRequest("GET", "/v1/me");
       isAdmin = me?.role === "admin";
-    } catch {
+    } catch (err: any) {
+      // Check if it's an authentication error (401) vs other errors
+      const errorStr = String(err?.message || "");
+      if (errorStr.includes("UNAUTHORIZED") || errorStr.includes("401") || errorStr.includes("Missing") || errorStr.includes("Invalid token")) {
+        authFailed = true;
+      }
       isAdmin = false;
     }
 
     // Build menu structure dynamically by role
     const mainMenu: MenuChoice[] = [];
+
+    // If authentication failed, add "Get Started" option at the top
+    if (authFailed) {
+      mainMenu.push({
+        label: "🚀 Get Started (Create Account)",
+        action: async () => {
+          restoreRawMode();
+          try {
+            console.log("\n" + "=".repeat(60));
+            console.log("Welcome to Uplink! Let's create your account.");
+            console.log("=".repeat(60) + "\n");
+
+            const label = (await promptLine("Label for this token (optional, e.g., 'my-laptop'): ")).trim();
+            const expiresInput = (await promptLine("Expires in days (optional, press Enter for no expiration): ")).trim();
+            const expiresDays = expiresInput ? Number(expiresInput) : undefined;
+
+            if (expiresDays && (isNaN(expiresDays) || expiresDays <= 0)) {
+              return "Invalid expiration days. Please enter a positive number or leave empty.";
+            }
+
+            console.log("\nCreating your token...");
+            const result = await unauthenticatedRequest("POST", "/v1/signup", {
+              label: label || undefined,
+              expiresInDays: expiresDays || undefined,
+            });
+
+            restoreRawMode();
+
+            const token = result.token;
+            const tokenId = result.id;
+            const userId = result.userId;
+
+            console.log("\n" + "=".repeat(60));
+            console.log("✅ Account created successfully!");
+            console.log("=".repeat(60) + "\n");
+            console.log("🔑 YOUR TOKEN (save this securely - shown only once):");
+            console.log("─".repeat(60));
+            console.log(token);
+            console.log("─".repeat(60) + "\n");
+            console.log("📋 Token Details:");
+            console.log(`   ID: ${tokenId}`);
+            console.log(`   User ID: ${userId}`);
+            console.log(`   Role: ${result.role}`);
+            if (result.expiresAt) {
+              console.log(`   Expires: ${result.expiresAt}`);
+            }
+            console.log("\n" + "=".repeat(60));
+            console.log("⚠️  IMPORTANT: Set this token as an environment variable:");
+            console.log("=".repeat(60) + "\n");
+            console.log("   export AGENTCLOUD_TOKEN=" + token);
+            console.log("\n   Or add it to your ~/.bashrc or ~/.zshrc:");
+            console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc`);
+            console.log("\n   Then restart this menu to use your new token.");
+            console.log("=".repeat(60) + "\n");
+
+            // Try to detect shell and suggest the right command
+            const shell = process.env.SHELL || "";
+            if (shell.includes("zsh")) {
+              console.log("💡 Quick setup (zsh):");
+              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc`);
+              console.log(`   source ~/.zshrc`);
+            } else if (shell.includes("bash")) {
+              console.log("💡 Quick setup (bash):");
+              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc`);
+              console.log(`   source ~/.bashrc`);
+            }
+
+            console.log("\nPress Enter to continue...");
+            await promptLine("");
+
+            return "Token created! Please set AGENTCLOUD_TOKEN environment variable and restart the menu.";
+          } catch (err: any) {
+            restoreRawMode();
+            const errorMsg = err?.message || String(err);
+            if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
+              return "⚠️  Too many signup attempts. Please try again later.";
+            }
+            return `❌ Error creating account: ${errorMsg}`;
+          }
+        },
+      });
+    }
 
     if (isAdmin) {
       mainMenu.push({
