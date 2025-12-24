@@ -17,7 +17,8 @@
     "smoke:tunnel": "bash scripts/tunnel-smoke.sh",
     "smoke:db": "bash scripts/db-api-smoke.sh",
     "smoke:all": "bash scripts/smoke-all.sh",
-    "test:features": "bash scripts/test-new-features.sh"
+    "test:features": "bash scripts/test-new-features.sh",
+    "test:comprehensive": "bash scripts/test-comprehensive.sh"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

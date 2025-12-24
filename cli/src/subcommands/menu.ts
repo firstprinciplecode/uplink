@@ -14,15 +14,6 @@ type MenuChoice = {
   subMenu?: MenuChoice[];
 };
 
-const ASCII_UPLINK = [
-  "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
-  "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
-  "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
-  "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
-  "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
-  " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
-].join("\n");
-
 function promptLine(question: string): Promise<string> {
   return new Promise((resolve) => {
     try {
@@ -42,13 +33,65 @@ function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }
 
+// ─────────────────────────────────────────────────────────────
+// Color palette (Oxide-inspired)
+// ─────────────────────────────────────────────────────────────
+const c = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  // Colors
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+  magenta: "\x1b[35m",
+  white: "\x1b[97m",
+  gray: "\x1b[90m",
+  // Bright variants
+  brightCyan: "\x1b[96m",
+  brightGreen: "\x1b[92m",
+  brightYellow: "\x1b[93m",
+  brightWhite: "\x1b[97m",
+};
+
 function colorCyan(text: string) {
-  return `\x1b[36m${text}\x1b[0m`;
+  return `${c.brightCyan}${text}${c.reset}`;
 }
 
 function colorYellow(text: string) {
-  return `\x1b[33m${text}\x1b[0m`;
+  return `${c.yellow}${text}${c.reset}`;
 }
+
+function colorGreen(text: string) {
+  return `${c.brightGreen}${text}${c.reset}`;
+}
+
+function colorDim(text: string) {
+  return `${c.dim}${text}${c.reset}`;
+}
+
+function colorBold(text: string) {
+  return `${c.bold}${c.brightWhite}${text}${c.reset}`;
+}
+
+function colorRed(text: string) {
+  return `${c.red}${text}${c.reset}`;
+}
+
+function colorMagenta(text: string) {
+  return `${c.magenta}${text}${c.reset}`;
+}
+
+// ASCII banner with color styling
+const ASCII_UPLINK = colorCyan([
+  "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
+  "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
+  "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
+  "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
+  "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
+  " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
+].join("\n"));
 
 function truncate(text: string, max: number) {
   if (text.length <= max) return text;
@@ -62,6 +105,116 @@ function restoreRawMode() {
   } catch {
     /* ignore */
   }
+}
+
+// Inline arrow-key selector (returns selected index, or -1 for "Back")
+type SelectOption = { label: string; value: string | number | null };
+
+async function inlineSelect(
+  title: string,
+  options: SelectOption[],
+  includeBack: boolean = true
+): Promise<{ index: number; value: string | number | null } | null> {
+  return new Promise((resolve) => {
+    // Add "Back" option if requested
+    const allOptions = includeBack 
+      ? [...options, { label: "Back", value: null }]
+      : options;
+    
+    let selected = 0;
+    
+    const renderSelector = () => {
+      // Clear previous render (move cursor up and clear lines)
+      const linesToClear = allOptions.length + 3;
+      process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
+      
+      console.log();
+      console.log(colorDim(title));
+      console.log();
+      
+      allOptions.forEach((opt, idx) => {
+        const isLast = idx === allOptions.length - 1;
+        const isSelected = idx === selected;
+        const branch = isLast ? "└─" : "├─";
+        
+        let label: string;
+        let branchColor: string;
+        
+        if (isSelected) {
+          branchColor = colorCyan(branch);
+          if (opt.label === "Back") {
+            label = colorDim(opt.label);
+          } else {
+            label = colorCyan(opt.label);
+          }
+        } else {
+          branchColor = colorDim(branch);
+          if (opt.label === "Back") {
+            label = colorDim(opt.label);
+          } else {
+            label = opt.label;
+          }
+        }
+        
+        console.log(`${branchColor} ${label}`);
+      });
+    };
+    
+    // Initial render - print blank lines first so we can clear them
+    console.log();
+    console.log(colorDim(title));
+    console.log();
+    allOptions.forEach((opt, idx) => {
+      const isLast = idx === allOptions.length - 1;
+      const branch = isLast ? "└─" : "├─";
+      const branchColor = idx === 0 ? colorCyan(branch) : colorDim(branch);
+      const label = idx === 0 ? colorCyan(opt.label) : (opt.label === "Back" ? colorDim(opt.label) : opt.label);
+      console.log(`${branchColor} ${label}`);
+    });
+    
+    // Set up key handler
+    try {
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+    } catch {
+      /* ignore */
+    }
+    
+    const keyHandler = (key: Buffer) => {
+      const str = key.toString();
+      
+      if (str === "\u0003") {
+        // Ctrl+C
+        process.stdin.removeListener("data", keyHandler);
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.exit(0);
+      } else if (str === "\u001b[A") {
+        // Up arrow
+        selected = (selected - 1 + allOptions.length) % allOptions.length;
+        renderSelector();
+      } else if (str === "\u001b[B") {
+        // Down arrow
+        selected = (selected + 1) % allOptions.length;
+        renderSelector();
+      } else if (str === "\u001b[D") {
+        // Left arrow - same as selecting "Back"
+        process.stdin.removeListener("data", keyHandler);
+        resolve(null);
+      } else if (str === "\r") {
+        // Enter
+        process.stdin.removeListener("data", keyHandler);
+        const selectedOption = allOptions[selected];
+        if (selectedOption.label === "Back" || selectedOption.value === null) {
+          resolve(null);
+        } else {
+          resolve({ index: selected, value: selectedOption.value });
+        }
+      }
+    };
+    
+    process.stdin.on("data", keyHandler);
+  });
 }
 
 // Helper function to make unauthenticated requests (for signup)
@@ -115,9 +268,9 @@ export const menuCommand = new Command("menu")
           restoreRawMode();
           clearScreen();
           try {
-            process.stdout.write("\n" + "=".repeat(60) + "\n");
-            process.stdout.write("Welcome to Uplink! Let's create your account.\n");
-            process.stdout.write("=".repeat(60) + "\n\n");
+            process.stdout.write("\n");
+            process.stdout.write(colorCyan("UPLINK") + colorDim(" │ ") + "Create Account\n");
+            process.stdout.write(colorDim("─".repeat(40)) + "\n\n");
 
             const label = (await promptLine("Label (optional): ")).trim();
             const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
@@ -159,21 +312,20 @@ export const menuCommand = new Command("menu")
             const tokenId = result.id;
             const userId = result.userId;
 
-            process.stdout.write("\n" + "=".repeat(60) + "\n");
-            process.stdout.write("✅ Account created successfully!\n");
-            process.stdout.write("=".repeat(60) + "\n\n");
-            process.stdout.write("🔑 YOUR TOKEN (save this securely - shown only once):\n");
-            process.stdout.write("─".repeat(60) + "\n");
-            process.stdout.write(token + "\n");
-            process.stdout.write("─".repeat(60) + "\n\n");
-            process.stdout.write("📋 Token Details:\n");
-            process.stdout.write(`   ID: ${tokenId}\n`);
-            process.stdout.write(`   User ID: ${userId}\n`);
-            process.stdout.write(`   Role: ${result.role}\n`);
+            process.stdout.write("\n");
+            process.stdout.write(colorGreen("✓") + " Account created\n");
+            process.stdout.write("\n");
+            process.stdout.write(colorDim("├─") + " Token     " + colorCyan(token) + "\n");
+            process.stdout.write(colorDim("├─") + " ID        " + tokenId + "\n");
+            process.stdout.write(colorDim("├─") + " User      " + userId + "\n");
+            process.stdout.write(colorDim("├─") + " Role      " + result.role + "\n");
             if (result.expiresAt) {
-              process.stdout.write(`   Expires: ${result.expiresAt}\n`);
+              process.stdout.write(colorDim("└─") + " Expires   " + result.expiresAt + "\n");
+            } else {
+              process.stdout.write(colorDim("└─") + " Expires   " + colorDim("never") + "\n");
             }
-            process.stdout.write("");
+            process.stdout.write("\n");
+            process.stdout.write(colorYellow("!") + " Save this token securely - shown only once\n");
 
             // Try to automatically add token to shell config
             const shell = process.env.SHELL || "";
@@ -209,8 +361,8 @@ export const menuCommand = new Command("menu")
 
             if (configFile) {
               const promptText = tokenExists
-                ? `\n💡 Update existing token in ~/.${shellName}rc? (Y/n): `
-                : `\n💡 Add token to ~/.${shellName}rc? (Y/n): `;
+                ? `\n→ Update existing token in ~/.${shellName}rc? (Y/n): `
+                : `\n→ Add token to ~/.${shellName}rc? (Y/n): `;
               
               const addToken = (await promptLine(promptText)).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
@@ -230,45 +382,43 @@ export const menuCommand = new Command("menu")
                     }
                     writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
                     tokenAdded = true;
-                    console.log(`\n✅ Token updated in ~/.${shellName}rc`);
+                    console.log(colorGreen(`\n✓ Token updated in ~/.${shellName}rc`));
                     const verifyContent = readFileSync(configFile, "utf-8");
                     if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
-                      console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
+                      console.log(colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`));
                     }
                   } else {
                     const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
                     writeFileSync(configFile, exportLine, { flag: "a", mode: 0o644 });
                     tokenAdded = true;
-                    console.log(`\n✅ Token added to ~/.${shellName}rc`);
+                    console.log(colorGreen(`\n✓ Token added to ~/.${shellName}rc`));
                     const verifyContent = readFileSync(configFile, "utf-8");
                     if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
-                      console.log(`\n⚠️  Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`);
+                      console.log(colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`));
                     }
                   }
                 } catch (err: any) {
-                  console.log(`\n⚠️  Could not write to ~/.${shellName}rc: ${err.message}`);
-                  console.log(`\n   Please add manually:`);
-                  console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`);
+                  console.log(colorYellow(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
+                  console.log(`\n  Please add manually:`);
+                  console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`));
                 }
               }
             } else {
-              console.log(`\n💡 Could not detect your shell. You can add the token manually:`);
-              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`);
-              console.log(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`);
+              console.log(colorYellow(`\n→ Could not detect your shell. Add the token manually:`));
+              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`));
+              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`));
             }
 
             if (!tokenAdded) {
-              process.stdout.write("\n" + "=".repeat(60) + "\n");
-              process.stdout.write("⚠️  IMPORTANT: Set this token as an environment variable:\n");
-              process.stdout.write("=".repeat(60) + "\n\n");
-              process.stdout.write("   export AGENTCLOUD_TOKEN=" + token + "\n");
-              if (configFile) {
-                process.stdout.write(`\n   Or add it to your ~/.${shellName}rc:\n`);
-                process.stdout.write(`   echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc\n`);
-                process.stdout.write(`   source ~/.${shellName}rc\n`);
-              }
-              process.stdout.write("\n   Then restart this menu to use your new token.\n");
-              process.stdout.write("=".repeat(60) + "\n\n");
+            process.stdout.write("\n");
+            process.stdout.write(colorYellow("!") + " Set this token as an environment variable:\n\n");
+            process.stdout.write(colorDim("  ") + "export AGENTCLOUD_TOKEN=" + token + "\n");
+            if (configFile) {
+              process.stdout.write(colorDim(`\n  Or add to ~/.${shellName}rc:\n`));
+              process.stdout.write(colorDim("  ") + `echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc\n`);
+              process.stdout.write(colorDim("  ") + `source ~/.${shellName}rc\n`);
+            }
+            process.stdout.write(colorDim("\n  Then restart this menu.\n\n"));
             }
 
             restoreRawMode();
@@ -276,9 +426,9 @@ export const menuCommand = new Command("menu")
             if (tokenAdded) {
               process.env.AGENTCLOUD_TOKEN = token;
               // Use stdout writes to avoid buffering/race with process.exit()
-              process.stdout.write(`\n✅ Token saved to ~/.${shellName}rc!\n`);
-              process.stdout.write(`\n💡 Next: copy/paste and run in your terminal:\n`);
-              process.stdout.write(`   source ~/.${shellName}rc && uplink\n\n`);
+              process.stdout.write(`\n${colorGreen("✓")} Token saved to ~/.${shellName}rc\n`);
+              process.stdout.write(`\n${colorYellow("→")} Next: run in your terminal:\n`);
+              process.stdout.write(colorDim(`   source ~/.${shellName}rc && uplink\n\n`));
               
               setTimeout(() => {
                 process.exit(0);
@@ -360,6 +510,13 @@ export const menuCommand = new Command("menu")
               return "smoke:all completed";
             },
           },
+          {
+            label: "Test: Comprehensive",
+            action: async () => {
+              await runSmoke("test:comprehensive");
+              return "test:comprehensive completed";
+            },
+          },
         ],
       });
     }
@@ -368,91 +525,67 @@ export const menuCommand = new Command("menu")
       label: "Manage Tunnels",
       subMenu: [
           {
-            label: "Start (Auto)",
+            label: "Start Tunnel",
             action: async () => {
               try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
                 // Scan for active ports
-                console.log("Scanning for active servers...");
+                console.log(colorDim("\nScanning for active servers..."));
+                
+                // Temporarily disable raw mode for scanning
+                try { process.stdin.setRawMode(false); } catch { /* ignore */ }
                 const activePorts = await scanCommonPorts();
                 
                 if (activePorts.length === 0) {
-                  // No ports found, prompt for manual entry
-                  const answer = await promptLine("\nNo active servers detected. Enter port number (default 3000): ");
+                  // No ports found - show selector with just custom option and back
+                  const options: SelectOption[] = [
+                    { label: "Enter custom port", value: "custom" },
+                  ];
+                  
+                  const result = await inlineSelect("No active servers detected", options, true);
+                  
+                  if (result === null) {
+                    // User selected Back
+                    restoreRawMode();
+                    return ""; // Return empty to go back without message
+                  }
+                  
+                  // Custom port entry
+                  try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+                  const answer = await promptLine("Enter port number (default 3000): ");
                   const port = Number(answer) || 3000;
+                  restoreRawMode();
                   return await createAndStartTunnel(port);
                 }
                 
-                // Show port selection menu
-                console.log("\nFound active servers on these ports:");
-                activePorts.forEach((port, idx) => {
-                  console.log(`  ${idx + 1}. Port ${port}`);
-                });
-                console.log(`  ${activePorts.length + 1}. Enter custom port`);
+                // Build options from found ports
+                const options: SelectOption[] = activePorts.map((port) => ({
+                  label: `Port ${port}`,
+                  value: port,
+                }));
+                options.push({ label: "Enter custom port", value: "custom" });
                 
-                const answer = await promptLine(`\nSelect port (1-${activePorts.length + 1}, default 1): `);
-                const choice = Number(answer) || 1;
+                const result = await inlineSelect("Select port to expose", options, true);
+                
+                if (result === null) {
+                  // User selected Back
+                  restoreRawMode();
+                  return ""; // Return empty to go back without message
+                }
                 
                 let port: number;
-                if (choice >= 1 && choice <= activePorts.length) {
-                  port = activePorts[choice - 1];
-                } else if (choice === activePorts.length + 1) {
-                  const customAnswer = await promptLine("Enter port number: ");
-                  port = Number(customAnswer) || 3000;
+                if (result.value === "custom") {
+                  // Custom port entry
+                  try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+                  const answer = await promptLine("Enter port number (default 3000): ");
+                  port = Number(answer) || 3000;
                 } else {
-                  port = activePorts[0]; // Default to first found port
+                  port = result.value as number;
                 }
                 
+                restoreRawMode();
                 return await createAndStartTunnel(port);
               } catch (err: any) {
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                throw err;
-              }
-            },
-          },
-          {
-            label: "Start (Manual)",
-            action: async () => {
-              const answer = await promptLine("Local port to expose (default 3000): ");
-              const port = Number(answer) || 3000;
-              try {
-                const result = await apiRequest("POST", "/v1/tunnels", { port });
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                const url = result.url || "(no url)";
-                const token = result.token || "(no token)";
-                const httpFallback =
-                  typeof url === "string" && url.startsWith("https://")
-                    ? url.replace(/^https:\/\//, "http://")
-                    : "";
-                return [
-                  `Created tunnel: ${url}`,
-                  httpFallback && url !== httpFallback ? `HTTP fallback: ${httpFallback}` : "",
-                  `Token: ${token}`,
-                  "",
-                  "To start the tunnel client, run:",
-                  `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071"}`,
-                ]
-                  .filter(Boolean)
-                  .join("\n");
-              } catch (err: any) {
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
+                restoreRawMode();
                 throw err;
               }
             },
@@ -461,42 +594,35 @@ export const menuCommand = new Command("menu")
             label: "Stop Tunnel",
             action: async () => {
               try {
-                process.stdin.setRawMode(false);
-                process.stdin.pause();
-                
                 // Find running tunnel client processes
                 const processes = findTunnelClients();
                 
                 if (processes.length === 0) {
-                  try {
-                    process.stdin.setRawMode(true);
-                    process.stdin.resume();
-                  } catch {
-                    /* ignore */
-                  }
+                  restoreRawMode();
                   return "No running tunnel clients found.";
                 }
                 
-                console.log("\nRunning tunnel clients:");
-                processes.forEach((p, idx) => {
-                  console.log(`  ${idx + 1}. Port ${p.port} | Token: ${p.token} | PID: ${p.pid}`);
-                });
-                console.log(`  ${processes.length + 1}. Kill all tunnel clients`);
+                // Build options from running tunnels
+                const options: SelectOption[] = processes.map((p) => ({
+                  label: `Port ${p.port} ${colorDim(`(${truncate(p.token, 8)})`)}`,
+                  value: p.pid,
+                }));
                 
-                const answer = await promptLine(`\nSelect client to stop (1-${processes.length + 1}, default 1): `);
-                const choice = Number(answer) || 1;
+                // Add "Stop all" option if more than one tunnel
+                if (processes.length > 1) {
+                  options.push({ label: colorRed("Stop all tunnels"), value: "all" });
+                }
+                
+                const result = await inlineSelect("Select tunnel to stop", options, true);
+                
+                if (result === null) {
+                  // User selected Back
+                  restoreRawMode();
+                  return ""; // Return empty to go back without message
+                }
                 
                 let killed = 0;
-                if (choice >= 1 && choice <= processes.length) {
-                  // Kill specific client
-                  const selected = processes[choice - 1];
-                  try {
-                    execSync(`kill -TERM ${selected.pid}`, { stdio: "ignore" });
-                    killed = 1;
-                  } catch (err: any) {
-                    throw new Error(`Failed to kill process ${selected.pid}: ${err.message}`);
-                  }
-                } else if (choice === processes.length + 1) {
+                if (result.value === "all") {
                   // Kill all
                   for (const p of processes) {
                     try {
@@ -507,30 +633,21 @@ export const menuCommand = new Command("menu")
                     }
                   }
                 } else {
-                  // Default to first
+                  // Kill specific client
+                  const pid = result.value as number;
                   try {
-                    execSync(`kill -TERM ${processes[0].pid}`, { stdio: "ignore" });
+                    execSync(`kill -TERM ${pid}`, { stdio: "ignore" });
                     killed = 1;
                   } catch (err: any) {
-                    throw new Error(`Failed to kill process: ${err.message}`);
+                    restoreRawMode();
+                    throw new Error(`Failed to kill process ${pid}: ${err.message}`);
                   }
                 }
                 
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
-                
-                return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+                restoreRawMode();
+                return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
               } catch (err: any) {
-                try {
-                  process.stdin.setRawMode(true);
-                  process.stdin.resume();
-                } catch {
-                  /* ignore */
-                }
+                restoreRawMode();
                 throw err;
               }
             },
@@ -650,13 +767,13 @@ export const menuCommand = new Command("menu")
               const result = await apiRequest("POST", "/v1/admin/tokens", body);
               const rawToken = result.token || "(no token returned)";
               return [
-                "✅ Token created successfully!",
+                "✓ Token created",
                 "",
-                `🔑 Token (save this - shown only once): ${rawToken}`,
-                `   ID: ${result.id}`,
-                `   Role: ${result.role}`,
-                `   Label: ${result.label || "-"}`,
-                result.expiresAt ? `   Expires: ${result.expiresAt}` : "",
+                `→ Token     ${rawToken}`,
+                `→ ID        ${result.id}`,
+                `→ Role      ${result.role}`,
+                `→ Label     ${result.label || "-"}`,
+                result.expiresAt ? `→ Expires   ${result.expiresAt}` : "",
               ]
                 .filter(Boolean)
                 .join("\n");
@@ -665,12 +782,38 @@ export const menuCommand = new Command("menu")
           {
             label: "Revoke Token",
             action: async () => {
-              const tokenIdAnswer = await promptLine("Token ID to revoke: ");
-              const tokenId = tokenIdAnswer.trim();
-              restoreRawMode();
-              if (!tokenId) return "No token ID provided.";
-              await apiRequest("DELETE", `/v1/admin/tokens/${tokenId}`);
-              return `✅ Token ${tokenId} revoked.`;
+              try {
+                // Fetch available tokens
+                const result = await apiRequest("GET", "/v1/admin/tokens");
+                const tokens = result.tokens || [];
+                
+                if (tokens.length === 0) {
+                  restoreRawMode();
+                  return "No tokens found.";
+                }
+                
+                // Build options from tokens
+                const options: SelectOption[] = tokens.map((t: any) => ({
+                  label: `${truncate(t.id, 12)} ${colorDim(`${t.role || "user"} - ${t.label || "no label"}`)}`,
+                  value: t.id,
+                }));
+                
+                const selected = await inlineSelect("Select token to revoke", options, true);
+                
+                if (selected === null) {
+                  // User selected Back
+                  restoreRawMode();
+                  return "";
+                }
+                
+                const tokenId = selected.value as string;
+                await apiRequest("DELETE", `/v1/admin/tokens/${tokenId}`);
+                restoreRawMode();
+                return `✓ Token ${truncate(tokenId, 12)} revoked`;
+              } catch (err: any) {
+                restoreRawMode();
+                throw err;
+              }
             },
           },
         ],
@@ -693,7 +836,7 @@ export const menuCommand = new Command("menu")
               // Process might have already exited
             }
           }
-          return `✅ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}.`;
+          return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
         },
       });
     }
@@ -726,16 +869,17 @@ export const menuCommand = new Command("menu")
         const domain = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
         const scheme = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
         
-        const tunnelLines = clients.map((client) => {
+        const tunnelLines = clients.map((client, idx) => {
           const url = `${scheme}://${client.token}.${domain}`;
-          return `  🌐 ${url} → localhost:${client.port}`;
+          const isLast = idx === clients.length - 1;
+          const branch = isLast ? "└─" : "├─";
+          return colorDim(branch) + " " + colorGreen(url) + colorDim(" → ") + `localhost:${client.port}`;
         });
         
         cachedActiveTunnels = [
-          "",
-          colorYellow("Active Tunnels:"),
+          colorDim("├─") + " Active   " + colorGreen(`${clients.length} tunnel${clients.length > 1 ? "s" : ""}`),
+          colorDim("│"),
           ...tunnelLines,
-          "",
         ].join("\n");
       }
     };
@@ -774,10 +918,14 @@ export const menuCommand = new Command("menu")
 
     const render = () => {
       clearScreen();
-      console.log(colorCyan(ASCII_UPLINK));
+      console.log();
+      console.log(ASCII_UPLINK);
+      console.log();
       
+      // Status bar - relay and API status
       if (menuStack.length === 1 && cachedRelayStatus) {
-        console.log(cachedRelayStatus);
+        const statusColor = cachedRelayStatus.includes("ok") ? colorGreen : colorRed;
+        console.log(colorDim("├─") + " Status  " + statusColor(cachedRelayStatus.replace("Relay: ", "")));
       }
 
       // Show active tunnels if we're at the main menu (use cached value, no scanning)
@@ -788,26 +936,97 @@ export const menuCommand = new Command("menu")
       console.log();
       
       const currentMenu = getCurrentMenu();
-      const menuTitle = menuPath.length > 0 
-        ? menuPath.join(" > ")
-        : "Interactive menu";
       
-      console.log(menuTitle);
-      console.log("─".repeat(menuTitle.length));
+      // Breadcrumb navigation
+      if (menuPath.length > 0) {
+        const breadcrumb = menuPath.map((p, i) => 
+          i === menuPath.length - 1 ? colorCyan(p) : colorDim(p)
+        ).join(colorDim(" › "));
+        console.log(breadcrumb);
+        console.log();
+      }
       
+      // Menu items with tree-style rendering
       currentMenu.forEach((choice, idx) => {
-        const pointer = idx === selected ? colorYellow("›") : " ";
-        const label = idx === selected ? colorYellow(choice.label) : choice.label;
-        const indicator = choice.subMenu ? " →" : "";
-        console.log(`${pointer} ${label}${indicator}`);
+        const isLast = idx === currentMenu.length - 1;
+        const isSelected = idx === selected;
+        const branch = isLast ? "└─" : "├─";
+        
+        // Clean up labels - remove emojis for cleaner look
+        let cleanLabel = choice.label
+          .replace(/^🚀\s*/, "")
+          .replace(/^⚠️\s*/, "")
+          .replace(/^✅\s*/, "")
+          .replace(/^❌\s*/, "");
+        
+        // Style based on selection and type
+        let label: string;
+        let branchColor: string;
+        
+        if (isSelected) {
+          branchColor = colorCyan(branch);
+          if (cleanLabel.toLowerCase().includes("exit")) {
+            label = colorDim(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
+            label = colorRed(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("get started")) {
+            label = colorGreen(cleanLabel);
+          } else {
+            label = colorCyan(cleanLabel);
+          }
+        } else {
+          branchColor = colorDim(branch);
+          if (cleanLabel.toLowerCase().includes("exit")) {
+            label = colorDim(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
+            label = colorRed(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("get started")) {
+            label = colorGreen(cleanLabel);
+          } else {
+            label = cleanLabel;
+          }
+        }
+        
+        // Submenu indicator
+        const indicator = choice.subMenu ? colorDim(" ›") : "";
+        
+        console.log(`${branchColor} ${label}${indicator}`);
       });
       
+      // Message area
       if (busy) {
-        console.log("\nWorking...");
-      } else if (message) {
-        console.log("\n" + message);
+        console.log();
+        console.log(colorDim("│"));
+        console.log(colorCyan("│ ") + colorDim("Working..."));
+      } else if (message && message !== "Use ↑/↓ and Enter. ← to go back. Ctrl+C to quit.") {
+        console.log();
+        // Format multi-line messages nicely
+        const lines = message.split("\n");
+        lines.forEach((line) => {
+          // Color success/error indicators
+          let styledLine = line
+            .replace(/^✅/, colorGreen("✓"))
+            .replace(/^❌/, colorRed("✗"))
+            .replace(/^⚠️/, colorYellow("!"))
+            .replace(/^🔑/, colorCyan("→"))
+            .replace(/^🌐/, colorCyan("→"))
+            .replace(/^📡/, colorCyan("→"))
+            .replace(/^💡/, colorYellow("→"));
+          console.log(colorDim("│ ") + styledLine);
+        });
       }
-      console.log("\nCtrl+C to exit" + (menuStack.length > 1 ? " | ← to go back" : ""));
+      
+      // Footer hints
+      console.log();
+      const hints = [
+        colorDim("↑↓") + " navigate",
+        colorDim("↵") + " select",
+      ];
+      if (menuStack.length > 1) {
+        hints.push(colorDim("←") + " back");
+      }
+      hints.push(colorDim("^C") + " exit");
+      console.log(colorDim(hints.join("  ")));
     };
 
     const cleanup = () => {
@@ -828,6 +1047,7 @@ export const menuCommand = new Command("menu")
         menuStack.push(choice.subMenu);
         menuPath.push(choice.label);
         selected = 0;
+        message = ""; // Clear any displayed output when entering submenu
         // Invalidate caches when leaving main menu
         cachedActiveTunnels = "";
         cachedRelayStatus = "";
@@ -877,6 +1097,7 @@ export const menuCommand = new Command("menu")
           menuStack.pop();
           menuPath.pop();
           selected = 0;
+          message = ""; // Clear any displayed output when going back
           // Refresh caches when returning to main menu
           if (menuStack.length === 1) {
             await refreshMainMenuCaches();
@@ -933,17 +1154,14 @@ async function createAndStartTunnel(port: number): Promise<string> {
   }
   
   return [
-    `✅ Tunnel created and client started!`,
+    `✓ Tunnel created and client started`,
     ``,
-    `🌐 Public URL: ${url}`,
-    `🔑 Token: ${token}`,
-    `📡 Local port: ${port}`,
+    `→ Public URL    ${url}`,
+    `→ Token         ${token}`,
+    `→ Local port    ${port}`,
     ``,
-    `The tunnel client is running in the background.`,
-    `Open ${url} in your browser to access your local server!`,
-    ``,
-    `To stop the tunnel, find and kill the client process:`,
-    `  pkill -f "client-improved.js.*${token}"`,
+    `Tunnel client running in background.`,
+    `Use "Stop Tunnel" to disconnect.`,
   ].join("\n");
 }
 
@@ -983,7 +1201,7 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
   }
 }
 
-function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all") {
+function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {
   return new Promise<void>((resolve, reject) => {
     const env = {
       ...process.env,
