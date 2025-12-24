@@ -2,6 +2,8 @@
 
 Agent-friendly cloud platform for exposing local development servers to the internet and managing PostgreSQL databases.
 
+![Uplink CLI](./assets/cli-screenshot.png)
+
 ## Features
 
 - **Tunnel Service** - Expose local servers to the internet with a public HTTPS URL
