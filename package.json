@@ -1,13 +1,39 @@
 {
   "name": "uplink-cli",
   "version": "0.1.0",
-  "private": false,
-  "description": "Uplink user CLI to manage tunnels via terminal menu",
-  "main": "index.js",
+  "description": "Localhost to public URL in seconds. No signup forms, no browser - everything in your terminal.",
+  "keywords": [
+    "tunnel",
+    "localhost",
+    "ngrok",
+    "expose",
+    "cli",
+    "dev-tools",
+    "webhook",
+    "public-url",
+    "port-forwarding"
+  ],
+  "homepage": "https://github.com/firstprinciplecode/uplink#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firstprinciplecode/uplink.git"
+  },
+  "bugs": {
+    "url": "https://github.com/firstprinciplecode/uplink/issues"
+  },
+  "author": "First Principle Code",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "bin": {
     "uplink": "./cli/bin/uplink.js"
   },
+  "files": [
+    "cli/",
+    "scripts/tunnel/client-improved.js",
+    "README.md"
+  ],
   "scripts": {
     "dev:relay": "node scripts/tunnel/relay.js",
     "dev:stub": "PORT=4100 AGENTCLOUD_TOKEN_DEV=dev-token node scripts/dev/stub-control-plane.js",
