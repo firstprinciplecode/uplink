@@ -1,15 +1,19 @@
 # Uplink
 
-Agent-friendly cloud platform for exposing local development servers to the internet and managing PostgreSQL databases.
+**Localhost to public URL in seconds.** No browser, no signup forms, no friction.
+
+Uplink lets you expose your local dev server to the internet with a single command. Everything happens in your terminal—create an account, get a token, start a tunnel. Done.
+
+Perfect for sharing work-in-progress, testing webhooks, or demoing to clients. And because it's 100% CLI-based, AI coding assistants like **Cursor**, **Claude Code**, and **Windsurf** can set it up for you automatically.
 
 ![Uplink CLI](./assets/cli-screenshot.png)
 
 ## Features
 
-- **Tunnel Service** - Expose local servers to the internet with a public HTTPS URL
-- **Database Service** - Managed PostgreSQL databases via Neon
-- **Interactive CLI** - Terminal-based menu interface with arrow-key navigation
-- **Self-Service Signup** - Create your own account via the CLI
+- **Instant Public URLs** - Your `localhost:3000` becomes `https://xyz.t.uplink.spot`
+- **Zero Browser Required** - Signup, auth, and tunnel management all in terminal
+- **Agent-Friendly** - AI assistants can create tokens and start tunnels via API
+- **Auto Port Detection** - Scans for running servers, select with arrow keys
 
 ## Quick Start
 
