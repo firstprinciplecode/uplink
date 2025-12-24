@@ -4,10 +4,10 @@ Agent-friendly cloud platform for exposing local development servers to the inte
 
 ## Features
 
-- **🌐 Tunnel Service** - Expose local servers to the internet with a public HTTPS URL
-- **🗄️ Database Service** - Managed PostgreSQL databases via Neon
-- **🖥️ Interactive CLI** - Terminal-based menu interface
-- **🚀 Self-Service Signup** - Create your own account via the CLI
+- **Tunnel Service** - Expose local servers to the internet with a public HTTPS URL
+- **Database Service** - Managed PostgreSQL databases via Neon
+- **Interactive CLI** - Terminal-based menu interface with arrow-key navigation
+- **Self-Service Signup** - Create your own account via the CLI
 
 ## Quick Start
 
@@ -28,13 +28,13 @@ uplink
 This opens an interactive menu. If you don't have a token yet, you'll see:
 
 ```
-🚀 Get Started (Create Account)
-Exit
+├─ Get Started (Create Account)
+└─ Exit
 ```
 
 ### 3. Create Your Account
 
-1. Select **"🚀 Get Started (Create Account)"**
+1. Select **"Get Started (Create Account)"**
 2. Enter an optional label (e.g., "my-laptop")
 3. Optionally set expiration days (or leave empty for no expiration)
 4. Your token will be displayed **once** - save it securely
@@ -48,10 +48,11 @@ uplink
 
 ### 4. Start a Tunnel
 
-Once authenticated, select **"Manage Tunnels"** → **"Start (Auto)"**:
+Once authenticated, select **"Manage Tunnels"** → **"Start Tunnel"**:
 
 - The CLI will scan for active servers on your local machine
-- Select a port from the list, or enter a custom port
+- Use arrow keys to select a port, or choose "Enter custom port"
+- Press "Back" if you want to cancel
 - Your tunnel URL will be displayed (e.g., `https://abc123.t.uplink.spot`)
 
 **Keep the terminal running** - the tunnel client must stay active.
@@ -153,11 +154,38 @@ The CLI communicates with the Uplink API. Main endpoints:
 
 ## Security
 
-- Tokens are hashed and stored securely
-- Tokens can be revoked or set to expire
-- User tokens only see their own resources
-- Admin tokens are required for admin operations
-- Rate limiting prevents abuse
+### Token Security
+- Tokens are hashed with HMAC-SHA256 before storage (never stored in plain text)
+- Tokens can be revoked instantly or set to auto-expire
+- User tokens only see their own resources (tunnels, databases)
+- Admin tokens required for system-wide operations
+
+### Rate Limiting
+- Signup: 5 requests/hour per IP (strictest)
+- Authentication: 10 attempts/15 min per IP
+- API calls: 100 requests/15 min per IP
+- Token creation: 20/hour
+- Tunnel creation: 50/hour
+
+### Production Recommendations
+
+1. **Set a token pepper** (strongly recommended):
+   ```bash
+   export CONTROL_PLANE_TOKEN_PEPPER=your-random-secret-here
+   ```
+   This adds an extra layer of protection - even if the database is compromised, tokens can't be used without the pepper.
+
+2. **Disable dev tokens** in production:
+   - Don't set `AGENTCLOUD_TOKEN_DEV`
+   - Use only database-backed tokens
+
+3. **Break-glass admin access** (emergency only):
+   ```bash
+   export ADMIN_TOKENS=emergency-admin-token-1,emergency-admin-token-2
+   ```
+   These bypass the database - use only for emergencies and rotate after use.
+
+4. **Use HTTPS** for all API endpoints (handled by Caddy in production)
 
 ## License
 
