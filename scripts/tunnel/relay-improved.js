@@ -34,10 +34,20 @@ const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
-// token -> client socket
+// token -> { socket, clientIp, targetPort, connectedAt }
 const clients = new Map();
 // requestId -> http response
 const pending = new Map();
+
+// Get real client IP (handle proxies)
+function getClientIp(socket) {
+  let ip = socket.remoteAddress || "unknown";
+  // Strip IPv6 prefix for IPv4-mapped addresses
+  if (ip.startsWith("::ffff:")) {
+    ip = ip.slice(7);
+  }
+  return ip;
+}
 // token -> rate limit tracking
 const rateLimits = new Map();
 // token -> validation cache (to avoid repeated DB queries)
@@ -167,6 +177,7 @@ const tlsOptions = CTRL_TLS_ENABLED
 const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.createServer)((socket) => {
   let buf = "";
   let registeredToken = null;
+  const clientIp = getClientIp(socket);
 
   socket.on("data", async (chunk) => {
     buf += chunk.toString("utf8");
@@ -196,11 +207,16 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
             return;
           }
           
-          // Register client
+          // Register client with metadata
           registeredToken = msg.token;
-          clients.set(msg.token, socket);
+          clients.set(msg.token, {
+            socket,
+            clientIp,
+            targetPort: msg.targetPort || 0,
+            connectedAt: new Date().toISOString(),
+          });
           socket.token = msg.token;
-          log("registered client", msg.token.substring(0, 8) + "...", "port", msg.targetPort);
+          log("registered client", msg.token.substring(0, 8) + "...", "port", msg.targetPort, "ip", clientIp);
           socket.write(JSON.stringify({ type: "registered" }) + "\n");
           
         } else if (msg.type === "response" && msg.id) {
@@ -237,8 +253,9 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
 
   socket.on("close", () => {
     if (registeredToken) {
+      const clientData = clients.get(registeredToken);
       clients.delete(registeredToken);
-      log("client disconnected", registeredToken.substring(0, 8) + "...");
+      log("client disconnected", registeredToken.substring(0, 8) + "...", "ip", clientData?.clientIp || "unknown");
     }
   });
 
@@ -269,11 +286,19 @@ const httpServer = http.createServer(async (req, res) => {
     }
   }
 
-  // Internal endpoint: list connected tokens (for API to query) - check first, before token extraction
+  // Internal endpoint: list connected tokens with IPs (for API to query) - check first, before token extraction
   if (pathname === "/internal/connected-tokens") {
-    const connectedTokens = Array.from(clients.keys());
+    const tunnels = [];
+    for (const [token, data] of clients.entries()) {
+      tunnels.push({
+        token,
+        clientIp: data.clientIp,
+        targetPort: data.targetPort,
+        connectedAt: data.connectedAt,
+      });
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ tokens: connectedTokens }));
+    return res.end(JSON.stringify({ tokens: tunnels.map(t => t.token), tunnels }));
   }
 
   const url = new URL(req.url, `http://${host || "localhost"}`);
@@ -314,8 +339,8 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   // Check if client is connected
-  const client = clients.get(token);
-  if (!client) {
+  const clientData = clients.get(token);
+  if (!clientData) {
     res.statusCode = 502;
     res.setHeader("Content-Type", "text/plain");
     return res.end("Tunnel not connected");
@@ -358,7 +383,7 @@ const httpServer = http.createServer(async (req, res) => {
   };
   
   try {
-    client.write(JSON.stringify(msg) + "\n");
+    clientData.socket.write(JSON.stringify(msg) + "\n");
   } catch (err) {
     logError(err, "Failed to send request to client");
     pending.delete(id);
