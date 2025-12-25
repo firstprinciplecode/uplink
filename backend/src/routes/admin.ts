@@ -401,6 +401,64 @@ adminRouter.post(
 });
 
 /**
+ * GET /v1/admin/relay-status
+ * Get relay status including connected tunnels with client IPs
+ */
+adminRouter.get("/relay-status", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const relayStatusPort = Number(process.env.TUNNEL_RELAY_STATUS || 7072);
+    const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
+
+    const statusData = await new Promise<any>((resolve) => {
+      const req = http.get(
+        {
+          host: relayHost,
+          port: relayStatusPort,
+          path: "/status",
+          timeout: 3000,
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => {
+            data += chunk.toString();
+          });
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch {
+              resolve({ error: "Failed to parse relay response", raw: data });
+            }
+          });
+        }
+      );
+      req.on("error", (err) => {
+        resolve({ error: "Relay unreachable", message: err.message });
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ error: "Relay timeout" });
+      });
+    });
+
+    return res.json(statusData);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.relay-status.error", error: err.message, stack: err.stack });
+    return res.status(500).json(
+      makeError("INTERNAL_ERROR", "Failed to get relay status", { error: err.message })
+    );
+  }
+});
+
+/**
  * POST /v1/admin/cleanup/dev-user-tunnels
  * Clean up old tunnels owned by dev-user (from before token system)
  */
