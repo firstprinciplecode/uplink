@@ -655,17 +655,19 @@ export const menuCommand = new Command("menu")
           {
             label: "View Connected (with IPs)",
             action: async () => {
-              const relayStatusUrl = process.env.TUNNEL_RELAY_STATUS_URL || "http://127.0.0.1:7072/status";
               try {
-                const res = await fetch(relayStatusUrl);
-                if (!res.ok) {
-                  return `❌ Failed to fetch relay status: ${res.status} ${res.statusText}`;
-                }
-                const data = await res.json() as { 
-                  connectedTunnels: number; 
-                  tunnels: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
-                  timestamp: string;
+                // Use the API endpoint which proxies to the relay
+                const data = await apiRequest("GET", "/v1/admin/relay-status") as { 
+                  connectedTunnels?: number; 
+                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
+                  timestamp?: string;
+                  error?: string;
+                  message?: string;
                 };
+                
+                if (data.error) {
+                  return `❌ Relay error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+                }
                 
                 if (!data.tunnels || data.tunnels.length === 0) {
                   return "No tunnels currently connected to the relay.";
@@ -683,7 +685,7 @@ export const menuCommand = new Command("menu")
                   ...lines,
                 ].join("\n");
               } catch (err: any) {
-                return `❌ Could not connect to relay status API at ${relayStatusUrl}\n\nMake sure the relay is running and TUNNEL_RELAY_STATUS_URL is set correctly.\n\nError: ${err.message}`;
+                return `❌ Failed to get relay status: ${err.message}`;
               }
             },
           },
