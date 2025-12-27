@@ -87,8 +87,12 @@ function colorMagenta(text: string) {
   return `${c.magenta}${text}${c.reset}`;
 }
 
+function colorWhite(text: string) {
+  return `${c.brightWhite}${text}${c.reset}`;
+}
+
 // ASCII banner with color styling
-const ASCII_UPLINK = colorCyan([
+const ASCII_UPLINK = colorWhite([
   "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
   "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
   "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
@@ -145,6 +149,7 @@ async function inlineSelect(
         let branchColor: string;
         
         if (isSelected) {
+          // Selected: cyan highlight
           branchColor = colorCyan(branch);
           if (opt.label === "Back") {
             label = colorDim(opt.label);
@@ -152,11 +157,12 @@ async function inlineSelect(
             label = colorCyan(opt.label);
           }
         } else {
-          branchColor = colorDim(branch);
+          // Not selected: white
+          branchColor = colorWhite(branch);
           if (opt.label === "Back") {
             label = colorDim(opt.label);
           } else {
-            label = opt.label;
+            label = colorWhite(opt.label);
           }
         }
         
@@ -171,8 +177,8 @@ async function inlineSelect(
     allOptions.forEach((opt, idx) => {
       const isLast = idx === allOptions.length - 1;
       const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorCyan(branch) : colorDim(branch);
-      const label = idx === 0 ? colorCyan(opt.label) : (opt.label === "Back" ? colorDim(opt.label) : opt.label);
+      const branchColor = idx === 0 ? colorCyan(branch) : colorWhite(branch);
+      const label = idx === 0 ? colorCyan(opt.label) : (opt.label === "Back" ? colorDim(opt.label) : colorWhite(opt.label));
       console.log(`${branchColor} ${label}`);
     });
     
@@ -1172,6 +1178,7 @@ export const menuCommand = new Command("menu")
         let branchColor: string;
         
         if (isSelected) {
+          // Selected: cyan highlight
           branchColor = colorCyan(branch);
           if (cleanLabel.toLowerCase().includes("exit")) {
             label = colorDim(cleanLabel);
@@ -1183,7 +1190,8 @@ export const menuCommand = new Command("menu")
             label = colorCyan(cleanLabel);
           }
         } else {
-          branchColor = colorDim(branch);
+          // Not selected: white text
+          branchColor = colorWhite(branch);
           if (cleanLabel.toLowerCase().includes("exit")) {
             label = colorDim(cleanLabel);
           } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
@@ -1191,7 +1199,7 @@ export const menuCommand = new Command("menu")
           } else if (cleanLabel.toLowerCase().includes("get started")) {
             label = colorGreen(cleanLabel);
           } else {
-            label = cleanLabel;
+            label = colorWhite(cleanLabel);
           }
         }
         
