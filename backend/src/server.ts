@@ -3,7 +3,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import helmet from "helmet";
 import { dbRouter } from "./routes/dbs";
-import { tunnelRouter, tunnelTokenExists } from "./routes/tunnels";
+import { tunnelRouter, tunnelTokenExists, resolveAliasHandler } from "./routes/tunnels";
 import { adminRouter } from "./routes/admin";
 import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
@@ -85,6 +85,9 @@ app.get("/internal/allow-tls", async (req, res) => {
     return res.status(500).json({ allow: false });
   }
 });
+
+// Internal alias resolution for relay - no auth, uses relay secret
+app.get("/internal/resolve-alias", resolveAliasHandler);
 
 // Global rate limiting for all /v1 routes
 app.use("/v1", apiRateLimiter);

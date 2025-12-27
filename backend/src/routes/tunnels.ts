@@ -128,8 +128,9 @@ tunnelRouter.post(
 
 /**
  * Internal: resolve alias -> token for relay
+ * This is exported so it can be mounted at /internal/resolve-alias (outside /v1) to bypass auth
  */
-tunnelRouter.get("/internal/resolve-alias", async (req: Request, res: Response) => {
+export async function resolveAliasHandler(req: Request, res: Response) {
   if (!isAuthorizedRelay(req)) {
     return res.status(403).json(makeError("FORBIDDEN", "Invalid relay secret"));
   }
@@ -157,7 +158,7 @@ tunnelRouter.get("/internal/resolve-alias", async (req: Request, res: Response) 
   }
 
   return res.json({ token: result.rows[0].token });
-});
+}
 
 /**
  * POST /v1/tunnels/:id/alias
