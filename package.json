@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Localhost to public URL in seconds. No signup forms, no browser - everything in your terminal.",
   "keywords": [
     "tunnel",
