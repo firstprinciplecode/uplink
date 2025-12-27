@@ -44,11 +44,17 @@ export function authMiddleware(
       return next();
     }
 
-    // Optional dev token only when using SQLite (local dev convenience).
+    // Optional dev token only when using SQLite AND explicitly configured
+    // SECURITY: No hardcoded default - must be explicitly set via AGENTCLOUD_TOKEN_DEV
     const dbUrl = config.databaseUrl;
     const isSqlite = dbUrl.startsWith("sqlite:");
-    const devToken = isSqlite ? process.env.AGENTCLOUD_TOKEN_DEV || "dev-token" : "";
+    const devToken = isSqlite ? process.env.AGENTCLOUD_TOKEN_DEV : "";
     if (devToken && token === devToken) {
+      logger.warn({
+        event: "auth.dev_token_used",
+        message: "Dev token authentication used - not recommended for production",
+        ip: clientIp,
+      });
       req.user = { id: "dev-user", role: "admin" };
       auditLog.authSuccess("dev-user", "admin", clientIp);
       return next();

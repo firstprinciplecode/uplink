@@ -57,6 +57,8 @@ const rateLimits = new Map();
 // token -> validation cache (to avoid repeated DB queries)
 const tokenCache = new Map();
 const TOKEN_CACHE_TTL = 60000; // 1 minute
+const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 10000; // Maximum entries before forced cleanup
 
 // Stats
 const stats = {
@@ -65,7 +67,60 @@ const stats = {
   rateLimited: 0,
   invalidTokens: 0,
   startTime: Date.now(),
+  cleanups: 0,
 };
+
+// Periodic cleanup to prevent memory leaks
+function cleanupStaleCaches() {
+  const now = Date.now();
+  let cleaned = 0;
+  
+  // Cleanup rate limits - remove entries with no recent requests
+  for (const [token, limit] of rateLimits.entries()) {
+    const validRequests = limit.requests.filter((time) => now - time < RATE_LIMIT_WINDOW);
+    if (validRequests.length === 0) {
+      rateLimits.delete(token);
+      cleaned++;
+    } else {
+      limit.requests = validRequests;
+    }
+  }
+  
+  // Cleanup token cache - remove expired entries
+  for (const [token, cached] of tokenCache.entries()) {
+    if (now - cached.timestamp > TOKEN_CACHE_TTL * 5) { // 5x TTL for grace period
+      tokenCache.delete(token);
+      cleaned++;
+    }
+  }
+  
+  // Cleanup alias cache
+  for (const [alias, cached] of aliasCache.entries()) {
+    if (now - cached.timestamp > ALIAS_CACHE_TTL * 5) {
+      aliasCache.delete(alias);
+      cleaned++;
+    }
+  }
+  
+  // Force cleanup if caches are too large (LRU-like behavior)
+  if (tokenCache.size > MAX_CACHE_SIZE) {
+    const entries = Array.from(tokenCache.entries())
+      .sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = entries.slice(0, Math.floor(MAX_CACHE_SIZE / 2));
+    for (const [key] of toRemove) {
+      tokenCache.delete(key);
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    stats.cleanups++;
+    log(`Cache cleanup: removed ${cleaned} stale entries (rate: ${rateLimits.size}, tokens: ${tokenCache.size}, aliases: ${aliasCache.size})`);
+  }
+}
+
+// Start cleanup interval
+setInterval(cleanupStaleCaches, CLEANUP_INTERVAL);
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -98,7 +153,7 @@ function checkRateLimit(token) {
   return true;
 }
 
-// Validate token via API
+// Validate token via API (fail-closed for security)
 async function validateToken(token) {
   // Check cache first
   const cached = tokenCache.get(token);
@@ -138,9 +193,15 @@ async function validateToken(token) {
     return response;
   } catch (err) {
     logError(err, "Token validation error");
-    // On error, allow token (fail open for availability)
-    tokenCache.set(token, { valid: true, timestamp: Date.now() });
-    return true;
+    // SECURITY: Fail closed - deny token on validation error
+    // Only allow if previously validated and still in cache with extended grace period
+    const staleCache = tokenCache.get(token);
+    if (staleCache && staleCache.valid && Date.now() - staleCache.timestamp < TOKEN_CACHE_TTL * 5) {
+      log("Token validation failed, using stale cache for", token.slice(0, 8));
+      return true; // Allow previously validated tokens during API outage (5x TTL grace)
+    }
+    stats.invalidTokens++;
+    return false; // Deny unknown tokens on error
   }
 }
 
