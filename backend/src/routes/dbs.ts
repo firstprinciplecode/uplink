@@ -138,8 +138,9 @@ dbRouter.get("/", async (req: Request, res: Response) => {
 
   const project = req.query.project as string | undefined;
   const params: Array<string> = [user.id];
-  let sql =
-    "SELECT * FROM databases WHERE owner_user_id = $1 AND status <> 'deleted'";
+  // Select only needed columns for list response
+  let sql = `SELECT id, name, project_id, provider, engine, region, status, created_at 
+             FROM databases WHERE owner_user_id = $1 AND status <> 'deleted'`;
 
   if (project) {
     params.push(project);
@@ -171,8 +172,11 @@ dbRouter.get("/:id", async (req: Request, res: Response) => {
   }
 
   const id = req.params.id;
+  // Select columns needed for response (excludes encrypted_password)
   const result = await pool.query(
-    "SELECT * FROM databases WHERE id = $1 AND owner_user_id = $2",
+    `SELECT id, owner_user_id, project_id, name, provider, provider_database_id, 
+            engine, version, region, status, host, port, database, "user", created_at, updated_at
+     FROM databases WHERE id = $1 AND owner_user_id = $2`,
     [id, user.id]
   );
 
@@ -200,8 +204,11 @@ dbRouter.delete("/:id", async (req: Request, res: Response) => {
   }
 
   const id = req.params.id;
+  // Select columns needed for deletion (excludes encrypted_password)
   const result = await pool.query(
-    "SELECT * FROM databases WHERE id = $1 AND owner_user_id = $2",
+    `SELECT id, owner_user_id, project_id, name, provider, provider_database_id, 
+            engine, version, region, status, host, port, database, "user", created_at, updated_at
+     FROM databases WHERE id = $1 AND owner_user_id = $2`,
     [id, user.id]
   );
 
