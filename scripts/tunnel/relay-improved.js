@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Improved tunnel relay with token validation, rate limiting, and better error handling.
- * Routes by Host header: <token>.t.uplink.spot -> token
- * - Ingress HTTP: LISTEN_HTTP (default 7070)
- * - Control channel: LISTEN_CTRL (default 7071)
- * - Token validation via API: VALIDATE_TOKENS (default: false)
- * - Rate limiting: RATE_LIMIT_REQUESTS per minute per token (default: 1000)
+ * Improved tunnel relay with token validation, alias resolution, rate limiting, and better error handling.
+ * Routes by Host header:
+ *   - Token:  <token>.x.uplink.spot (TUNNEL_DOMAIN)
+ *   - Alias:  <alias>.uplink.spot (ALIAS_DOMAIN) -> resolved via backend
+ * Ingress HTTP: LISTEN_HTTP (default 7070)
+ * Control channel: LISTEN_CTRL (default 7071)
+ * Token validation via API: VALIDATE_TOKENS (default: false)
+ * Rate limiting: RATE_LIMIT_REQUESTS per minute per token (default: 1000)
  */
 
 const http = require("http");
@@ -16,9 +18,9 @@ const { randomUUID } = require("crypto");
 
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
 const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
-const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
 const LISTEN_CTRL = Number(process.env.TUNNEL_RELAY_CTRL || 7071);
-const TUNNEL_DOMAIN = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
+const TUNNEL_DOMAIN = (process.env.TUNNEL_DOMAIN || "t.uplink.spot").toLowerCase();
+const ALIAS_DOMAIN = (process.env.ALIAS_DOMAIN || "uplink.spot").toLowerCase();
 const VALIDATE_TOKENS = process.env.TUNNEL_VALIDATE_TOKENS === "true";
 const API_BASE = process.env.AGENTCLOUD_API_BASE || process.env.API_BASE || "http://localhost:4000";
 const RATE_LIMIT_REQUESTS = Number(process.env.TUNNEL_RATE_LIMIT_REQUESTS || 1000); // per minute
@@ -31,13 +33,15 @@ const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
 const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
-const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
-const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
 // token -> { socket, clientIp, targetPort, connectedAt }
 const clients = new Map();
 // requestId -> http response
 const pending = new Map();
+// alias -> { token, timestamp }
+const aliasCache = new Map();
+const ALIAS_CACHE_TTL = 60000;
+const RESERVED_ALIASES = new Set(["www", "api", "x", "t", "docs", "support", "status", "health", "mail"]);
 
 // Get real client IP (handle proxies)
 function getClientIp(socket) {
@@ -140,15 +144,81 @@ async function validateToken(token) {
   }
 }
 
+async function resolveAliasToToken(alias) {
+  const cached = aliasCache.get(alias);
+  if (cached && Date.now() - cached.timestamp < ALIAS_CACHE_TTL) {
+    return cached.token;
+  }
+
+  const url = `${API_BASE}/internal/resolve-alias?alias=${alias}`;
+
+  try {
+    const token = await new Promise((resolve, reject) => {
+      const req = http.get(
+        url,
+        {
+          timeout: 2000,
+          headers: INTERNAL_SECRET
+            ? { [INTERNAL_SECRET_HEADER]: INTERNAL_SECRET }
+            : undefined,
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => {
+            data += chunk.toString();
+          });
+          res.on("end", () => {
+            if (res.statusCode !== 200) return resolve(null);
+            try {
+              const json = JSON.parse(data);
+              resolve(json.token || null);
+            } catch {
+              resolve(null);
+            }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error("Timeout"));
+      });
+    });
+
+    if (token) {
+      aliasCache.set(alias, { token, timestamp: Date.now() });
+    }
+    return token;
+  } catch (err) {
+    logError(err, "Alias resolution error");
+    return null;
+  }
+}
+
 // Extract token from Host header: abc123.t.uplink.spot -> abc123
 function extractTokenFromHost(host) {
   if (!host) return null;
-  const parts = host.split(".");
+  const lower = host.toLowerCase();
+  const parts = lower.split(".");
   if (parts.length < 3) return null;
   const token = parts[0];
   const domain = parts.slice(1).join(".");
   if (domain === TUNNEL_DOMAIN || domain.endsWith(`.${TUNNEL_DOMAIN}`)) {
     return token;
+  }
+  return null;
+}
+
+function extractAliasFromHost(host) {
+  if (!host) return null;
+  const lower = host.toLowerCase();
+  const parts = lower.split(".");
+  if (parts.length < 3) return null;
+  const alias = parts[0];
+  const domain = parts.slice(1).join(".");
+  if (domain === ALIAS_DOMAIN || domain.endsWith(`.${ALIAS_DOMAIN}`)) {
+    if (RESERVED_ALIASES.has(alias)) return null;
+    return alias;
   }
   return null;
 }
@@ -323,11 +393,23 @@ const httpServer = http.createServer(async (req, res) => {
     );
   }
 
-  const token = extractTokenFromHost(host);
+  let token = extractTokenFromHost(host);
   if (!token) {
-    res.statusCode = 404;
-    res.setHeader("Content-Type", "text/plain");
-    return res.end(`Invalid host. Expected format: <token>.${TUNNEL_DOMAIN}`);
+    const alias = extractAliasFromHost(host);
+    if (alias) {
+      token = await resolveAliasToToken(alias);
+      if (!token) {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "text/plain");
+        return res.end("Alias not found or inactive");
+      }
+    } else {
+      res.statusCode = 404;
+      res.setHeader("Content-Type", "text/plain");
+      return res.end(
+        `Invalid host. Expected <token>.${TUNNEL_DOMAIN} or <alias>.${ALIAS_DOMAIN}`
+      );
+    }
   }
 
   // Rate limiting
@@ -412,8 +494,10 @@ httpServer.headersTimeout = 65000;   // must be greater than keepAliveTimeout
 
 httpServer.listen(LISTEN_HTTP, LISTEN_HTTP_HOST, () => {
   log(`Tunnel ingress listening on ${LISTEN_HTTP_HOST}:${LISTEN_HTTP}`);
-  log(`Domain: ${TUNNEL_DOMAIN}`);
-  log(`Expected format: <token>.${TUNNEL_DOMAIN}`);
+  log(`Domain (tokens): ${TUNNEL_DOMAIN}`);
+  log(`Domain (aliases): ${ALIAS_DOMAIN}`);
+  log(`Expected token format: <token>.${TUNNEL_DOMAIN}`);
+  log(`Expected alias format: <alias>.${ALIAS_DOMAIN}`);
   log(`Max request size: ${MAX_REQUEST_SIZE / 1024 / 1024}MB`);
 });
 

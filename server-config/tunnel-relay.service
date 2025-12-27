@@ -9,8 +9,11 @@ WorkingDirectory=/opt/agentcloud
 Environment="NODE_ENV=production"
 Environment="TUNNEL_RELAY_HTTP=7070"
 Environment="TUNNEL_RELAY_CTRL=7071"
-Environment="TUNNEL_DOMAIN=dev.uplink.spot"
-ExecStart=/usr/bin/node /opt/agentcloud/scripts/tunnel/relay-host.js
+Environment="TUNNEL_DOMAIN=x.uplink.spot"
+Environment="ALIAS_DOMAIN=uplink.spot"
+# Set to match backend RELAY_INTERNAL_SECRET
+Environment="RELAY_INTERNAL_SECRET="
+ExecStart=/usr/bin/node /opt/agentcloud/scripts/tunnel/relay-improved.js
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -23,8 +23,17 @@ api.uplink.spot {
 	reverse_proxy 127.0.0.1:4000
 }
 
-# Tunnel ingress: host routing relies on preserving the Host header (<token>.t.uplink.spot)
-*.t.uplink.spot {
+# Tunnel ingress: host routing relies on preserving the Host header
+# Token-based: <token>.x.uplink.spot
+# Alias-based: <alias>.uplink.spot
+*.x.uplink.spot {
+	import cloudflare_tls
+	reverse_proxy 127.0.0.1:7070 {
+		header_up Host {http.request.host}
+	}
+}
+
+*.uplink.spot {
 	import cloudflare_tls
 	reverse_proxy 127.0.0.1:7070 {
 		header_up Host {http.request.host}
@@ -32,7 +41,7 @@ api.uplink.spot {
 }
 
 # Optional base host (handy for health checks / debugging)
-t.uplink.spot {
+x.uplink.spot {
 	import cloudflare_tls
 	respond "uplink tunnel ingress ok" 200
 }
