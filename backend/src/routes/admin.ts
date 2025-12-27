@@ -494,4 +494,69 @@ adminRouter.post("/cleanup/dev-user-tunnels", async (req: Request, res: Response
   }
 });
 
+/**
+ * POST /v1/admin/grant-alias
+ * Grant alias access to a user by setting their alias_limit
+ */
+adminRouter.post("/grant-alias", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const { userId, aliasLimit } = req.body as { userId?: string; aliasLimit?: number };
+
+    if (!userId) {
+      return res.status(400).json(makeError("INVALID_REQUEST", "userId is required"));
+    }
+    if (aliasLimit === undefined || typeof aliasLimit !== "number") {
+      return res.status(400).json(makeError("INVALID_REQUEST", "aliasLimit must be a number"));
+    }
+    if (aliasLimit < -1 || aliasLimit > 100) {
+      return res.status(400).json(makeError("INVALID_REQUEST", "aliasLimit must be -1 (unlimited) or 0-100"));
+    }
+
+    // Check if user exists
+    const userResult = await pool.query(
+      "SELECT id, user_id, role FROM tokens WHERE user_id = $1 LIMIT 1",
+      [userId]
+    );
+    if (userResult.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "User not found", { userId }));
+    }
+
+    // Update alias_limit for all tokens belonging to this user
+    const result = await pool.query(
+      "UPDATE tokens SET alias_limit = $1 WHERE user_id = $2",
+      [aliasLimit, userId]
+    );
+
+    auditLog.tokenRevoked(userId, "", user.id); // Reusing audit log for now
+    logger.info({
+      event: "admin.grant_alias",
+      targetUserId: userId,
+      aliasLimit,
+      updatedTokens: result.rowCount,
+      grantedBy: user.id,
+    });
+
+    return res.json({
+      success: true,
+      userId,
+      aliasLimit,
+      updatedTokens: result.rowCount,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.grant_alias.error", error: err.message, stack: err.stack });
+    return res.status(500).json(
+      makeError("INTERNAL_ERROR", "Failed to grant alias access", { error: err.message })
+    );
+  }
+});
+
 

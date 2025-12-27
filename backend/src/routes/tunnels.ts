@@ -170,6 +170,42 @@ tunnelRouter.post("/:id/alias", async (req: Request, res: Response) => {
     return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
   }
 
+  // Check if user has alias permission
+  const permResult = await pool.query(
+    "SELECT alias_limit FROM tokens WHERE user_id = $1 LIMIT 1",
+    [user.id]
+  );
+  const aliasLimit = permResult.rows[0]?.alias_limit ?? 0;
+
+  if (aliasLimit === 0) {
+    return res.status(403).json(
+      makeError(
+        "ALIAS_NOT_ENABLED",
+        "Permanent aliases are a premium feature. Contact us on Discord at uplink.spot to upgrade.",
+        { upgrade_url: "https://uplink.spot", user_id: user.id }
+      )
+    );
+  }
+
+  // If aliasLimit > 0, check they haven't exceeded their limit
+  if (aliasLimit > 0) {
+    const countResult = await pool.query(
+      "SELECT COUNT(*) as count FROM tunnel_aliases WHERE owner_user_id = $1",
+      [user.id]
+    );
+    const currentCount = parseInt(countResult.rows[0]?.count || "0", 10);
+    if (currentCount >= aliasLimit) {
+      return res.status(403).json(
+        makeError(
+          "ALIAS_LIMIT_REACHED",
+          `You've reached your alias limit (${aliasLimit}). Contact us to increase your limit.`,
+          { current: currentCount, limit: aliasLimit }
+        )
+      );
+    }
+  }
+  // aliasLimit === -1 means unlimited (admin)
+
   const aliasInput = (req.body as { alias?: string }).alias;
   if (!aliasInput) {
     return res.status(400).json(makeError("INVALID_ALIAS", "Alias is required"));
