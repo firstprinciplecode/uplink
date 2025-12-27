@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import bodyParser from "body-parser";
+import compression from "compression";
 import helmet from "helmet";
 import { dbRouter } from "./routes/dbs";
 import { tunnelRouter, tunnelTokenExists, resolveAliasHandler } from "./routes/tunnels";
@@ -17,6 +18,17 @@ const app = express();
 
 // Security headers
 app.use(helmet());
+
+// Response compression (gzip/deflate) - reduces response size by 70-90%
+app.use(compression({
+  level: 6, // Balanced compression (1-9, higher = smaller but slower)
+  threshold: 1024, // Only compress responses > 1KB
+  filter: (req, res) => {
+    // Don't compress if client doesn't accept it
+    if (req.headers["x-no-compression"]) return false;
+    return compression.filter(req, res);
+  },
+}));
 
 // Body parsing
 app.use(bodyParser.json({ limit: "10mb" }));

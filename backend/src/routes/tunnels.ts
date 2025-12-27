@@ -223,9 +223,10 @@ tunnelRouter.post("/:id/alias", async (req: Request, res: Response) => {
 
   const { id } = req.params;
 
-  // Verify tunnel ownership
+  // Verify tunnel ownership (select only needed columns)
   const tunnelResult = await pool.query(
-    "SELECT * FROM tunnels WHERE id = $1 AND status <> 'deleted'",
+    `SELECT id, owner_user_id, token, target_port, status, created_at, updated_at, expires_at 
+     FROM tunnels WHERE id = $1 AND status <> 'deleted'`,
     [id]
   );
   if (tunnelResult.rowCount === 0) {
@@ -293,7 +294,8 @@ tunnelRouter.delete("/:id/alias", async (req: Request, res: Response) => {
 
   const { id } = req.params;
   const tunnelResult = await pool.query(
-    "SELECT * FROM tunnels WHERE id = $1 AND status <> 'deleted'",
+    `SELECT id, owner_user_id, token, target_port, status, created_at, updated_at, expires_at
+     FROM tunnels WHERE id = $1 AND status <> 'deleted'`,
     [id]
   );
   if (tunnelResult.rowCount === 0) {

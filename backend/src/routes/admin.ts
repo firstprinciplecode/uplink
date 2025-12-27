@@ -153,15 +153,20 @@ adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: Request,
     const limit = Number(req.query.limit) || 50;
     const offset = Number(req.query.offset) || 0;
 
-    let sql = "SELECT * FROM tunnels WHERE status <> 'deleted'";
+    // Join with aliases in a single query (avoids N+1)
+    let sql = `SELECT t.id, t.owner_user_id, t.token, t.target_port, t.status, 
+                      t.created_at, t.updated_at, t.expires_at, a.alias
+               FROM tunnels t
+               LEFT JOIN tunnel_aliases a ON a.tunnel_id = t.id
+               WHERE t.status <> 'deleted'`;
     const params: any[] = [];
 
     if (status) {
-      sql += " AND status = $1";
+      sql += " AND t.status = $1";
       params.push(status);
     }
 
-    sql += " ORDER BY created_at DESC LIMIT $" + (params.length + 1) + " OFFSET $" + (params.length + 2);
+    sql += " ORDER BY t.created_at DESC LIMIT $" + (params.length + 1) + " OFFSET $" + (params.length + 2);
     params.push(limit, offset);
 
     const result = await pool.query(sql, params);
@@ -213,7 +218,10 @@ adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: Reques
     const limit = Number(req.query.limit) || 50;
     const offset = Number(req.query.offset) || 0;
 
-    let sql = "SELECT * FROM databases WHERE status <> 'deleted'";
+    // Select specific columns, excluding encrypted_password for security
+    let sql = `SELECT id, owner_user_id, project_id, name, provider, provider_database_id, 
+               engine, version, region, status, host, port, database, "user", created_at, updated_at
+               FROM databases WHERE status <> 'deleted'`;
     const params: any[] = [];
 
     if (status) {

@@ -34,6 +34,15 @@ const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
+// HTTP Agent with keep-alive for connection reuse (reduces TCP handshake overhead)
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,      // Keep idle connections for 30s
+  maxSockets: 10,             // Max concurrent connections per host
+  maxFreeSockets: 5,          // Max idle connections to keep
+  timeout: 5000,              // Socket timeout
+});
+
 // token -> { socket, clientIp, targetPort, connectedAt }
 const clients = new Map();
 // requestId -> http response
@@ -170,7 +179,7 @@ async function validateToken(token) {
   try {
     const url = `${API_BASE}/internal/allow-tls?domain=${token}.${TUNNEL_DOMAIN}`;
     const response = await new Promise((resolve, reject) => {
-      const req = http.get(url, { timeout: 2000 }, (res) => {
+      const req = http.get(url, { timeout: 2000, agent: httpAgent }, (res) => {
         let data = "";
         res.on("data", (chunk) => { data += chunk; });
         res.on("end", () => {
@@ -219,6 +228,7 @@ async function resolveAliasToToken(alias) {
         url,
         {
           timeout: 2000,
+          agent: httpAgent,
           headers: INTERNAL_SECRET
             ? { [INTERNAL_SECRET_HEADER]: INTERNAL_SECRET }
             : undefined,
