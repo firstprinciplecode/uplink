@@ -195,8 +195,9 @@ tunnelRouter.post("/:id/alias", async (req: Request, res: Response) => {
   if (tunnelResult.rowCount === 0) {
     return res.status(404).json(makeError("NOT_FOUND", "Tunnel not found", { id }));
   }
-  const tunnel = tunnelResult.rows[0] as TunnelRecord;
-  if (tunnel.ownerUserId !== user.id) {
+  const tunnel = tunnelResult.rows[0] as TunnelRecord & { owner_user_id?: string };
+  const ownerId = tunnel.ownerUserId || tunnel.owner_user_id;
+  if (ownerId !== user.id) {
     return res.status(403).json(makeError("FORBIDDEN", "Access denied"));
   }
 
@@ -262,8 +263,9 @@ tunnelRouter.delete("/:id/alias", async (req: Request, res: Response) => {
   if (tunnelResult.rowCount === 0) {
     return res.status(404).json(makeError("NOT_FOUND", "Tunnel not found", { id }));
   }
-  const tunnel = tunnelResult.rows[0] as TunnelRecord;
-  if (tunnel.ownerUserId !== user.id) {
+  const tunnel = tunnelResult.rows[0] as TunnelRecord & { owner_user_id?: string };
+  const ownerId = tunnel.ownerUserId || tunnel.owner_user_id;
+  if (ownerId !== user.id) {
     return res.status(403).json(makeError("FORBIDDEN", "Access denied"));
   }
 
@@ -299,10 +301,11 @@ tunnelRouter.get("/:id", async (req: Request, res: Response) => {
       );
     }
 
-    const record = result.rows[0] as TunnelRecord & { alias?: string | null };
+    const record = result.rows[0] as TunnelRecord & { alias?: string | null; owner_user_id?: string };
 
     // Check authorization (user can only see their own tunnels)
-    if (record.ownerUserId !== user.id) {
+    const ownerId = record.ownerUserId || record.owner_user_id;
+    if (ownerId !== user.id) {
       return res.status(403).json(
         makeError("FORBIDDEN", "Access denied")
       );
