@@ -63,12 +63,49 @@ export function validateConfig(): Config {
     logger.warn("NEON_PROJECT_ID not set - database provisioning will not work");
   }
 
+  // Security warnings for production
+  const isProduction = process.env.NODE_ENV === "production";
+  
+  if (isProduction && !process.env.CONTROL_PLANE_TOKEN_PEPPER) {
+    logger.warn({
+      event: "security.warning",
+      message: "CONTROL_PLANE_TOKEN_PEPPER not set - tokens are less secure without a pepper",
+      severity: "high",
+    });
+  }
+  
+  if (isProduction && isSqlite) {
+    logger.warn({
+      event: "security.warning", 
+      message: "SQLite detected in production - use Postgres for better security and performance",
+      severity: "medium",
+    });
+  }
+  
+  if (isProduction && config.adminTokens.length === 0) {
+    logger.warn({
+      event: "security.warning",
+      message: "No ADMIN_TOKENS configured - admin access requires DB-backed tokens only",
+      severity: "low",
+    });
+  }
+
+  if (!process.env.RELAY_INTERNAL_SECRET) {
+    logger.warn({
+      event: "security.warning",
+      message: "RELAY_INTERNAL_SECRET not set - internal endpoints have no authentication",
+      severity: "high",
+    });
+  }
+
   logger.info({
     event: "config.validated",
     port: config.port,
     databaseType: isSqlite ? "sqlite" : "postgres",
     tunnelDomain: config.tunnelDomain,
     hasNeonConfig: !!(config.neonApiKey && config.neonProjectId),
+    hasPepper: !!process.env.CONTROL_PLANE_TOKEN_PEPPER,
+    hasInternalSecret: !!process.env.RELAY_INTERNAL_SECRET,
   });
 
   return config;

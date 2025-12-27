@@ -36,9 +36,21 @@ if (isSqlite) {
     },
   };
 } else {
-  // Use Postgres
+  // Use Postgres with optimized pool settings
   pool = new Pool({
     connectionString: dbUrl,
+    // Pool configuration
+    max: Number(process.env.DB_POOL_MAX || 20), // Maximum connections
+    min: Number(process.env.DB_POOL_MIN || 2),  // Minimum connections
+    idleTimeoutMillis: 30000, // Close idle connections after 30s
+    connectionTimeoutMillis: 10000, // Timeout for acquiring connection
+    // Statement timeout to prevent long-running queries
+    statement_timeout: 30000, // 30 seconds
+  });
+  
+  // Handle pool errors gracefully
+  pool.on("error", (err: Error) => {
+    console.error("Unexpected database pool error:", err.message);
   });
 }
 

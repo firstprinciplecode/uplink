@@ -18,13 +18,13 @@ function getApiToken(apiBase: string): string | undefined {
     return process.env.AGENTCLOUD_TOKEN || undefined;
   }
 
-  // Local dev convenience:
+  // Local dev:
   // - Prefer AGENTCLOUD_TOKEN if set
-  // - Otherwise allow AGENTCLOUD_TOKEN_DEV / dev-token
+  // - Otherwise allow AGENTCLOUD_TOKEN_DEV (no hardcoded default for security)
   return (
     process.env.AGENTCLOUD_TOKEN ||
     process.env.AGENTCLOUD_TOKEN_DEV ||
-    "dev-token"
+    undefined
   );
 }
 
