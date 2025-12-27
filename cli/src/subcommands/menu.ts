@@ -686,16 +686,49 @@ export const menuCommand = new Command("menu")
               const alias = aliasInput.trim();
               if (!alias) return "Alias not set (empty).";
 
-              const result = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
-                alias,
-              });
-              const aliasUrl = result.aliasUrl || `${URL_SCHEME}://${alias}.${ALIAS_DOMAIN}`;
-              const tokenUrl = result.url || `${URL_SCHEME}://${result.token}.${TOKEN_DOMAIN}`;
-              return [
-                "✓ Alias updated",
-                `→ Alias URL   ${aliasUrl}`,
-                `→ Token URL   ${tokenUrl}`,
-              ].join("\n");
+              try {
+                const result = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
+                  alias,
+                });
+                const aliasUrl = result.aliasUrl || `${URL_SCHEME}://${alias}.${ALIAS_DOMAIN}`;
+                const tokenUrl = result.url || `${URL_SCHEME}://${result.token}.${TOKEN_DOMAIN}`;
+                return [
+                  "✓ Alias updated",
+                  `→ Alias URL   ${aliasUrl}`,
+                  `→ Token URL   ${tokenUrl}`,
+                ].join("\n");
+              } catch (err: any) {
+                const errMsg = err?.message || String(err);
+                // Check for premium feature errors
+                if (errMsg.includes("ALIAS_NOT_ENABLED")) {
+                  try {
+                    const parsed = JSON.parse(errMsg);
+                    const userId = parsed?.error?.details?.user_id || "(check your token)";
+                    return [
+                      "",
+                      colorYellow("🔒 Permanent Aliases - Premium Feature"),
+                      "",
+                      "Permanent aliases give you stable URLs like:",
+                      `  ${colorGreen(`https://myapp.${ALIAS_DOMAIN}`)}`,
+                      "",
+                      "Instead of regenerating tokens each time.",
+                      "",
+                      "To unlock this feature:",
+                      `  → Join our Discord: ${colorCyan("https://uplink.spot")}`,
+                      `  → Share your user ID: ${colorDim(userId)}`,
+                      "",
+                      "We'll enable it for your account!",
+                      "",
+                    ].join("\n");
+                  } catch {
+                    return colorYellow("🔒 Aliases are a premium feature. Contact us at uplink.spot to upgrade.");
+                  }
+                }
+                if (errMsg.includes("ALIAS_LIMIT_REACHED")) {
+                  return colorYellow("⚠️  You've reached your alias limit. Contact us to increase it.");
+                }
+                throw err; // Re-throw other errors
+              }
             },
           },
           {
@@ -923,6 +956,71 @@ export const menuCommand = new Command("menu")
                 await apiRequest("DELETE", `/v1/admin/tokens/${tokenId}`);
                 restoreRawMode();
                 return `✓ Token ${truncate(tokenId, 12)} revoked`;
+              } catch (err: any) {
+                restoreRawMode();
+                throw err;
+              }
+            },
+          },
+          {
+            label: "Grant Alias Access",
+            action: async () => {
+              try {
+                // Fetch available tokens to show users
+                const result = await apiRequest("GET", "/v1/admin/tokens");
+                const tokens = result.tokens || [];
+                
+                if (tokens.length === 0) {
+                  restoreRawMode();
+                  return "No tokens found.";
+                }
+                
+                // Build options from tokens (group by user_id)
+                const userMap = new Map<string, any>();
+                for (const t of tokens) {
+                  const userId = t.user_id || t.userId;
+                  if (userId && !userMap.has(userId)) {
+                    userMap.set(userId, t);
+                  }
+                }
+                
+                const options: SelectOption[] = Array.from(userMap.entries()).map(([userId, t]) => ({
+                  label: `${truncate(userId, 20)} ${colorDim(`${t.role || "user"} - ${t.label || "no label"}`)}`,
+                  value: userId,
+                }));
+                
+                const selected = await inlineSelect("Select user to grant alias access", options, true);
+                
+                if (selected === null) {
+                  restoreRawMode();
+                  return "";
+                }
+                
+                const userId = selected.value as string;
+                
+                // Prompt for limit
+                try {
+                  process.stdin.setRawMode(false);
+                } catch {
+                  /* ignore */
+                }
+                const limitAnswer = await promptLine("Alias limit (1-10, or -1 for unlimited, default 1): ");
+                restoreRawMode();
+                
+                const aliasLimit = limitAnswer.trim() ? parseInt(limitAnswer.trim(), 10) : 1;
+                if (isNaN(aliasLimit) || aliasLimit < -1 || aliasLimit > 100) {
+                  return "Invalid limit. Must be -1 (unlimited) or 0-100.";
+                }
+                
+                await apiRequest("POST", "/v1/admin/grant-alias", { userId, aliasLimit });
+                
+                const limitDesc = aliasLimit === -1 ? "unlimited" : String(aliasLimit);
+                return [
+                  "✓ Alias access granted",
+                  "",
+                  `→ User      ${userId}`,
+                  `→ Limit     ${limitDesc} alias(es)`,
+                ].join("\n");
               } catch (err: any) {
                 restoreRawMode();
                 throw err;
