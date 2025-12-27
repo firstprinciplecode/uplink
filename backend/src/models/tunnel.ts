@@ -16,6 +16,8 @@ export interface TunnelResponse {
   id: string;
   token: string;
   url: string;
+  alias?: string;
+  aliasUrl?: string;
   targetPort: number;
   status: TunnelStatus;
   createdAt: string;
@@ -26,7 +28,9 @@ export interface TunnelResponse {
 export function toTunnelResponse(
   record: TunnelRecord,
   domain: string,
-  useHostRouting: boolean = true
+  useHostRouting: boolean = true,
+  aliasDomain?: string,
+  aliasName?: string | null
 ): TunnelResponse {
   // NOTE: HTTPS for wildcard subdomains requires extra server-side config (DNS-01 / on-demand TLS).
   // Default to HTTP so returned URLs work immediately; can be overridden via env for deployments
@@ -36,7 +40,7 @@ export function toTunnelResponse(
     ? `${scheme}://${record.token}.${domain}`
     : `http://127.0.0.1:7070/t/${record.token}`;
 
-  return {
+  const base: TunnelResponse = {
     id: record.id,
     token: record.token,
     url,
@@ -46,5 +50,12 @@ export function toTunnelResponse(
     updatedAt: record.updatedAt,
     ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
   };
+
+  if (aliasName && aliasDomain) {
+    base.alias = aliasName;
+    base.aliasUrl = `${scheme}://${aliasName}.${aliasDomain}`;
+  }
+
+  return base;
 }
 

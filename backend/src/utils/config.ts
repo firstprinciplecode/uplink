@@ -6,6 +6,7 @@ interface Config {
   neonApiKey?: string;
   neonProjectId?: string;
   tunnelDomain: string;
+  aliasDomain: string;
   adminTokens: string[];
   dbLimitPerUser: number;
   logLevel: string;
@@ -43,7 +44,8 @@ export function validateConfig(): Config {
     ),
     neonApiKey: process.env.NEON_API_KEY,
     neonProjectId: process.env.NEON_PROJECT_ID,
-    tunnelDomain: getOptionalEnv("TUNNEL_DOMAIN", "t.uplink.spot"),
+    tunnelDomain: getOptionalEnv("TUNNEL_DOMAIN", "x.uplink.spot"),
+    aliasDomain: getOptionalEnv("ALIAS_DOMAIN", "uplink.spot"),
     adminTokens: (process.env.ADMIN_TOKENS || "")
       .split(",")
       .map((t) => t.trim())

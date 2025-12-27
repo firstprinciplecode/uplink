@@ -79,6 +79,10 @@ function colorRed(text: string) {
   return `${c.red}${text}${c.reset}`;
 }
 
+const TOKEN_DOMAIN = process.env.TUNNEL_DOMAIN || "x.uplink.spot";
+const ALIAS_DOMAIN = process.env.ALIAS_DOMAIN || "uplink.spot";
+const URL_SCHEME = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
+
 function colorMagenta(text: string) {
   return `${c.magenta}${text}${c.reset}`;
 }
@@ -653,6 +657,67 @@ export const menuCommand = new Command("menu")
             },
           },
           {
+            label: "Set Permanent Alias",
+            action: async () => {
+              const data = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = data.tunnels || [];
+              if (!tunnels.length) return "No tunnels found.";
+
+              const options: SelectOption[] = tunnels.map((t: any) => {
+                const token = truncate(t.token || "", 10);
+                const alias = t.alias ? colorGreen(t.alias) : colorDim("none");
+                const port = t.target_port ?? t.targetPort ?? "-";
+                return {
+                  label: `${token.padEnd(12)} port ${String(port).padEnd(5)} alias ${alias}`,
+                  value: t.id,
+                };
+              });
+
+              const choice = await inlineSelect("Select tunnel for alias", options, true);
+              if (choice === null) return "";
+
+              try {
+                process.stdin.setRawMode(false);
+              } catch {
+                /* ignore */
+              }
+              const aliasInput = await promptLine("Enter alias (e.g. thomas): ");
+              restoreRawMode();
+              const alias = aliasInput.trim();
+              if (!alias) return "Alias not set (empty).";
+
+              const result = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
+                alias,
+              });
+              const aliasUrl = result.aliasUrl || `${URL_SCHEME}://${alias}.${ALIAS_DOMAIN}`;
+              const tokenUrl = result.url || `${URL_SCHEME}://${result.token}.${TOKEN_DOMAIN}`;
+              return [
+                "✓ Alias updated",
+                `→ Alias URL   ${aliasUrl}`,
+                `→ Token URL   ${tokenUrl}`,
+              ].join("\n");
+            },
+          },
+          {
+            label: "Remove Alias",
+            action: async () => {
+              const data = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = (data.tunnels || []).filter((t: any) => !!t.alias);
+              if (!tunnels.length) return "No tunnels with aliases.";
+
+              const options: SelectOption[] = tunnels.map((t: any) => ({
+                label: `${truncate(t.token || "", 10).padEnd(12)} alias ${colorGreen(t.alias)}`,
+                value: t.id,
+              }));
+
+              const choice = await inlineSelect("Select tunnel to remove alias", options, true);
+              if (choice === null) return "";
+
+              await apiRequest("DELETE", `/v1/tunnels/${choice.value}/alias`);
+              return "✓ Alias removed";
+            },
+          },
+          {
             label: "View Connected (with IPs)",
             action: async () => {
               try {
@@ -705,27 +770,38 @@ export const menuCommand = new Command("menu")
             if (!tunnels || tunnels.length === 0) {
               return "No tunnels found.";
             }
-            
-            const lines = tunnels.map(
-              (t: any) => {
-                const token = t.token || "";
-                const connectedFromApi = t.connected ?? false;
-                const connectedLocal = runningClients.some((c) => c.token === token);
-                const connectionStatus = isAdmin
-                  ? (connectedFromApi ? "connected" : "disconnected")
-                  : (connectedLocal ? "connected" : "unknown");
-                
-                return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
+            const lines = tunnels.map((t: any) => {
+              const token = t.token || "";
+              const alias = t.alias || "-";
+              const tokenUrl = t.url || `${URL_SCHEME}://${token}.${TOKEN_DOMAIN}`;
+              const aliasUrl =
+                t.aliasUrl || (t.alias ? `${URL_SCHEME}://${t.alias}.${ALIAS_DOMAIN}` : "-");
+              const connectedFromApi = t.connected ?? false;
+              const connectedLocal = runningClients.some((c) => c.token === token);
+              const connectionStatus = isAdmin
+                ? connectedFromApi
+                  ? "connected"
+                  : "disconnected"
+                : connectedLocal
+                ? "connected"
+                : "unknown";
+
+              return [
+                `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
                   t.target_port ?? t.targetPort ?? "-"
                 ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
                   t.created_at ?? t.createdAt ?? "",
                   19
-                )}`;
-              }
-            );
-            return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
-              "\n"
-            );
+                )}`,
+                `    url:   ${tokenUrl}`,
+                `    alias: ${aliasUrl} (${alias})`,
+              ].join("\n");
+            });
+            return [
+              "ID           Token         Port   Connection   Created",
+              "-".repeat(90),
+              ...lines,
+            ].join("\n\n");
           },
         },
         {
@@ -903,11 +979,8 @@ export const menuCommand = new Command("menu")
       if (clients.length === 0) {
         cachedActiveTunnels = "";
       } else {
-        const domain = process.env.TUNNEL_DOMAIN || "t.uplink.spot";
-        const scheme = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
-        
         const tunnelLines = clients.map((client, idx) => {
-          const url = `${scheme}://${client.token}.${domain}`;
+          const url = `${URL_SCHEME}://${client.token}.${TOKEN_DOMAIN}`;
           const isLast = idx === clients.length - 1;
           const branch = isLast ? "└─" : "├─";
           return colorDim(branch) + " " + colorGreen(url) + colorDim(" → ") + `localhost:${client.port}`;
