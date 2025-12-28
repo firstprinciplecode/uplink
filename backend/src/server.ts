@@ -52,6 +52,8 @@ app.use((req, res, next) => {
 
 // Health check (no auth, no rate limit)
 app.get("/health", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
