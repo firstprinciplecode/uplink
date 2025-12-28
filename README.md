@@ -10,10 +10,12 @@ Perfect for sharing work-in-progress, testing webhooks, or demoing to clients. A
 
 ## Features
 
-- **Instant Public URLs** - Your `localhost:3000` becomes `https://xyz.t.uplink.spot`
+- **Instant Public URLs** - Your `localhost:3000` becomes `https://xyz.x.uplink.spot`
+- **Permanent Aliases** - Claim memorable URLs like `https://myapp.uplink.spot`
 - **Zero Browser Required** - Signup, auth, and tunnel management all in terminal
 - **Agent-Friendly** - AI assistants can create tokens and start tunnels via API
 - **Auto Port Detection** - Scans for running servers, select with arrow keys
+- **Auto-Retry** - Built-in retry logic with exponential backoff for reliability
 
 ## Quick Start
 
@@ -59,7 +61,7 @@ Once authenticated, select **"Manage Tunnels"** → **"Start Tunnel"**:
 - The CLI will scan for active servers on your local machine
 - Use arrow keys to select a port, or choose "Enter custom port"
 - Press "Back" if you want to cancel
-- Your tunnel URL will be displayed (e.g., `https://abc123.t.uplink.spot`)
+- Your tunnel URL will be displayed (e.g., `https://abc123.x.uplink.spot`)
 
 **Keep the terminal running** - the tunnel client must stay active.
 
@@ -103,8 +105,8 @@ export AGENTCLOUD_TOKEN=your-token-here
 # Tunnel control server (default: tunnel.uplink.spot:7071)
 export TUNNEL_CTRL=tunnel.uplink.spot:7071
 
-# Tunnel domain (default: t.uplink.spot)
-export TUNNEL_DOMAIN=t.uplink.spot
+# Tunnel domain (default: x.uplink.spot)
+export TUNNEL_DOMAIN=x.uplink.spot
 ```
 
 ## Requirements
@@ -119,7 +121,7 @@ export TUNNEL_DOMAIN=t.uplink.spot
 1. **Create tunnel** - Request a tunnel from the API
 2. **Get token** - Receive a unique token (e.g., `abc123`)
 3. **Start client** - Run the tunnel client locally, connecting to the relay
-4. **Access** - Your local server is accessible at `https://abc123.t.uplink.spot`
+4. **Access** - Your local server is accessible at `https://abc123.x.uplink.spot`
 
 The tunnel client forwards HTTP requests from the public URL to your local server.
 
