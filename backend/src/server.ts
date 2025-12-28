@@ -8,6 +8,7 @@ import { tunnelRouter, tunnelTokenExists, resolveAliasHandler } from "./routes/t
 import { adminRouter } from "./routes/admin";
 import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
+import { publicRouter } from "./routes/public";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rate-limit";
 import { logger } from "./utils/logger";
@@ -116,6 +117,9 @@ app.get("/internal/allow-tls", async (req, res) => {
 
 // Internal alias resolution for relay - no auth, uses relay secret
 app.get("/internal/resolve-alias", resolveAliasHandler);
+
+// Public endpoints (no auth required) - for website globe visualization
+app.use("/public", publicRouter);
 
 // Global rate limiting for all /v1 routes
 app.use("/v1", apiRateLimiter);

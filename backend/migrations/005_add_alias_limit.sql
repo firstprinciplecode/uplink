@@ -12,3 +12,4 @@ UPDATE tokens SET alias_limit = -1 WHERE role = 'admin';
 -- Index for quick lookup
 CREATE INDEX IF NOT EXISTS idx_tokens_alias_limit ON tokens(alias_limit);
 
+

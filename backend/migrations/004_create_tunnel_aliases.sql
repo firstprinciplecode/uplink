@@ -13,3 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_tunnel_aliases_owner ON tunnel_aliases(owner_user
 CREATE INDEX IF NOT EXISTS idx_tunnel_aliases_tunnel ON tunnel_aliases(tunnel_id);
 
 
+
