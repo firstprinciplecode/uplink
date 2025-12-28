@@ -46,6 +46,17 @@ x.uplink.spot {
 	respond "uplink tunnel ingress ok" 200
 }
 
+# Main website (landing page with globe visualization)
+uplink.spot {
+	import cloudflare_tls
+	root * /var/www/uplink-website
+	file_server
+	encode gzip
+
+	# Fallback to index.html for SPA routing (if needed)
+	try_files {path} /index.html
+}
+
 
 
 
