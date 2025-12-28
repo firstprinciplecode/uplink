@@ -59,14 +59,30 @@ app.get("/health/live", (req, res) => {
   res.json({ status: "alive" });
 });
 
+// Cache for ready check (avoid DB query on every health check)
+let readyCache: { ready: boolean; checkedAt: number } | null = null;
+const READY_CACHE_TTL = 5000; // 5 seconds
+
 app.get("/health/ready", async (req, res) => {
+  const now = Date.now();
+  
+  // Return cached result if fresh
+  if (readyCache && (now - readyCache.checkedAt) < READY_CACHE_TTL) {
+    if (readyCache.ready) {
+      return res.json({ status: "ready", cached: true });
+    }
+    return res.status(503).json({ status: "not ready", cached: true });
+  }
+  
   try {
     // Check database connection
     const { pool } = await import("./db/pool");
     await pool.query("SELECT 1");
+    readyCache = { ready: true, checkedAt: now };
     res.json({ status: "ready" });
   } catch (error) {
     logger.error({ event: "health_check.failed", error });
+    readyCache = { ready: false, checkedAt: now };
     res.status(503).json({ status: "not ready" });
   }
 });
