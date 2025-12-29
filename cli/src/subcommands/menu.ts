@@ -79,17 +79,13 @@ function colorRed(text: string) {
   return `${c.red}${text}${c.reset}`;
 }
 
-const TOKEN_DOMAIN = process.env.TUNNEL_DOMAIN || "x.uplink.spot";
-const ALIAS_DOMAIN = process.env.ALIAS_DOMAIN || "uplink.spot";
-const URL_SCHEME = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
-
-function colorMagenta(text: string) {
-  return `${c.magenta}${text}${c.reset}`;
-}
-
 function colorWhite(text: string) {
   return `${c.brightWhite}${text}${c.reset}`;
 }
+
+const TOKEN_DOMAIN = process.env.TUNNEL_DOMAIN || "x.uplink.spot";
+const ALIAS_DOMAIN = process.env.ALIAS_DOMAIN || "uplink.spot";
+const URL_SCHEME = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
 
 // ASCII banner with color styling
 const ASCII_UPLINK = colorWhite([
@@ -273,7 +269,7 @@ export const menuCommand = new Command("menu")
     // If authentication failed, show ONLY "Get Started" and "Exit"
     if (authFailed) {
       mainMenu.push({
-        label: "🚀 Get Started (Create Account)",
+        label: "Get Started",
         action: async () => {
           restoreRawMode();
           clearScreen();
@@ -301,21 +297,21 @@ export const menuCommand = new Command("menu")
               });
               if (!result) {
                 restoreRawMode();
-                return "❌ Error: No response from server.";
+                return "Error: No response from server.";
               }
             } catch (err: any) {
               restoreRawMode();
               const errorMsg = err?.message || String(err);
-              console.error("\n❌ Signup error:", errorMsg);
+              console.error("\nSignup error:", errorMsg);
               if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
-                return "⚠️  Too many signup attempts. Please try again later.";
+                return "Too many signup attempts. Please try again later.";
               }
-              return `❌ Error creating account: ${errorMsg}`;
+              return `Error creating account: ${errorMsg}`;
             }
 
             if (!result || !result.token) {
               restoreRawMode();
-              return "❌ Error: Invalid response from server. Token not received.";
+              return "Error: Invalid response from server. Token not received.";
             }
 
             const token = result.token;
@@ -455,9 +451,9 @@ export const menuCommand = new Command("menu")
             restoreRawMode();
             const errorMsg = err?.message || String(err);
             if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
-              return "⚠️  Too many signup attempts. Please try again later.";
+              return "Too many signup attempts. Please try again later.";
             }
-            return `❌ Error creating account: ${errorMsg}`;
+            return `Error creating account: ${errorMsg}`;
           }
         },
       });
@@ -525,6 +521,42 @@ export const menuCommand = new Command("menu")
             action: async () => {
               await runSmoke("test:comprehensive");
               return "test:comprehensive completed";
+            },
+          },
+          {
+            label: "View Connected Tunnels",
+            action: async () => {
+              try {
+                const data = await apiRequest("GET", "/v1/admin/relay-status") as { 
+                  connectedTunnels?: number; 
+                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
+                  timestamp?: string;
+                  error?: string;
+                  message?: string;
+                };
+                
+                if (data.error) {
+                  return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+                }
+                
+                if (!data.tunnels || data.tunnels.length === 0) {
+                  return "No tunnels currently connected to the relay.";
+                }
+                
+                const lines = data.tunnels.map((t) => 
+                  `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
+                );
+                
+                return [
+                  `Connected Tunnels: ${data.connectedTunnels}`,
+                  "",
+                  "Token          Client IP        Port   Uptime     Connected At",
+                  "-".repeat(75),
+                  ...lines,
+                ].join("\n");
+              } catch (err: any) {
+                return `Error: Failed to get relay status - ${err.message}`;
+              }
             },
           },
         ],
@@ -712,7 +744,7 @@ export const menuCommand = new Command("menu")
                     const userId = parsed?.error?.details?.user_id || "(check your token)";
                     return [
                       "",
-                      colorYellow("🔒 Permanent Aliases - Premium Feature"),
+                      colorYellow("Permanent Aliases - Premium Feature"),
                       "",
                       "Permanent aliases give you stable URLs like:",
                       `  ${colorGreen(`https://myapp.${ALIAS_DOMAIN}`)}`,
@@ -727,11 +759,11 @@ export const menuCommand = new Command("menu")
                       "",
                     ].join("\n");
                   } catch {
-                    return colorYellow("🔒 Aliases are a premium feature. Contact us at uplink.spot to upgrade.");
+                    return colorYellow("Aliases are a premium feature. Contact us at uplink.spot to upgrade.");
                   }
                 }
                 if (errMsg.includes("ALIAS_LIMIT_REACHED")) {
-                  return colorYellow("⚠️  You've reached your alias limit. Contact us to increase it.");
+                  return colorYellow("You've reached your alias limit. Contact us to increase it.");
                 }
                 throw err; // Re-throw other errors
               }
@@ -756,43 +788,6 @@ export const menuCommand = new Command("menu")
               return "✓ Alias removed";
             },
           },
-          {
-            label: "View Connected (with IPs)",
-            action: async () => {
-              try {
-                // Use the API endpoint which proxies to the relay
-                const data = await apiRequest("GET", "/v1/admin/relay-status") as { 
-                  connectedTunnels?: number; 
-                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
-                  timestamp?: string;
-                  error?: string;
-                  message?: string;
-                };
-                
-                if (data.error) {
-                  return `❌ Relay error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
-                }
-                
-                if (!data.tunnels || data.tunnels.length === 0) {
-                  return "No tunnels currently connected to the relay.";
-                }
-                
-                const lines = data.tunnels.map((t) => 
-                  `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
-                );
-                
-                return [
-                  `Connected Tunnels: ${data.connectedTunnels}`,
-                  "",
-                  "Token          Client IP        Port   Uptime     Connected At",
-                  "-".repeat(75),
-                  ...lines,
-                ].join("\n");
-              } catch (err: any) {
-                return `❌ Failed to get relay status: ${err.message}`;
-              }
-            },
-          },
         ],
       });
 
@@ -800,7 +795,7 @@ export const menuCommand = new Command("menu")
       label: "Usage",
       subMenu: [
         {
-          label: isAdmin ? "List Tunnels (admin)" : "List My Tunnels",
+          label: isAdmin ? "List All Tunnels" : "List My Tunnels",
           action: async () => {
             const runningClients = findTunnelClients();
             const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
@@ -844,7 +839,7 @@ export const menuCommand = new Command("menu")
           },
         },
         {
-          label: isAdmin ? "List Databases (admin)" : "List My Databases",
+          label: isAdmin ? "List All Databases" : "List My Databases",
           action: async () => {
             const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
             const result = await apiRequest("GET", path);
@@ -875,7 +870,7 @@ export const menuCommand = new Command("menu")
     // Admin-only: Manage Tokens
     if (isAdmin) {
       mainMenu.push({
-        label: "Manage Tokens (admin)",
+        label: "Manage Tokens",
         subMenu: [
           {
             label: "List Tokens",
@@ -1036,9 +1031,9 @@ export const menuCommand = new Command("menu")
         ],
       });
 
-      // Admin-only: Stop ALL Tunnel Clients (kill switch)
+      // Admin-only: Stop ALL Tunnel Clients
       mainMenu.push({
-        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
+        label: "Stop All Tunnel Clients",
         action: async () => {
           const clients = findTunnelClients();
           if (clients.length === 0) {
@@ -1166,40 +1161,34 @@ export const menuCommand = new Command("menu")
         const isSelected = idx === selected;
         const branch = isLast ? "└─" : "├─";
         
-        // Clean up labels - remove emojis for cleaner look
-        let cleanLabel = choice.label
-          .replace(/^🚀\s*/, "")
-          .replace(/^⚠️\s*/, "")
-          .replace(/^✅\s*/, "")
-          .replace(/^❌\s*/, "");
-        
         // Style based on selection and type
         let label: string;
         let branchColor: string;
+        const labelLower = choice.label.toLowerCase();
         
         if (isSelected) {
           // Selected: cyan highlight
           branchColor = colorCyan(branch);
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
+          if (labelLower.includes("exit")) {
+            label = colorDim(choice.label);
+          } else if (labelLower.includes("stop all")) {
+            label = colorRed(choice.label);
+          } else if (labelLower.includes("get started")) {
+            label = colorGreen(choice.label);
           } else {
-            label = colorCyan(cleanLabel);
+            label = colorCyan(choice.label);
           }
         } else {
           // Not selected: white text
           branchColor = colorWhite(branch);
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
+          if (labelLower.includes("exit")) {
+            label = colorDim(choice.label);
+          } else if (labelLower.includes("stop all")) {
+            label = colorRed(choice.label);
+          } else if (labelLower.includes("get started")) {
+            label = colorGreen(choice.label);
           } else {
-            label = colorWhite(cleanLabel);
+            label = colorWhite(choice.label);
           }
         }
         
@@ -1220,14 +1209,11 @@ export const menuCommand = new Command("menu")
         const lines = message.split("\n");
         lines.forEach((line) => {
           // Color success/error indicators
+          // Style success/error prefixes consistently
           let styledLine = line
-            .replace(/^✅/, colorGreen("✓"))
-            .replace(/^❌/, colorRed("✗"))
-            .replace(/^⚠️/, colorYellow("!"))
-            .replace(/^🔑/, colorCyan("→"))
-            .replace(/^🌐/, colorCyan("→"))
-            .replace(/^📡/, colorCyan("→"))
-            .replace(/^💡/, colorYellow("→"));
+            .replace(/^✓\s*/, colorGreen("✓ "))
+            .replace(/^→\s*/, colorCyan("→ "))
+            .replace(/^Error:\s*/, colorRed("✗ "));
           console.log(colorDim("│ ") + styledLine);
         });
       }
@@ -1424,7 +1410,7 @@ function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comp
     const env = {
       ...process.env,
       AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot",
-      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN ?? "dev-token",
+      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN,
     };
 
     // For test:comprehensive, run inline (no subprocess)

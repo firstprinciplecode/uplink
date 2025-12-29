@@ -1,17 +1,23 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.0-alpha.6",
-  "description": "Localhost to public URL in seconds. No signup forms, no browser - everything in your terminal.",
+  "version": "0.1.0-alpha.7",
+  "description": "Expose localhost to the internet in seconds. Interactive terminal UI, permanent custom domains, zero config. A modern ngrok alternative.",
   "keywords": [
     "tunnel",
     "localhost",
     "ngrok",
+    "ngrok-alternative",
     "expose",
     "cli",
     "dev-tools",
     "webhook",
     "public-url",
-    "port-forwarding"
+    "port-forwarding",
+    "reverse-proxy",
+    "tunneling",
+    "local-development",
+    "https-tunnel",
+    "custom-domain"
   ],
   "homepage": "https://github.com/firstprinciplecode/uplink#readme",
   "repository": {
