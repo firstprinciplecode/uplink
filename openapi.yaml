@@ -1,0 +1,179 @@
+openapi: 3.0.3
+info:
+  title: Uplink Tunnel API (minimal stub)
+  version: "0.1.0"
+servers:
+  - url: https://api.uplink.spot
+paths:
+  /v1/signup:
+    post:
+      summary: Create new user account (no auth required)
+      description: Public endpoint for agents/users to self-register and get a token
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  description: Optional label for the token
+                expiresInDays:
+                  type: integer
+                  description: Token expiration in days (optional)
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignupResponse"
+        "429":
+          description: Rate limited
+  /v1/tunnels:
+    post:
+      summary: Create tunnel
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                port:
+                  type: integer
+                project:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tunnel"
+    get:
+      summary: List tunnels (owner)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tunnels:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tunnel"
+                  count:
+                    type: integer
+  /v1/tunnels/{id}:
+    delete:
+      summary: Delete tunnel
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+  /v1/tunnels/{id}/alias:
+    post:
+      summary: Set alias
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                alias:
+                  type: string
+      responses:
+        "201":
+          description: Alias set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tunnel"
+    delete:
+      summary: Delete alias
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Alias removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tunnel"
+  /v1/tunnels/{id}/stats:
+    get:
+      summary: Tunnel stats (alias totals or in-memory token stats)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    SignupResponse:
+      type: object
+      properties:
+        id: { type: string, description: Token ID }
+        token: { type: string, description: Raw token (only shown once) }
+        tokenPrefix: { type: string, description: First 8 chars for identification }
+        role: { type: string, enum: [user] }
+        userId: { type: string }
+        label: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        message: { type: string }
+    Tunnel:
+      type: object
+      properties:
+        id: { type: string }
+        url: { type: string }
+        ingressHttpUrl: { type: string }
+        token: { type: string }
+        alias: { type: string, nullable: true }
+        status: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
