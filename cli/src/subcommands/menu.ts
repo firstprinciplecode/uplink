@@ -8,6 +8,11 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 
+// Check if running from project directory (smoke tests require local scripts)
+function isInProjectDir(): boolean {
+  return existsSync("scripts/test-comprehensive.sh") && existsSync("package.json");
+}
+
 type MenuChoice = {
   label: string;
   action?: () => Promise<string>;
@@ -471,33 +476,36 @@ export const menuCommand = new Command("menu")
       // Only show other menu items if authentication succeeded
 
     if (isAdmin) {
-      mainMenu.push({
-        label: "System Status",
-        subMenu: [
-          {
-            label: "View Status",
-            action: async () => {
-              let health = "unknown";
-              try {
-                const res = await fetch(`${apiBase}/health`);
-                const json = await res.json().catch(() => ({}));
-                health = json.status || res.statusText || "unknown";
-              } catch {
-                health = "unreachable";
-              }
+      const systemStatusItems: MenuChoice[] = [
+        {
+          label: "View Status",
+          action: async () => {
+            let health = "unknown";
+            try {
+              const res = await fetch(`${apiBase}/health`);
+              const json = await res.json().catch(() => ({}));
+              health = json.status || res.statusText || "unknown";
+            } catch {
+              health = "unreachable";
+            }
 
-              const stats = await apiRequest("GET", "/v1/admin/stats");
-              return [
-                `API health: ${health}`,
-                "Tunnels:",
-                `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
-                `  Created last 24h: ${stats.tunnels.createdLast24h}`,
-                "Databases:",
-                `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
-                `  Created last 24h: ${stats.databases.createdLast24h}`,
-              ].join("\n");
-            },
+            const stats = await apiRequest("GET", "/v1/admin/stats");
+            return [
+              `API health: ${health}`,
+              "Tunnels:",
+              `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
+              `  Created last 24h: ${stats.tunnels.createdLast24h}`,
+              "Databases:",
+              `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
+              `  Created last 24h: ${stats.databases.createdLast24h}`,
+            ].join("\n");
           },
+        },
+      ];
+
+      // Smoke tests only available when running from project directory
+      if (isInProjectDir()) {
+        systemStatusItems.push(
           {
             label: "Test: Tunnel",
             action: async () => {
@@ -525,72 +533,80 @@ export const menuCommand = new Command("menu")
               await runSmoke("test:comprehensive");
               return "test:comprehensive completed";
             },
-          },
-          {
-            label: "View Connected Tunnels",
-            action: async () => {
-              try {
-                const data = await apiRequest("GET", "/v1/admin/relay-status") as {
-                  connectedTunnels?: number;
-                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
-                  timestamp?: string;
-                  error?: string;
-                  message?: string;
-                };
+          }
+        );
+      }
 
-                if (data.error) {
-                  return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
-                }
-                if (!data.tunnels || data.tunnels.length === 0) {
-                  return "No tunnels currently connected to the relay.";
-                }
-
-                const lines = data.tunnels.map((t) =>
-                  `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
-                );
-
-                return [
-                  `Connected Tunnels: ${data.connectedTunnels}`,
-                  "",
-                  "Token          Client IP        Port   Uptime     Connected At",
-                  "-".repeat(75),
-                  ...lines,
-                ].join("\n");
-              } catch (err: any) {
-                return `Error: Failed to get relay status - ${err.message}`;
-              }
-            },
-          },
-          {
-            label: "View Traffic Stats",
-            action: async () => {
-              const data = await apiRequest("GET", "/v1/admin/traffic-stats?sync=true") as {
-                count?: number;
-                aliases?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: string | null; lastStatus: number | null }>;
+      systemStatusItems.push(
+        {
+          label: "View Connected Tunnels",
+          action: async () => {
+            try {
+              const data = await apiRequest("GET", "/v1/admin/relay-status") as {
+                connectedTunnels?: number;
+                tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
+                timestamp?: string;
+                error?: string;
+                message?: string;
               };
 
-              const aliases = data.aliases || [];
-              if (aliases.length === 0) return "No persisted alias stats yet.";
+              if (data.error) {
+                return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+              }
+              if (!data.tunnels || data.tunnels.length === 0) {
+                return "No tunnels currently connected to the relay.";
+              }
 
-              const top = aliases.slice(0, 25);
-              const lines = top.map((a) => {
-                const last = a.lastSeenAt ? truncate(a.lastSeenAt, 19) : "-";
-                return `${truncate(a.alias, 22).padEnd(24)} ${String(a.requests || 0).padStart(8)}  ${formatBytes(a.bytesIn || 0).padStart(9)}  ${formatBytes(a.bytesOut || 0).padStart(9)}  ${String(a.lastStatus ?? "-").padStart(3)}  ${last}`;
-              });
+              const lines = data.tunnels.map((t) =>
+                `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
+              );
 
               return [
-                `Aliases tracked: ${aliases.length}`,
+                `Connected Tunnels: ${data.connectedTunnels}`,
                 "",
-                "Alias                    Requests   In         Out        Sts  Last Seen",
+                "Token          Client IP        Port   Uptime     Connected At",
                 "-".repeat(75),
                 ...lines,
-                aliases.length > top.length ? `\nShowing top ${top.length} by requests.` : "",
-              ]
-                .filter(Boolean)
-                .join("\n");
-            },
+              ].join("\n");
+            } catch (err: any) {
+              return `Error: Failed to get relay status - ${err.message}`;
+            }
           },
-        ],
+        },
+        {
+          label: "View Traffic Stats",
+          action: async () => {
+            const data = await apiRequest("GET", "/v1/admin/traffic-stats?sync=true") as {
+              count?: number;
+              aliases?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: string | null; lastStatus: number | null }>;
+            };
+
+            const aliases = data.aliases || [];
+            if (aliases.length === 0) return "No persisted alias stats yet.";
+
+            const top = aliases.slice(0, 25);
+            const lines = top.map((a) => {
+              const last = a.lastSeenAt ? truncate(a.lastSeenAt, 19) : "-";
+              return `${truncate(a.alias, 22).padEnd(24)} ${String(a.requests || 0).padStart(8)}  ${formatBytes(a.bytesIn || 0).padStart(9)}  ${formatBytes(a.bytesOut || 0).padStart(9)}  ${String(a.lastStatus ?? "-").padStart(3)}  ${last}`;
+            });
+
+            return [
+              `Aliases tracked: ${aliases.length}`,
+              "",
+              "Alias                    Requests   In         Out        Sts  Last Seen",
+              "-".repeat(75),
+              ...lines,
+              aliases.length > top.length ? `\nShowing top ${top.length} by requests.` : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+          },
+        }
+      );
+
+      mainMenu.push({
+        label: "System Status",
+        subMenu: systemStatusItems,
       });
     }
 
