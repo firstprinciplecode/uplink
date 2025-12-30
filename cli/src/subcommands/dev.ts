@@ -38,7 +38,7 @@ export const devCommand = new Command("dev")
         "tunnel",
         clientFile
       );
-      const ctrlHost = process.env.TUNNEL_CTRL ?? "127.0.0.1:7071";
+      const ctrlHost = process.env.TUNNEL_CTRL ?? "tunnel.uplink.spot:7071";
       const args = [
         clientPath,
         "--token",
