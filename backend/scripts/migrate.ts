@@ -23,6 +23,7 @@ async function migrate() {
     "003_create_tokens.sql",
     "004_create_tunnel_aliases.sql",
     "005_add_alias_limit.sql",
+    "006_alias_traffic_stats.sql",
   ];
 
   if (isSqlite) {

@@ -15,6 +15,150 @@ function requireAdmin(user?: { id: string; role?: string }) {
   return user && user.role === "admin";
 }
 
+type RelayTrafficStatsResponse = {
+  relayRunId: string;
+  since: string;
+  timestamp: string;
+  totals?: {
+    tokensTracked: number;
+    aliasesTracked: number;
+    connected: number;
+    pending: number;
+  };
+  byAlias: Array<{
+    alias: string;
+    requests: number;
+    responses: number;
+    bytesIn: number;
+    bytesOut: number;
+    lastSeenAt: number | null;
+    lastStatus: number | null;
+  }>;
+};
+
+async function fetchRelayTrafficStats(): Promise<RelayTrafficStatsResponse | null> {
+  const relayHttpPort = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
+  const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
+  const relaySecret = process.env.RELAY_INTERNAL_SECRET || "";
+  const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: relayHost,
+        port: relayHttpPort,
+        path: "/internal/traffic-stats",
+        timeout: 3000,
+        headers: relaySecret ? { [INTERNAL_SECRET_HEADER]: relaySecret } : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+function isoOrNull(ms: number | null | undefined): string | null {
+  if (!ms || typeof ms !== "number") return null;
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+async function syncAliasTrafficFromRelayToDb(relay: RelayTrafficStatsResponse) {
+  if (!relay?.relayRunId || !Array.isArray(relay.byAlias)) return;
+
+  const nowIso = new Date().toISOString();
+
+  // Use a transaction; works for both pg and sqlite implementation in pool
+  await pool.query("BEGIN");
+  try {
+    for (const a of relay.byAlias) {
+      const alias = String(a.alias || "").trim().toLowerCase();
+      if (!alias) continue;
+
+      const relayRunId = relay.relayRunId;
+      const newRequests = Number(a.requests || 0);
+      const newBytesIn = Number(a.bytesIn || 0);
+      const newBytesOut = Number(a.bytesOut || 0);
+      const lastSeenAt = isoOrNull(a.lastSeenAt);
+      const lastStatus = a.lastStatus === null || a.lastStatus === undefined ? null : Number(a.lastStatus);
+
+      // Fetch previous snapshot for this alias/run to compute delta
+      const prevRes = await pool.query(
+        `SELECT requests, bytes_in, bytes_out
+         FROM alias_traffic_runs
+         WHERE alias = $1 AND relay_run_id = $2
+         LIMIT 1`,
+        [alias, relayRunId]
+      );
+      const prev = prevRes.rows?.[0] || {};
+      const prevRequests = Number(prev.requests || 0);
+      const prevBytesIn = Number(prev.bytes_in || 0);
+      const prevBytesOut = Number(prev.bytes_out || 0);
+
+      const deltaRequests = Math.max(0, newRequests - prevRequests);
+      const deltaBytesIn = Math.max(0, newBytesIn - prevBytesIn);
+      const deltaBytesOut = Math.max(0, newBytesOut - prevBytesOut);
+
+      // Upsert snapshot for this run
+      await pool.query(
+        `INSERT INTO alias_traffic_runs (alias, relay_run_id, requests, bytes_in, bytes_out, last_seen_at, last_status, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (alias, relay_run_id) DO UPDATE SET
+           requests = EXCLUDED.requests,
+           bytes_in = EXCLUDED.bytes_in,
+           bytes_out = EXCLUDED.bytes_out,
+           last_seen_at = EXCLUDED.last_seen_at,
+           last_status = EXCLUDED.last_status,
+           updated_at = EXCLUDED.updated_at`,
+        [alias, relayRunId, newRequests, newBytesIn, newBytesOut, lastSeenAt, lastStatus, nowIso]
+      );
+
+      // Update totals by delta
+      await pool.query(
+        `INSERT INTO alias_traffic_totals (alias, requests, bytes_in, bytes_out, last_seen_at, last_status, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (alias) DO UPDATE SET
+           requests = alias_traffic_totals.requests + $2,
+           bytes_in = alias_traffic_totals.bytes_in + $3,
+           bytes_out = alias_traffic_totals.bytes_out + $4,
+           last_seen_at = CASE
+             WHEN $5 IS NULL THEN alias_traffic_totals.last_seen_at
+             WHEN alias_traffic_totals.last_seen_at IS NULL THEN $5
+             WHEN $5 > alias_traffic_totals.last_seen_at THEN $5
+             ELSE alias_traffic_totals.last_seen_at
+           END,
+           last_status = COALESCE($6, alias_traffic_totals.last_status),
+           updated_at = $7`,
+        [alias, deltaRequests, deltaBytesIn, deltaBytesOut, lastSeenAt, lastStatus, nowIso]
+      );
+    }
+
+    await pool.query("COMMIT");
+  } catch (err) {
+    await pool.query("ROLLBACK").catch(() => {});
+    throw err;
+  }
+}
+
 /**
  * GET /v1/admin/stats
  * Get system statistics
@@ -131,6 +275,51 @@ async function getConnectedTokens(): Promise<Set<string>> {
     req.on("timeout", () => {
       req.destroy();
       resolve(new Set());
+    });
+  });
+}
+
+type RelayConnectedTunnel = {
+  token: string;
+  clientIp: string;
+  targetPort: number;
+  connectedAt: string;
+};
+
+async function getConnectedTunnels(): Promise<RelayConnectedTunnel[]> {
+  const relayHttpPort = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
+  const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
+  const relaySecret = process.env.RELAY_INTERNAL_SECRET || "";
+  const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: relayHost,
+        port: relayHttpPort,
+        path: "/internal/connected-tokens",
+        timeout: 3000,
+        headers: relaySecret ? { [INTERNAL_SECRET_HEADER]: relaySecret } : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            resolve((json.tunnels || []) as RelayConnectedTunnel[]);
+          } catch {
+            resolve([]);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve([]));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve([]);
     });
   });
 }
@@ -421,48 +610,93 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
     if (!requireAdmin(user)) {
       return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
     }
+    const tunnels = await getConnectedTunnels();
 
-    const relayStatusPort = Number(process.env.TUNNEL_RELAY_STATUS || 7072);
-    const relayHost = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
-
-    const statusData = await new Promise<any>((resolve) => {
-      const req = http.get(
-        {
-          host: relayHost,
-          port: relayStatusPort,
-          path: "/status",
-          timeout: 3000,
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => {
-            data += chunk.toString();
-          });
-          res.on("end", () => {
-            try {
-              resolve(JSON.parse(data));
-            } catch {
-              resolve({ error: "Failed to parse relay response", raw: data });
-            }
-          });
-        }
-      );
-      req.on("error", (err) => {
-        resolve({ error: "Relay unreachable", message: err.message });
-      });
-      req.on("timeout", () => {
-        req.destroy();
-        resolve({ error: "Relay timeout" });
-      });
+    const now = Date.now();
+    const withUptime = tunnels.map((t) => {
+      let connectedFor = "";
+      try {
+        const start = new Date(t.connectedAt).getTime();
+        const seconds = Math.max(0, Math.floor((now - start) / 1000));
+        const mins = Math.floor(seconds / 60);
+        const hrs = Math.floor(mins / 60);
+        const days = Math.floor(hrs / 24);
+        if (days > 0) connectedFor = `${days}d${hrs % 24}h`;
+        else if (hrs > 0) connectedFor = `${hrs}h${mins % 60}m`;
+        else connectedFor = `${mins}m${seconds % 60}s`;
+      } catch {
+        connectedFor = "";
+      }
+      return { ...t, connectedFor };
     });
 
-    return res.json(statusData);
+    return res.json({
+      connectedTunnels: withUptime.length,
+      tunnels: withUptime,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "admin.relay-status.error", error: err.message, stack: err.stack });
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to get relay status", { error: err.message })
     );
+  }
+});
+
+/**
+ * GET /v1/admin/traffic-stats
+ * Returns persisted totals per alias; can optionally sync from relay first with ?sync=true
+ */
+adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const sync = String(req.query.sync || "").toLowerCase() === "true";
+
+    let relayMeta: { relayRunId: string; since: string; timestamp: string } | null = null;
+    if (sync) {
+      const relay = await fetchRelayTrafficStats();
+      if (relay) {
+        relayMeta = { relayRunId: relay.relayRunId, since: relay.since, timestamp: relay.timestamp };
+        await syncAliasTrafficFromRelayToDb(relay);
+      }
+    }
+
+    const totalsRes = await pool.query(
+      `SELECT alias, requests, bytes_in, bytes_out, last_seen_at, last_status, updated_at
+       FROM alias_traffic_totals
+       ORDER BY requests DESC
+       LIMIT 200`,
+      []
+    );
+
+    const aliases = (totalsRes.rows || []).map((r: any) => ({
+      alias: r.alias,
+      requests: Number(r.requests || 0),
+      bytesIn: Number(r.bytes_in || 0),
+      bytesOut: Number(r.bytes_out || 0),
+      lastSeenAt: r.last_seen_at || null,
+      lastStatus: r.last_status === null || r.last_status === undefined ? null : Number(r.last_status),
+      updatedAt: r.updated_at,
+    }));
+
+    return res.json({
+      timestamp: new Date().toISOString(),
+      relay: relayMeta,
+      count: aliases.length,
+      aliases,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.traffic_stats.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get traffic stats"));
   }
 });
 

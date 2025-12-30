@@ -8,6 +8,7 @@ import { createTunnelSchema } from "../schemas/validation";
 import { tunnelCreationRateLimiter } from "../middleware/rate-limit";
 import { logger, auditLog } from "../utils/logger";
 import { config } from "../utils/config";
+import http from "http";
 
 export const tunnelRouter = Router();
 
@@ -15,6 +16,8 @@ const TUNNEL_DOMAIN = config.tunnelDomain;
 const ALIAS_DOMAIN = config.aliasDomain;
 const USE_HOST_ROUTING = process.env.TUNNEL_USE_HOST !== "false"; // Default to host-based
 const RELAY_INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
+const RELAY_HTTP_PORT = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
+const RELAY_HOST = process.env.TUNNEL_RELAY_HOST || "127.0.0.1";
 
 const RESERVED_ALIASES = new Set([
   "www",
@@ -41,6 +44,56 @@ function isAuthorizedRelay(req: Request): boolean {
   if (!RELAY_INTERNAL_SECRET) return true;
   const provided = req.headers["x-relay-internal-secret"];
   return provided === RELAY_INTERNAL_SECRET;
+}
+
+async function fetchRelayJson(path: string, timeoutMs: number): Promise<any | null> {
+  const headers: Record<string, string> = {};
+  if (RELAY_INTERNAL_SECRET) headers["x-relay-internal-secret"] = RELAY_INTERNAL_SECRET;
+
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: RELAY_HOST,
+        port: RELAY_HTTP_PORT,
+        path,
+        timeout: timeoutMs,
+        headers: Object.keys(headers).length ? headers : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk.toString()));
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+async function isTokenConnected(token: string): Promise<boolean> {
+  const json = await fetchRelayJson("/internal/connected-tokens", 2000);
+  const tokens = json?.tokens;
+  if (Array.isArray(tokens)) return tokens.includes(token);
+  return false;
+}
+
+type RelayTrafficStats = {
+  relayRunId?: string;
+  byToken?: Array<{ token: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: number | null; lastStatus: number | null; connected?: boolean }>;
+  byAlias?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: number | null; lastStatus: number | null }>;
+};
+
+async function fetchRelayTrafficStats(): Promise<RelayTrafficStats | null> {
+  return (await fetchRelayJson("/internal/traffic-stats", 3000)) as RelayTrafficStats | null;
 }
 
 async function getAliasForTunnel(tunnelId: string): Promise<string | null> {
@@ -451,6 +504,120 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: err.message })
     );
+  }
+});
+
+/**
+ * GET /v1/tunnels/:id/stats
+ * - If tunnel has alias: return persisted totals by alias (+ current run overlay if available).
+ * - If no alias: return in-memory per-token stats from relay.
+ */
+tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT t.id, t.owner_user_id, t.token, t.target_port, t.status, t.created_at, t.updated_at, t.expires_at, a.alias
+       FROM tunnels t
+       LEFT JOIN tunnel_aliases a ON a.tunnel_id = t.id
+       WHERE t.id = $1 AND t.status <> 'deleted'
+       LIMIT 1`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "Tunnel not found", { id }));
+    }
+
+    const row = result.rows[0] as any;
+    const ownerId = row.ownerUserId || row.owner_user_id;
+    if (ownerId !== user.id) {
+      return res.status(403).json(makeError("FORBIDDEN", "Access denied"));
+    }
+
+    const token = row.token as string;
+    const alias = row.alias ? String(row.alias) : null;
+
+    const connected = await isTokenConnected(token);
+    const relay = await fetchRelayTrafficStats();
+
+    const tokenRun = relay?.byToken?.find((t) => t.token === token) || null;
+    const aliasRun = alias ? relay?.byAlias?.find((a) => a.alias === alias) || null : null;
+
+    if (!alias) {
+      return res.json({
+        id,
+        token,
+        connected,
+        inMemory: tokenRun
+          ? {
+              requests: Number(tokenRun.requests || 0),
+              bytesIn: Number(tokenRun.bytesIn || 0),
+              bytesOut: Number(tokenRun.bytesOut || 0),
+              lastSeenAt: tokenRun.lastSeenAt ?? null,
+              lastStatus: tokenRun.lastStatus ?? null,
+              relayRunId: relay?.relayRunId || null,
+            }
+          : {
+              requests: 0,
+              bytesIn: 0,
+              bytesOut: 0,
+              lastSeenAt: null,
+              lastStatus: null,
+              relayRunId: relay?.relayRunId || null,
+            },
+      });
+    }
+
+    const totalsRes = await pool.query(
+      `SELECT alias, requests, bytes_in, bytes_out, last_seen_at, last_status, updated_at
+       FROM alias_traffic_totals
+       WHERE alias = $1
+       LIMIT 1`,
+      [alias]
+    );
+    const totalsRow = totalsRes.rows?.[0] || null;
+
+    return res.json({
+      id,
+      token,
+      alias,
+      connected,
+      totals: totalsRow
+        ? {
+            requests: Number(totalsRow.requests || 0),
+            bytesIn: Number(totalsRow.bytes_in || 0),
+            bytesOut: Number(totalsRow.bytes_out || 0),
+            lastSeenAt: totalsRow.last_seen_at || null,
+            lastStatus: totalsRow.last_status === null || totalsRow.last_status === undefined ? null : Number(totalsRow.last_status),
+            updatedAt: totalsRow.updated_at,
+          }
+        : {
+            requests: 0,
+            bytesIn: 0,
+            bytesOut: 0,
+            lastSeenAt: null,
+            lastStatus: null,
+            updatedAt: null,
+          },
+      currentRun: aliasRun
+        ? {
+            relayRunId: relay?.relayRunId || null,
+            requests: Number(aliasRun.requests || 0),
+            bytesIn: Number(aliasRun.bytesIn || 0),
+            bytesOut: Number(aliasRun.bytesOut || 0),
+            lastSeenAt: aliasRun.lastSeenAt ?? null,
+            lastStatus: aliasRun.lastStatus ?? null,
+          }
+        : { relayRunId: relay?.relayRunId || null, requests: 0, bytesIn: 0, bytesOut: 0, lastSeenAt: null, lastStatus: null },
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "tunnel.stats.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get tunnel stats"));
   }
 });
 
