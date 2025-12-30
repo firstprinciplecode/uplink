@@ -34,6 +34,9 @@ const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
+// Unique identifier for this relay process run (used to avoid double-counting in backend persistence)
+const RELAY_RUN_ID = randomUUID();
+
 // HTTP Agent with keep-alive for connection reuse (reduces TCP handshake overhead)
 const httpAgent = new http.Agent({
   keepAlive: true,
@@ -45,12 +48,35 @@ const httpAgent = new http.Agent({
 
 // token -> { socket, clientIp, targetPort, connectedAt }
 const clients = new Map();
-// requestId -> http response
+// requestId -> { res, token, alias, startedAt }
 const pending = new Map();
 // alias -> { token, timestamp }
 const aliasCache = new Map();
 const ALIAS_CACHE_TTL = 60000;
 const RESERVED_ALIASES = new Set(["www", "api", "x", "t", "docs", "support", "status", "health", "mail"]);
+
+// Traffic stats (in-memory)
+// token -> { requests, responses, bytesIn, bytesOut, lastSeenAt, lastStatus }
+const trafficByToken = new Map();
+// alias -> { requests, responses, bytesIn, bytesOut, lastSeenAt, lastStatus }
+const trafficByAlias = new Map();
+
+function getTraffic(map, key) {
+  if (!key) return null;
+  let t = map.get(key);
+  if (!t) {
+    t = {
+      requests: 0,
+      responses: 0,
+      bytesIn: 0,
+      bytesOut: 0,
+      lastSeenAt: null,
+      lastStatus: null,
+    };
+    map.set(key, t);
+  }
+  return t;
+}
 
 // Get real client IP (handle proxies)
 function getClientIp(socket) {
@@ -361,14 +387,35 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
           socket.write(JSON.stringify({ type: "registered" }) + "\n");
           
         } else if (msg.type === "response" && msg.id) {
-          const res = pending.get(msg.id);
-          if (!res) {
+          const entry = pending.get(msg.id);
+          if (!entry) {
             log("warn", "Response for unknown request:", msg.id);
             return;
           }
           pending.delete(msg.id);
           
+          const res = entry.res;
+          const token = entry.token;
+          const alias = entry.alias;
+          
           const body = msg.body ? Buffer.from(msg.body, "base64") : Buffer.alloc(0);
+          
+          // Update traffic stats (response side)
+          const nowMs = Date.now();
+          const tTok = getTraffic(trafficByToken, token);
+          if (tTok) {
+            tTok.responses += 1;
+            tTok.bytesOut += body.length;
+            tTok.lastSeenAt = nowMs;
+            tTok.lastStatus = msg.status || 502;
+          }
+          const tAli = getTraffic(trafficByAlias, alias);
+          if (tAli) {
+            tAli.responses += 1;
+            tAli.bytesOut += body.length;
+            tAli.lastSeenAt = nowMs;
+            tAli.lastStatus = msg.status || 502;
+          }
           
           // Set headers (sanitize)
           Object.entries(msg.headers || {}).forEach(([k, v]) => {
@@ -420,7 +467,7 @@ const httpServer = http.createServer(async (req, res) => {
   const pathname = req.url.split("?")[0]; // Extract pathname before URL parsing
 
   // Internal endpoints (protected by optional shared secret)
-  if (pathname === "/internal/connected-tokens" || pathname === "/health") {
+  if (pathname === "/internal/connected-tokens" || pathname === "/internal/traffic-stats" || pathname === "/health") {
     if (INTERNAL_SECRET && req.headers[INTERNAL_SECRET_HEADER] !== INTERNAL_SECRET) {
       res.writeHead(403, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "forbidden" }));
@@ -440,6 +487,53 @@ const httpServer = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ tokens: tunnels.map(t => t.token), tunnels }));
+  }
+
+  // Internal endpoint: traffic stats (no IPs, secret protected)
+  if (pathname === "/internal/traffic-stats") {
+    const byToken = [];
+    for (const [token, t] of trafficByToken.entries()) {
+      byToken.push({
+        token,
+        connected: clients.has(token),
+        requests: t.requests,
+        responses: t.responses,
+        bytesIn: t.bytesIn,
+        bytesOut: t.bytesOut,
+        lastSeenAt: t.lastSeenAt,
+        lastStatus: t.lastStatus,
+      });
+    }
+
+    const byAlias = [];
+    for (const [alias, t] of trafficByAlias.entries()) {
+      byAlias.push({
+        alias,
+        requests: t.requests,
+        responses: t.responses,
+        bytesIn: t.bytesIn,
+        bytesOut: t.bytesOut,
+        lastSeenAt: t.lastSeenAt,
+        lastStatus: t.lastStatus,
+      });
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(
+      JSON.stringify({
+        relayRunId: RELAY_RUN_ID,
+        since: new Date(stats.startTime).toISOString(),
+        timestamp: new Date().toISOString(),
+        totals: {
+          tokensTracked: trafficByToken.size,
+          aliasesTracked: trafficByAlias.size,
+          connected: clients.size,
+          pending: pending.size,
+        },
+        byToken,
+        byAlias,
+      })
+    );
   }
 
   const url = new URL(req.url, `http://${host || "localhost"}`);
@@ -465,9 +559,11 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   let token = extractTokenFromHost(host);
+  let aliasKey = null;
   if (!token) {
     const alias = extractAliasFromHost(host);
     if (alias) {
+      aliasKey = alias;
       token = await resolveAliasToToken(alias);
       if (!token) {
         res.statusCode = 404;
@@ -524,7 +620,22 @@ const httpServer = http.createServer(async (req, res) => {
   const body = Buffer.concat(chunks);
 
   const id = randomUUID();
-  pending.set(id, res);
+  pending.set(id, { res, token, alias: aliasKey, startedAt: Date.now() });
+
+  // Update traffic stats (request side)
+  const nowMs = Date.now();
+  const tTok = getTraffic(trafficByToken, token);
+  if (tTok) {
+    tTok.requests += 1;
+    tTok.bytesIn += body.length;
+    tTok.lastSeenAt = nowMs;
+  }
+  const tAli = getTraffic(trafficByAlias, aliasKey);
+  if (tAli) {
+    tAli.requests += 1;
+    tAli.bytesIn += body.length;
+    tAli.lastSeenAt = nowMs;
+  }
 
   const msg = {
     type: "request",
@@ -570,6 +681,7 @@ httpServer.listen(LISTEN_HTTP, LISTEN_HTTP_HOST, () => {
   log(`Expected token format: <token>.${TUNNEL_DOMAIN}`);
   log(`Expected alias format: <alias>.${ALIAS_DOMAIN}`);
   log(`Max request size: ${MAX_REQUEST_SIZE / 1024 / 1024}MB`);
+  log(`Relay run id: ${RELAY_RUN_ID}`);
 });
 
 httpServer.on("error", (err) => {

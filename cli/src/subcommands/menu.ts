@@ -98,6 +98,15 @@ function truncate(text: string, max: number) {
   return text.slice(0, max - 1) + "…";
 }
 
+function formatBytes(bytes: number): string {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const idx = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const val = n / Math.pow(1024, idx);
+  return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
 function restoreRawMode() {
   try {
     process.stdin.setRawMode(true);
@@ -517,6 +526,70 @@ export const menuCommand = new Command("menu")
               return "test:comprehensive completed";
             },
           },
+          {
+            label: "View Connected Tunnels",
+            action: async () => {
+              try {
+                const data = await apiRequest("GET", "/v1/admin/relay-status") as {
+                  connectedTunnels?: number;
+                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
+                  timestamp?: string;
+                  error?: string;
+                  message?: string;
+                };
+
+                if (data.error) {
+                  return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+                }
+                if (!data.tunnels || data.tunnels.length === 0) {
+                  return "No tunnels currently connected to the relay.";
+                }
+
+                const lines = data.tunnels.map((t) =>
+                  `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
+                );
+
+                return [
+                  `Connected Tunnels: ${data.connectedTunnels}`,
+                  "",
+                  "Token          Client IP        Port   Uptime     Connected At",
+                  "-".repeat(75),
+                  ...lines,
+                ].join("\n");
+              } catch (err: any) {
+                return `Error: Failed to get relay status - ${err.message}`;
+              }
+            },
+          },
+          {
+            label: "View Traffic Stats",
+            action: async () => {
+              const data = await apiRequest("GET", "/v1/admin/traffic-stats?sync=true") as {
+                count?: number;
+                aliases?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: string | null; lastStatus: number | null }>;
+              };
+
+              const aliases = data.aliases || [];
+              if (aliases.length === 0) return "No persisted alias stats yet.";
+
+              const top = aliases.slice(0, 25);
+              const lines = top.map((a) => {
+                const last = a.lastSeenAt ? truncate(a.lastSeenAt, 19) : "-";
+                return `${truncate(a.alias, 22).padEnd(24)} ${String(a.requests || 0).padStart(8)}  ${formatBytes(a.bytesIn || 0).padStart(9)}  ${formatBytes(a.bytesOut || 0).padStart(9)}  ${String(a.lastStatus ?? "-").padStart(3)}  ${last}`;
+              });
+
+              return [
+                `Aliases tracked: ${aliases.length}`,
+                "",
+                "Alias                    Requests   In         Out        Sts  Last Seen",
+                "-".repeat(75),
+                ...lines,
+                aliases.length > top.length ? `\nShowing top ${top.length} by requests.` : "",
+              ]
+                .filter(Boolean)
+                .join("\n");
+            },
+          },
         ],
       });
     }
@@ -690,6 +763,62 @@ export const menuCommand = new Command("menu")
                 restoreRawMode();
                 throw err;
               }
+            },
+          },
+          {
+            label: "View Tunnel Stats",
+            action: async () => {
+              const data = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = data.tunnels || [];
+              if (!tunnels.length) return "No tunnels found.";
+
+              const options: SelectOption[] = tunnels.map((t: any) => {
+                const token = truncate(t.token || "", 10);
+                const alias = t.alias ? truncate(String(t.alias), 16) : "-";
+                const port = t.target_port ?? t.targetPort ?? "-";
+                return {
+                  label: `${token.padEnd(12)} port ${String(port).padEnd(5)} alias ${alias}`,
+                  value: t.id,
+                };
+              });
+
+              const choice = await inlineSelect("Select tunnel", options, true);
+              if (choice === null) return "";
+
+              const stats = await apiRequest("GET", `/v1/tunnels/${choice.value}/stats`) as any;
+              const connected = stats.connected ? "yes" : "no";
+              const alias = stats.alias || null;
+
+              if (!alias) {
+                const s = stats.inMemory || {};
+                return [
+                  `Connected: ${connected}`,
+                  `Requests:  ${s.requests || 0}`,
+                  `In:        ${formatBytes(s.bytesIn || 0)}`,
+                  `Out:       ${formatBytes(s.bytesOut || 0)}`,
+                  `LastSeen:  ${s.lastSeenAt ? new Date(s.lastSeenAt).toISOString() : "-"}`,
+                  `Status:    ${s.lastStatus ?? "-"}`,
+                ].join("\n");
+              }
+
+              const totals = stats.totals || {};
+              const run = stats.currentRun || {};
+              return [
+                `Alias:     ${alias}`,
+                `Connected: ${connected}`,
+                "",
+                "Totals (persisted):",
+                `  Requests  ${totals.requests || 0}`,
+                `  In        ${formatBytes(totals.bytesIn || 0)}`,
+                `  Out       ${formatBytes(totals.bytesOut || 0)}`,
+                `  LastSeen  ${totals.lastSeenAt ? truncate(String(totals.lastSeenAt), 19) : "-"}`,
+                "",
+                "Current run (relay):",
+                `  Requests  ${run.requests || 0}`,
+                `  In        ${formatBytes(run.bytesIn || 0)}`,
+                `  Out       ${formatBytes(run.bytesOut || 0)}`,
+                `  LastSeen  ${run.lastSeenAt ? new Date(run.lastSeenAt).toISOString() : "-"}`,
+              ].join("\n");
             },
           },
         ],
