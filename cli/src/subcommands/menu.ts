@@ -1,12 +1,16 @@
 import { Command } from "commander";
 import fetch from "node-fetch";
-import { spawn, execSync } from "child_process";
-import readline from "readline";
-import { apiRequest } from "../http";
-import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import { apiRequest } from "../http";
+import { scanCommonPorts } from "../utils/port-scanner";
+import { ASCII_UPLINK, colorCyan, colorDim, colorGreen, colorRed, colorWhite, colorYellow } from "./menu/colors";
+import { clearScreen, promptLine, restoreRawMode, truncate } from "./menu/io";
+import { inlineSelect, SelectOption } from "./menu/inline-select";
+import { unauthenticatedRequest } from "./menu/requests";
+import { createAndStartTunnel, findTunnelClients } from "./menu/tunnels";
+import { runSmoke } from "./menu/tests";
 
 type MenuChoice = {
   label: string;
@@ -14,232 +18,9 @@ type MenuChoice = {
   subMenu?: MenuChoice[];
 };
 
-function promptLine(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    try {
-      process.stdin.setRawMode(false);
-    } catch {
-      /* ignore */
-    }
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-function clearScreen() {
-  process.stdout.write("\x1b[2J\x1b[0f");
-}
-
-// ─────────────────────────────────────────────────────────────
-// Color palette (Oxide-inspired)
-// ─────────────────────────────────────────────────────────────
-const c = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  // Colors
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  red: "\x1b[31m",
-  magenta: "\x1b[35m",
-  white: "\x1b[97m",
-  gray: "\x1b[90m",
-  // Bright variants
-  brightCyan: "\x1b[96m",
-  brightGreen: "\x1b[92m",
-  brightYellow: "\x1b[93m",
-  brightWhite: "\x1b[97m",
-};
-
-function colorCyan(text: string) {
-  return `${c.brightCyan}${text}${c.reset}`;
-}
-
-function colorYellow(text: string) {
-  return `${c.yellow}${text}${c.reset}`;
-}
-
-function colorGreen(text: string) {
-  return `${c.brightGreen}${text}${c.reset}`;
-}
-
-function colorDim(text: string) {
-  return `${c.dim}${text}${c.reset}`;
-}
-
-function colorBold(text: string) {
-  return `${c.bold}${c.brightWhite}${text}${c.reset}`;
-}
-
-function colorRed(text: string) {
-  return `${c.red}${text}${c.reset}`;
-}
-
-function colorWhite(text: string) {
-  return `${c.brightWhite}${text}${c.reset}`;
-}
-
 const TOKEN_DOMAIN = process.env.TUNNEL_DOMAIN || "x.uplink.spot";
 const ALIAS_DOMAIN = process.env.ALIAS_DOMAIN || "uplink.spot";
 const URL_SCHEME = (process.env.TUNNEL_URL_SCHEME || "https").toLowerCase();
-
-// ASCII banner with color styling
-const ASCII_UPLINK = colorWhite([
-  "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
-  "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
-  "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
-  "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
-  "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
-  " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
-].join("\n"));
-
-function truncate(text: string, max: number) {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 1) + "…";
-}
-
-function restoreRawMode() {
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-}
-
-// Inline arrow-key selector (returns selected index, or -1 for "Back")
-type SelectOption = { label: string; value: string | number | null };
-
-async function inlineSelect(
-  title: string,
-  options: SelectOption[],
-  includeBack: boolean = true
-): Promise<{ index: number; value: string | number | null } | null> {
-  return new Promise((resolve) => {
-    // Add "Back" option if requested
-    const allOptions = includeBack 
-      ? [...options, { label: "Back", value: null }]
-      : options;
-    
-    let selected = 0;
-    
-    const renderSelector = () => {
-      // Clear previous render (move cursor up and clear lines)
-      const linesToClear = allOptions.length + 3;
-      process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
-      
-      console.log();
-      console.log(colorDim(title));
-      console.log();
-      
-      allOptions.forEach((opt, idx) => {
-        const isLast = idx === allOptions.length - 1;
-        const isSelected = idx === selected;
-        const branch = isLast ? "└─" : "├─";
-        
-        let label: string;
-        let branchColor: string;
-        
-        if (isSelected) {
-          // Selected: cyan highlight
-          branchColor = colorCyan(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = colorCyan(opt.label);
-          }
-        } else {
-          // Not selected: white
-          branchColor = colorWhite(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = colorWhite(opt.label);
-          }
-        }
-        
-        console.log(`${branchColor} ${label}`);
-      });
-    };
-    
-    // Initial render - print blank lines first so we can clear them
-    console.log();
-    console.log(colorDim(title));
-    console.log();
-    allOptions.forEach((opt, idx) => {
-      const isLast = idx === allOptions.length - 1;
-      const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorCyan(branch) : colorWhite(branch);
-      const label = idx === 0 ? colorCyan(opt.label) : (opt.label === "Back" ? colorDim(opt.label) : colorWhite(opt.label));
-      console.log(`${branchColor} ${label}`);
-    });
-    
-    // Set up key handler
-    try {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-    } catch {
-      /* ignore */
-    }
-    
-    const keyHandler = (key: Buffer) => {
-      const str = key.toString();
-      
-      if (str === "\u0003") {
-        // Ctrl+C
-        process.stdin.removeListener("data", keyHandler);
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.exit(0);
-      } else if (str === "\u001b[A") {
-        // Up arrow
-        selected = (selected - 1 + allOptions.length) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[B") {
-        // Down arrow
-        selected = (selected + 1) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[D") {
-        // Left arrow - same as selecting "Back"
-        process.stdin.removeListener("data", keyHandler);
-        resolve(null);
-      } else if (str === "\r") {
-        // Enter
-        process.stdin.removeListener("data", keyHandler);
-        const selectedOption = allOptions[selected];
-        if (selectedOption.label === "Back" || selectedOption.value === null) {
-          resolve(null);
-        } else {
-          resolve({ index: selected, value: selectedOption.value });
-        }
-      }
-    };
-    
-    process.stdin.on("data", keyHandler);
-  });
-}
-
-// Helper function to make unauthenticated requests (for signup)
-async function unauthenticatedRequest(method: string, path: string, body?: unknown): Promise<any> {
-  const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-  const response = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(JSON.stringify(json, null, 2));
-  }
-  return json;
-}
 
 export const menuCommand = new Command("menu")
   .description("Interactive terminal menu (arrow keys + enter)")
@@ -262,6 +43,7 @@ export const menuCommand = new Command("menu")
         errorMsg.includes("Missing AGENTCLOUD_TOKEN");
       isAdmin = false;
     }
+
 
     // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
@@ -317,6 +99,7 @@ export const menuCommand = new Command("menu")
             const token = result.token;
             const tokenId = result.id;
             const userId = result.userId;
+            const safeToken = token.replace(/'/g, `'\"'\"'`);
 
             process.stdout.write("\n");
             process.stdout.write(colorGreen("✓") + " Account created\n");
@@ -378,13 +161,13 @@ export const menuCommand = new Command("menu")
                     const lines = configContent.split("\n");
                     const updatedLines = lines.map((line) => {
                       if (line.match(/^\s*export\s+AGENTCLOUD_TOKEN=/)) {
-                        return `export AGENTCLOUD_TOKEN=${token}`;
+                        return `export AGENTCLOUD_TOKEN='${safeToken}'`;
                       }
                       return line;
                     });
                     const wasReplaced = updatedLines.some((line, idx) => line !== lines[idx]);
                     if (!wasReplaced) {
-                      updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
+                      updatedLines.push(`export AGENTCLOUD_TOKEN='${safeToken}'`);
                     }
                     writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
                     tokenAdded = true;
@@ -394,7 +177,7 @@ export const menuCommand = new Command("menu")
                       console.log(colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`));
                     }
                   } else {
-                    const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
+                    const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN='${safeToken}'\n`;
                     writeFileSync(configFile, exportLine, { flag: "a", mode: 0o644 });
                     tokenAdded = true;
                     console.log(colorGreen(`\n✓ Token added to ~/.${shellName}rc`));
@@ -668,7 +451,7 @@ export const menuCommand = new Command("menu")
                   // Kill all
                   for (const p of processes) {
                     try {
-                      execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
+                      process.kill(p.pid, "SIGTERM");
                       killed++;
                     } catch {
                       // Process might have already exited
@@ -678,7 +461,7 @@ export const menuCommand = new Command("menu")
                   // Kill specific client
                   const pid = result.value as number;
                   try {
-                    execSync(`kill -TERM ${pid}`, { stdio: "ignore" });
+                    process.kill(pid, "SIGTERM");
                     killed = 1;
                   } catch (err: any) {
                     restoreRawMode();
@@ -1042,7 +825,7 @@ export const menuCommand = new Command("menu")
           let killed = 0;
           for (const client of clients) {
             try {
-              execSync(`kill -TERM ${client.pid}`, { stdio: "ignore" });
+              process.kill(client.pid, "SIGTERM");
               killed++;
             } catch {
               // Process might have already exited
@@ -1327,284 +1110,3 @@ export const menuCommand = new Command("menu")
     process.stdin.on("data", onKey);
   });
 
-async function createAndStartTunnel(port: number): Promise<string> {
-  // Create tunnel
-  const result = await apiRequest("POST", "/v1/tunnels", { port });
-  const url = result.url || "(no url)";
-  const token = result.token || "(no token)";
-  const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
-  
-  // Start tunnel client in background
-  const path = require("path");
-  const projectRoot = path.join(__dirname, "../../..");
-  const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
-  const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
-    stdio: "ignore",
-    detached: true,
-    cwd: projectRoot,
-  });
-  clientProcess.unref();
-  
-  // Wait a moment for client to connect
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-  
-  return [
-    `✓ Tunnel created and client started`,
-    ``,
-    `→ Public URL    ${url}`,
-    `→ Token         ${token}`,
-    `→ Local port    ${port}`,
-    ``,
-    `Tunnel client running in background.`,
-    `Use "Stop Tunnel" to disconnect.`,
-  ].join("\n");
-}
-
-function findTunnelClients(): Array<{ pid: number; port: number; token: string }> {
-  try {
-    // Find processes running client-improved.js (current user, match script path to avoid false positives)
-    const user = process.env.USER || "";
-    const psCmd = user
-      ? `ps -u ${user} -o pid=,command=`
-      : "ps -eo pid=,command=";
-    const output = execSync(psCmd, { encoding: "utf-8" });
-    const lines = output
-      .trim()
-      .split("\n")
-      .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
-    
-    const clients: Array<{ pid: number; port: number; token: string }> = [];
-    
-    for (const line of lines) {
-      // Parse process line: PID COMMAND (pid may have leading whitespace)
-      // Format: "56218 node /path/to/client-improved.js --token TOKEN --port PORT --ctrl CTRL"
-      const pidMatch = line.match(/^\s*(\d+)/);
-      const tokenMatch = line.match(/--token\s+(\S+)/);
-      const portMatch = line.match(/--port\s+(\d+)/);
-      
-      if (pidMatch && tokenMatch && portMatch) {
-        clients.push({
-          pid: parseInt(pidMatch[1], 10),
-          port: parseInt(portMatch[1], 10),
-          token: tokenMatch[1],
-        });
-      }
-    }
-    
-    return clients;
-  } catch {
-    return [];
-  }
-}
-
-function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {
-  return new Promise<void>((resolve, reject) => {
-    const projectRoot = join(__dirname, "../../..");
-    const env = {
-      ...process.env,
-      AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot",
-      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN,
-    };
-
-    // For test:comprehensive, run inline (no subprocess)
-    if (script === "test:comprehensive") {
-      runComprehensiveTest(env).then(resolve).catch(reject);
-      return;
-    }
-
-    // For other scripts, use npm run with shell mode from project root
-    const child = spawn("npm", ["run", script], { 
-      stdio: "inherit", 
-      env, 
-      cwd: projectRoot,
-      shell: true 
-    });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${script} failed with exit code ${code}`));
-      }
-    });
-    child.on("error", (err) => reject(err));
-  });
-}
-
-// Inline comprehensive test (no subprocess needed)
-async function runComprehensiveTest(env: Record<string, string | undefined>) {
-  const API_BASE = env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-  const ADMIN_TOKEN = env.AGENTCLOUD_TOKEN || "";
-  
-  const c = {
-    reset: "\x1b[0m",
-    red: "\x1b[31m",
-    green: "\x1b[32m",
-    yellow: "\x1b[33m",
-    blue: "\x1b[34m",
-  };
-  
-  let PASSED = 0;
-  let FAILED = 0;
-  let SKIPPED = 0;
-  
-  const logPass = (msg: string) => { console.log(`${c.green}✅ PASS${c.reset}: ${msg}`); PASSED++; };
-  const logFail = (msg: string) => { console.log(`${c.red}❌ FAIL${c.reset}: ${msg}`); FAILED++; };
-  const logSkip = (msg: string) => { console.log(`${c.yellow}⏭️  SKIP${c.reset}: ${msg}`); SKIPPED++; };
-  const logInfo = (msg: string) => { console.log(`${c.blue}ℹ️  INFO${c.reset}: ${msg}`); };
-  const logSection = (title: string) => {
-    console.log(`\n${c.blue}═══════════════════════════════════════════════════════════${c.reset}`);
-    console.log(`${c.blue}  ${title}${c.reset}`);
-    console.log(`${c.blue}═══════════════════════════════════════════════════════════${c.reset}`);
-  };
-  
-  const api = async (method: string, path: string, body?: object, token?: string) => {
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      
-      const res = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      
-      let responseBody: any;
-      try { responseBody = await res.json(); } catch { responseBody = {}; }
-      return { status: res.status, body: responseBody };
-    } catch (err: any) {
-      return { status: 0, body: { error: err.message } };
-    }
-  };
-  
-  console.log("");
-  console.log("╔═══════════════════════════════════════════════════════════╗");
-  console.log("║       UPLINK COMPREHENSIVE TEST SUITE                     ║");
-  console.log("╚═══════════════════════════════════════════════════════════╝");
-  console.log(`\nAPI Base: ${API_BASE}\n`);
-  
-  if (!ADMIN_TOKEN) {
-    console.log(`${c.red}ERROR: AGENTCLOUD_TOKEN not set.${c.reset}`);
-    throw new Error("AGENTCLOUD_TOKEN not set");
-  }
-  
-  // 1. Health
-  logSection("1. HEALTH CHECKS");
-  let res = await api("GET", "/health");
-  if (res.status === 200 && res.body?.status === "ok") logPass("GET /health returns 200");
-  else logFail(`GET /health - got ${res.status}`);
-  
-  res = await api("GET", "/health/live");
-  if (res.status === 200) logPass("GET /health/live returns 200");
-  else logFail(`GET /health/live - got ${res.status}`);
-  
-  // 2. Auth
-  logSection("2. AUTHENTICATION");
-  res = await api("GET", "/v1/me");
-  if (res.status === 401) logPass("Missing token returns 401");
-  else logFail(`Missing token - got ${res.status}`);
-  
-  res = await api("GET", "/v1/me", undefined, "invalid-token");
-  if (res.status === 401) logPass("Invalid token returns 401");
-  else logFail(`Invalid token - got ${res.status}`);
-  
-  res = await api("GET", "/v1/me", undefined, ADMIN_TOKEN);
-  if (res.status === 200 && res.body?.role === "admin") logPass("Valid admin token works");
-  else logFail(`Admin token - got ${res.status}`);
-  
-  // 3. Signup
-  logSection("3. SIGNUP FLOW");
-  let USER_TOKEN = "";
-  let USER_TOKEN_ID = "";
-  res = await api("POST", "/v1/signup", { label: `test-${Date.now()}` });
-  if (res.status === 201 && res.body?.token) {
-    USER_TOKEN = res.body.token;
-    USER_TOKEN_ID = res.body.id;
-    logPass("POST /v1/signup creates token");
-    if (res.body.role === "user") logPass("Signup creates user role");
-    else logFail(`Signup role: ${res.body.role}`);
-  } else if (res.status === 429) {
-    logSkip("Signup rate limited");
-  } else {
-    logFail(`Signup - got ${res.status}`);
-  }
-  
-  // 4. Authorization
-  logSection("4. AUTHORIZATION");
-  if (USER_TOKEN) {
-    res = await api("GET", "/v1/admin/stats", undefined, USER_TOKEN);
-    if (res.status === 403) logPass("User blocked from admin endpoint");
-    else logFail(`User accessed admin - got ${res.status}`);
-  } else {
-    logSkip("No user token for auth tests");
-  }
-  
-  // 5. Tunnels
-  logSection("5. TUNNEL API");
-  res = await api("GET", "/v1/tunnels", undefined, ADMIN_TOKEN);
-  if (res.status === 200) logPass("GET /v1/tunnels works");
-  else logFail(`Tunnels list - got ${res.status}`);
-  
-  res = await api("POST", "/v1/tunnels", { port: 3000 }, ADMIN_TOKEN);
-  if (res.status === 201) {
-    logPass("POST /v1/tunnels creates tunnel");
-    if (res.body?.id) {
-      const delRes = await api("DELETE", `/v1/tunnels/${res.body.id}`, undefined, ADMIN_TOKEN);
-      if (delRes.status === 200) logPass("DELETE tunnel works");
-      else logFail(`Delete tunnel - got ${delRes.status}`);
-    }
-  } else {
-    logFail(`Create tunnel - got ${res.status}`);
-  }
-  
-  // 6. Databases
-  logSection("6. DATABASE API");
-  res = await api("GET", "/v1/dbs", undefined, ADMIN_TOKEN);
-  if (res.status === 200) logPass("GET /v1/dbs works");
-  else logFail(`Databases list - got ${res.status}`);
-  logInfo("Skipping DB creation (provisions real resources)");
-  
-  // 7. Admin Stats
-  logSection("7. ADMIN STATS");
-  res = await api("GET", "/v1/admin/stats", undefined, ADMIN_TOKEN);
-  if (res.status === 200) {
-    logPass("GET /v1/admin/stats works");
-    if (res.body?.tunnels !== undefined) logPass("Stats include tunnels");
-    if (res.body?.databases !== undefined) logPass("Stats include databases");
-  } else {
-    logFail(`Admin stats - got ${res.status}`);
-  }
-  
-  // Cleanup
-  logSection("8. CLEANUP");
-  if (USER_TOKEN_ID) {
-    res = await api("DELETE", `/v1/admin/tokens/${USER_TOKEN_ID}`, undefined, ADMIN_TOKEN);
-    if (res.status === 200) logPass("Cleaned up test token");
-    else logInfo("Could not clean up token");
-  } else {
-    logInfo("No test token to clean up");
-  }
-  
-  // Summary
-  logSection("TEST SUMMARY");
-  console.log(`\n  ${c.green}Passed${c.reset}:  ${PASSED}`);
-  console.log(`  ${c.red}Failed${c.reset}:  ${FAILED}`);
-  console.log(`  ${c.yellow}Skipped${c.reset}: ${SKIPPED}\n`);
-  
-  if (FAILED === 0) {
-    console.log(`${c.green}═══════════════════════════════════════════════════════════${c.reset}`);
-    console.log(`${c.green}  ✅ ALL TESTS PASSED (${PASSED}/${PASSED + FAILED})${c.reset}`);
-    console.log(`${c.green}═══════════════════════════════════════════════════════════${c.reset}`);
-  } else {
-    console.log(`${c.red}═══════════════════════════════════════════════════════════${c.reset}`);
-    console.log(`${c.red}  ❌ SOME TESTS FAILED (${FAILED}/${PASSED + FAILED})${c.reset}`);
-    console.log(`${c.red}═══════════════════════════════════════════════════════════${c.reset}`);
-    throw new Error(`${FAILED} tests failed`);
-  }
-}
