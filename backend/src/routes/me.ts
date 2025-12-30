@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { makeError } from "../schemas/error";
 
 interface AuthedRequest extends Request {
-  user?: { id: string; role?: string };
+  user?: { id: string; role: "admin" | "user" };
 }
 
 export const meRouter = Router();

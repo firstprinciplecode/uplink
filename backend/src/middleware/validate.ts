@@ -6,18 +6,18 @@ import { logger } from "../utils/logger";
 export function validateBody(schema: ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      req.body = schema.parse(req.body);
+      req.body = schema.parse(req.body) as any;
       next();
     } catch (error) {
       if (error instanceof ZodError) {
         logger.warn({
           event: "validation.failed",
           path: req.path,
-          errors: error.errors,
+          errors: error.issues,
         });
         return res.status(400).json(
           makeError("VALIDATION_ERROR", "Invalid request body", {
-            errors: error.errors.map((e) => ({
+            errors: error.issues.map((e) => ({
               path: e.path.join("."),
               message: e.message,
             })),
@@ -32,18 +32,18 @@ export function validateBody(schema: ZodSchema) {
 export function validateQuery(schema: ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      req.query = schema.parse(req.query);
+      req.query = schema.parse(req.query) as any;
       next();
     } catch (error) {
       if (error instanceof ZodError) {
         logger.warn({
           event: "validation.failed",
           path: req.path,
-          errors: error.errors,
+          errors: error.issues,
         });
         return res.status(400).json(
           makeError("VALIDATION_ERROR", "Invalid query parameters", {
-            errors: error.errors.map((e) => ({
+            errors: error.issues.map((e) => ({
               path: e.path.join("."),
               message: e.message,
             })),

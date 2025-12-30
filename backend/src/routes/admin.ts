@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
-import http from "http";
+import * as http from "http";
 import { randomUUID, randomBytes } from "crypto";
 import { hashToken, tokenPrefix } from "../utils/token-hash";
 import { validateBody, validateQuery } from "../middleware/validate";
@@ -10,6 +10,10 @@ import { tokenCreationRateLimiter } from "../middleware/rate-limit";
 import { logger, auditLog } from "../utils/logger";
 
 export const adminRouter = Router();
+
+interface AuthedRequest extends Request {
+  user?: { id: string; role: "admin" | "user" };
+}
 
 function requireAdmin(user?: { id: string; role?: string }) {
   return user && user.role === "admin";
@@ -163,7 +167,7 @@ async function syncAliasTrafficFromRelayToDb(relay: RelayTrafficStatsResponse) {
  * GET /v1/admin/stats
  * Get system statistics
  */
-adminRouter.get("/stats", async (req: Request, res: Response) => {
+adminRouter.get("/stats", async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -328,7 +332,7 @@ async function getConnectedTunnels(): Promise<RelayConnectedTunnel[]> {
  * GET /v1/admin/tunnels
  * List all tunnels (admin view) with connection status from relay
  */
-adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
+adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -381,10 +385,10 @@ adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: Request,
       offset,
     });
   } catch (error: unknown) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    logger.error({ event: "admin.tunnels.list.error", error: err.message, stack: err.stack });
+    const err = error as any;
+    logger.error({ event: "admin.tunnels.list.error", error: err?.message });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to list tunnels", { error: err?.message })
     );
   }
 });
@@ -393,7 +397,7 @@ adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: Request,
  * GET /v1/admin/databases
  * List all databases (admin view)
  */
-adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
+adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -435,10 +439,10 @@ adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: Reques
       offset,
     });
   } catch (error: unknown) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    logger.error({ event: "admin.databases.list.error", error: err.message, stack: err.stack });
+    const err = error as any;
+    logger.error({ event: "admin.databases.list.error", error: err?.message });
     return res.status(500).json(
-      makeError("INTERNAL_ERROR", "Failed to list databases", { error: error.message })
+      makeError("INTERNAL_ERROR", "Failed to list databases", { error: err?.message })
     );
   }
 });
@@ -447,7 +451,7 @@ adminRouter.get("/databases", validateQuery(listQuerySchema), async (req: Reques
  * GET /v1/admin/tokens
  * List tokens (does NOT return raw tokens, only metadata)
  */
-adminRouter.get("/tokens", validateQuery(listQuerySchema), async (req: Request, res: Response) => {
+adminRouter.get("/tokens", validateQuery(listQuerySchema), async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -494,7 +498,7 @@ adminRouter.post(
   "/tokens",
   tokenCreationRateLimiter,
   validateBody(createTokenSchema),
-  async (req: Request, res: Response) => {
+  async (req: AuthedRequest, res: Response) => {
     try {
       const user = req.user;
       if (!user) {
@@ -562,7 +566,7 @@ adminRouter.post(
 adminRouter.post(
   "/tokens/revoke",
   validateBody(revokeTokenSchema),
-  async (req: Request, res: Response) => {
+  async (req: AuthedRequest, res: Response) => {
     try {
       const user = req.user;
       if (!user) {
@@ -601,7 +605,7 @@ adminRouter.post(
  * GET /v1/admin/relay-status
  * Get relay status including connected tunnels with client IPs
  */
-adminRouter.get("/relay-status", async (req: Request, res: Response) => {
+adminRouter.get("/relay-status", async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -610,9 +614,6 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
     if (!requireAdmin(user)) {
       return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status entry',data:{userId:user.id,role:user.role,relayHost:process.env.TUNNEL_RELAY_HOST||'127.0.0.1',relayHttp:process.env.TUNNEL_RELAY_HTTP||'7070'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const tunnels = await getConnectedTunnels();
 
     const now = Date.now();
@@ -633,9 +634,6 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
       return { ...t, connectedFor };
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status result',data:{count:withUptime.length,rawCount:tunnels.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.json({
       connectedTunnels: withUptime.length,
       tunnels: withUptime,
@@ -644,9 +642,6 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "admin.relay-status.error", error: err.message, stack: err.stack });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status error',data:{error:err.message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to get relay status", { error: err.message })
     );
@@ -657,7 +652,7 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
  * GET /v1/admin/traffic-stats
  * Returns persisted totals per alias; can optionally sync from relay first with ?sync=true
  */
-adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
+adminRouter.get("/traffic-stats", async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -669,19 +664,12 @@ adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
 
     const sync = String(req.query.sync || "").toLowerCase() === "true";
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'traffic-stats entry',data:{userId:user.id,role:user.role,sync},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-
     let relayMeta: { relayRunId: string; since: string; timestamp: string } | null = null;
     if (sync) {
       const relay = await fetchRelayTrafficStats();
       if (relay) {
         relayMeta = { relayRunId: relay.relayRunId, since: relay.since, timestamp: relay.timestamp };
         await syncAliasTrafficFromRelayToDb(relay);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'relay sync done',data:{relayRunId:relay.relayRunId,byAliasCount:Array.isArray(relay.byAlias)?relay.byAlias.length:null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       }
     }
 
@@ -712,9 +700,6 @@ adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "admin.traffic_stats.error", error: err.message, stack: err.stack });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'traffic-stats error',data:{error:err.message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get traffic stats"));
   }
 });
@@ -723,7 +708,7 @@ adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
  * POST /v1/admin/cleanup/dev-user-tunnels
  * Clean up old tunnels owned by dev-user (from before token system)
  */
-adminRouter.post("/cleanup/dev-user-tunnels", async (req: Request, res: Response) => {
+adminRouter.post("/cleanup/dev-user-tunnels", async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -747,11 +732,11 @@ adminRouter.post("/cleanup/dev-user-tunnels", async (req: Request, res: Response
       message: `Marked ${result.rowCount || 0} dev-user tunnels as deleted`,
     });
   } catch (error: unknown) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    logger.error({ event: "admin.cleanup.error", error: err.message, stack: err.stack });
+    const err = error as any;
+    logger.error({ event: "admin.cleanup.error", error: err?.message });
     return res
       .status(500)
-      .json(makeError("INTERNAL_ERROR", "Failed to cleanup tunnels", { error: error.message }));
+      .json(makeError("INTERNAL_ERROR", "Failed to cleanup tunnels", { error: err?.message }));
   }
 });
 
@@ -759,7 +744,7 @@ adminRouter.post("/cleanup/dev-user-tunnels", async (req: Request, res: Response
  * POST /v1/admin/grant-alias
  * Grant alias access to a user by setting their alias_limit
  */
-adminRouter.post("/grant-alias", async (req: Request, res: Response) => {
+adminRouter.post("/grant-alias", async (req: AuthedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {

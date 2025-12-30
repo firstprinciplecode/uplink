@@ -116,7 +116,7 @@ dbRouter.post("/", validateBody(createDatabaseSchema), async (req: Request, res:
       neon.pooledConnectionString
     );
     
-    auditLog.databaseCreated(user.id, dbId, body.name, provider);
+    auditLog.databaseCreated(user.id, record.id, body.name, provider);
     
     return res.status(201).json(response);
   } catch (err) {

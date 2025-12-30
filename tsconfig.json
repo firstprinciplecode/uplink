@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "express"],
+    "typeRoots": ["./node_modules/@types", "./backend/src/types"]
+  },
+  "include": [
+    "backend/src/**/*",
+    "cli/src/**/*",
+    "scripts/**/*"
+  ]
+}
