@@ -610,6 +610,9 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
     if (!requireAdmin(user)) {
       return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status entry',data:{userId:user.id,role:user.role,relayHost:process.env.TUNNEL_RELAY_HOST||'127.0.0.1',relayHttp:process.env.TUNNEL_RELAY_HTTP||'7070'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const tunnels = await getConnectedTunnels();
 
     const now = Date.now();
@@ -630,6 +633,9 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
       return { ...t, connectedFor };
     });
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status result',data:{count:withUptime.length,rawCount:tunnels.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return res.json({
       connectedTunnels: withUptime.length,
       tunnels: withUptime,
@@ -638,6 +644,9 @@ adminRouter.get("/relay-status", async (req: Request, res: Response) => {
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "admin.relay-status.error", error: err.message, stack: err.stack });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-relay-status',location:'backend/src/routes/admin.ts:relay-status',message:'relay-status error',data:{error:err.message},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return res.status(500).json(
       makeError("INTERNAL_ERROR", "Failed to get relay status", { error: err.message })
     );
@@ -660,12 +669,19 @@ adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
 
     const sync = String(req.query.sync || "").toLowerCase() === "true";
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'traffic-stats entry',data:{userId:user.id,role:user.role,sync},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     let relayMeta: { relayRunId: string; since: string; timestamp: string } | null = null;
     if (sync) {
       const relay = await fetchRelayTrafficStats();
       if (relay) {
         relayMeta = { relayRunId: relay.relayRunId, since: relay.since, timestamp: relay.timestamp };
         await syncAliasTrafficFromRelayToDb(relay);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'relay sync done',data:{relayRunId:relay.relayRunId,byAliasCount:Array.isArray(relay.byAlias)?relay.byAlias.length:null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
       }
     }
 
@@ -696,6 +712,9 @@ adminRouter.get("/traffic-stats", async (req: Request, res: Response) => {
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "admin.traffic_stats.error", error: err.message, stack: err.stack });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H-traffic-stats',location:'backend/src/routes/admin.ts:traffic-stats',message:'traffic-stats error',data:{error:err.message},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get traffic stats"));
   }
 });
