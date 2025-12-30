@@ -272,7 +272,7 @@ export const menuCommand = new Command("menu")
     // If authentication failed, show ONLY "Get Started" and "Exit"
     if (authFailed) {
       mainMenu.push({
-        label: "🚀 Get Started (Create Account)",
+        label: "Get Started",
         action: async () => {
           restoreRawMode();
           clearScreen();
@@ -828,7 +828,7 @@ export const menuCommand = new Command("menu")
       label: "Usage",
       subMenu: [
         {
-          label: isAdmin ? "List Tunnels (admin)" : "List My Tunnels",
+          label: isAdmin ? "List All Tunnels" : "List My Tunnels",
           action: async () => {
             const runningClients = findTunnelClients();
             const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
@@ -861,7 +861,7 @@ export const menuCommand = new Command("menu")
           },
         },
         {
-          label: isAdmin ? "List Databases (admin)" : "List My Databases",
+          label: isAdmin ? "List All Databases" : "List My Databases",
           action: async () => {
             const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
             const result = await apiRequest("GET", path);
@@ -892,7 +892,7 @@ export const menuCommand = new Command("menu")
     // Admin-only: Manage Tokens
     if (isAdmin) {
       mainMenu.push({
-        label: "Manage Tokens (admin)",
+        label: "Manage Tokens",
         subMenu: [
           {
             label: "List Tokens",
@@ -964,7 +964,7 @@ export const menuCommand = new Command("menu")
 
       // Admin-only: Stop ALL Tunnel Clients (kill switch)
       mainMenu.push({
-        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
+        label: "Stop All Tunnel Clients",
         action: async () => {
           const clients = findTunnelClients();
           if (clients.length === 0) {
