@@ -38,10 +38,7 @@ export interface DatabaseConnectionInfo {
 }
 
 export interface DatabaseResponse
-  extends Omit<
-    DatabaseRecord,
-    "encryptedPassword" | "ownerUserId" | "projectId" | "providerDatabaseId"
-  > {
+  extends Omit<DatabaseRecord, "encryptedPassword" | "ownerUserId" | "providerDatabaseId"> {
   ready: boolean;
   connection: DatabaseConnectionInfo;
 }
@@ -66,12 +63,16 @@ export function toDatabaseResponse(
   return {
     id: record.id,
     name: record.name,
-    project: record.projectId,
+    projectId: record.projectId,
     provider: record.provider,
     engine: record.engine,
     version: record.version,
     region: record.region,
     status: record.status,
+    host: record.host,
+    port: record.port,
+    database: record.database,
+    user: record.user,
     ready: record.status === "ready",
     connection,
     createdAt: record.createdAt,
