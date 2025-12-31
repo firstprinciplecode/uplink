@@ -74,6 +74,7 @@ CREATE_RES=$(curl_s "${API_BASE}/v1/tunnels" \
 echo "Response: ${CREATE_RES}"
 
 TOKEN=$(node -e "const d=JSON.parse(process.argv[1]||'{}'); console.log(d.token||'');" "${CREATE_RES}")
+TUNNEL_URL=$(node -e "const d=JSON.parse(process.argv[1]||'{}'); console.log(d.url||'');" "${CREATE_RES}")
 
 if [[ -z "${TOKEN}" ]]; then
   echo "❌ Failed to get tunnel token"
@@ -81,6 +82,8 @@ if [[ -z "${TOKEN}" ]]; then
   echo "${CREATE_RES}" | head -50
   exit 1
 fi
+
+echo "Tunnel URL: ${TUNNEL_URL}"
 
 echo "▶ Starting tunnel client with token ${TOKEN} ..."
 node scripts/tunnel/client.js --token "${TOKEN}" --port "${PORT}" --ctrl "${CTRL}" >"${CLIENT_LOG}" 2>&1 &
@@ -108,9 +111,8 @@ if [[ "${registered}" != "1" ]]; then
   exit 1
 fi
 
-echo "▶ Verifying ingress via relay ..."
-# Use the full tunnel URL (HTTPS via Caddy): https://<token>.t.uplink.spot
-TUNNEL_URL="https://${TOKEN}.${DOMAIN}"
+echo "▶ Verifying ingress via relay at ${TUNNEL_URL} ..."
+# Use the URL returned by the API (includes correct domain)
 HTTP_RES=$(curl_s "${TUNNEL_URL}/") || true
 
 if echo "${HTTP_RES}" | grep -qi "Directory listing\|<!DOCTYPE HTML\|<html"; then
