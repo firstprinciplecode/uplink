@@ -6,13 +6,21 @@ import { adminCommand } from "./subcommands/admin";
 import { menuCommand } from "./subcommands/menu";
 import { tunnelCommand } from "./subcommands/tunnel";
 import { signupCommand } from "./subcommands/signup";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// Get version from package.json
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgPath = join(__dirname, "../../package.json");
+const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 
 const program = new Command();
 
 program
   .name("uplink")
   .description("Agent-friendly cloud CLI")
-  .version("0.1.0")
+  .version(pkg.version)
   .option("--api-base <url>", "Override API base URL (default env AGENTCLOUD_API_BASE)")
   .option("--token-stdin", "Read AGENTCLOUD_TOKEN from stdin once");
 
