@@ -827,11 +827,10 @@ export const menuCommand = new Command("menu")
               if (!tunnels.length) return "No tunnels found.";
 
               const options: SelectOption[] = tunnels.map((t: any) => {
-                const token = truncate(t.token || "", 10);
-                const alias = t.alias ? truncate(String(t.alias), 16) : "-";
-                const port = t.target_port ?? t.targetPort ?? "-";
+                const token = truncate(t.token || "", 12);
+                const permanentUrl = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
                 return {
-                  label: `${token.padEnd(12)} port ${String(port).padEnd(5)} alias ${alias}`,
+                  label: `${token.padEnd(14)} ${truncate(permanentUrl, 30)}`,
                   value: t.id,
                 };
               });
@@ -857,9 +856,10 @@ export const menuCommand = new Command("menu")
 
               const totals = stats.totals || {};
               const run = stats.currentRun || {};
+              const permanentUrl = `https://${alias}.x.uplink.spot`;
               return [
-                `Alias:     ${alias}`,
-                `Connected: ${connected}`,
+                `Permanent URL: ${permanentUrl}`,
+                `Connected:     ${connected}`,
                 "",
                 "Totals (persisted):",
                 `  Requests  ${totals.requests || 0}`,
@@ -873,6 +873,74 @@ export const menuCommand = new Command("menu")
                 `  Out       ${formatBytes(run.bytesOut || 0)}`,
                 `  LastSeen  ${run.lastSeenAt ? new Date(run.lastSeenAt).toISOString() : "-"}`,
               ].join("\n");
+            },
+          },
+          {
+            label: "Create Permanent URL",
+            action: async () => {
+              // Get user's tunnels
+              const data = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = data.tunnels || [];
+              if (!tunnels.length) return "No tunnels found. Create a tunnel first.";
+
+              // Build options from tunnels
+              const options: SelectOption[] = tunnels.map((t: any) => {
+                const token = truncate(t.token || "", 12);
+                const currentUrl = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
+                return {
+                  label: `${token.padEnd(14)} ${truncate(currentUrl, 30)}`,
+                  value: t.id,
+                };
+              });
+
+              const choice = await inlineSelect("Select tunnel to set alias for", options, true);
+              if (choice === null) return "";
+
+              // Prompt for alias
+              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+              const aliasAnswer = await promptLine("Enter alias name (e.g. my-app): ");
+              const alias = aliasAnswer.trim().toLowerCase();
+              restoreRawMode();
+
+              if (!alias) return "No alias provided.";
+
+              // Validate alias format
+              if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) {
+                return "Invalid alias. Must be 1-63 chars, alphanumeric + hyphen, cannot start/end with hyphen.";
+              }
+
+              try {
+                const result = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, { alias });
+                const aliasUrl = result.aliasUrl || `https://${alias}.x.uplink.spot`;
+                return [
+                  "✓ Permanent alias set",
+                  "",
+                  `→ Alias     ${alias}`,
+                  `→ URL       ${aliasUrl}`,
+                  "",
+                  "Your tunnel will now be accessible at this permanent URL.",
+                ].join("\n");
+              } catch (err: any) {
+                const msg = err?.message || String(err);
+                if (msg.includes("ALIAS_NOT_ENABLED")) {
+                  return [
+                    "❌ Permanent aliases are a premium feature",
+                    "",
+                    "Contact us on Discord at uplink.spot to upgrade your account.",
+                  ].join("\n");
+                }
+                if (msg.includes("ALIAS_LIMIT_REACHED")) {
+                  return [
+                    "❌ Alias limit reached",
+                    "",
+                    "You've reached your alias limit. Contact us to increase it.",
+                  ].join("\n");
+                }
+                if (msg.includes("ALIAS_TAKEN")) {
+                  return `❌ Alias "${alias}" is already in use. Try a different name.`;
+                }
+                throw err;
+              }
             },
           },
         ],
@@ -900,16 +968,15 @@ export const menuCommand = new Command("menu")
                 const connectionStatus = isAdmin
                   ? (connectedFromApi ? "connected" : "disconnected")
                   : (connectedLocal ? "connected" : "unknown");
+                const alias = t.alias ? String(t.alias) : "";
+                const permanentUrl = alias ? `${alias}.x.uplink.spot` : "-";
                 
-                return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
+                return `${truncate(token, 12).padEnd(14)}  ${String(
                   t.target_port ?? t.targetPort ?? "-"
-                ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
-                  t.created_at ?? t.createdAt ?? "",
-                  19
-                )}`;
+                ).padEnd(5)}  ${connectionStatus.padEnd(11)}  ${truncate(permanentUrl, 24).padEnd(26)}`;
               }
             );
-            return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
+            return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join(
               "\n"
             );
           },
