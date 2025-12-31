@@ -39,12 +39,14 @@ function clearScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Color palette (Oxide-inspired)
+// Color palette (Claude Code-inspired - clean, minimal)
 // ─────────────────────────────────────────────────────────────
 const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
+  italic: "\x1b[3m",
+  underline: "\x1b[4m",
   // Colors
   cyan: "\x1b[36m",
   green: "\x1b[32m",
@@ -53,11 +55,17 @@ const c = {
   magenta: "\x1b[35m",
   white: "\x1b[97m",
   gray: "\x1b[90m",
+  blue: "\x1b[34m",
   // Bright variants
   brightCyan: "\x1b[96m",
   brightGreen: "\x1b[92m",
   brightYellow: "\x1b[93m",
   brightWhite: "\x1b[97m",
+  brightBlue: "\x1b[94m",
+  // 256 color for subtle tones
+  softBlue: "\x1b[38;5;75m",
+  softGray: "\x1b[38;5;245m",
+  darkGray: "\x1b[38;5;240m",
 };
 
 function colorCyan(text: string) {
@@ -88,15 +96,45 @@ function colorMagenta(text: string) {
   return `${c.magenta}${text}${c.reset}`;
 }
 
-// ASCII banner with color styling
-const ASCII_UPLINK = colorCyan([
+function colorBlue(text: string) {
+  return `${c.softBlue}${text}${c.reset}`;
+}
+
+function colorSoftGray(text: string) {
+  return `${c.softGray}${text}${c.reset}`;
+}
+
+function colorAccent(text: string) {
+  return `${c.brightBlue}${text}${c.reset}`;
+}
+
+// ASCII banner with status indicator
+const ASCII_BANNER = [
   "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
   "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
   "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
   "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
   "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
   " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
-].join("\n"));
+];
+
+function renderHeader(role: string, connected: boolean) {
+  const status = connected 
+    ? colorGreen("●") + colorSoftGray(" connected")
+    : colorYellow("●") + colorSoftGray(" offline");
+  const roleTag = role === "admin" 
+    ? colorSoftGray(" • ") + colorYellow("admin")
+    : "";
+  
+  // ASCII banner in accent color
+  console.log();
+  ASCII_BANNER.forEach(line => console.log("  " + colorAccent(line)));
+  
+  // Status line below banner
+  console.log();
+  console.log("  " + status + roleTag);
+  console.log();
+}
 
 function truncate(text: string, max: number) {
   if (text.length <= max) return text;
@@ -1077,79 +1115,58 @@ export const menuCommand = new Command("menu")
 
     const render = () => {
       clearScreen();
-      console.log();
-      console.log(ASCII_UPLINK);
-      console.log();
       
-      // Status bar - relay and API status
-      if (menuStack.length === 1 && cachedRelayStatus) {
-        const statusColor = cachedRelayStatus.includes("ok") ? colorGreen : colorRed;
-        console.log(colorDim("├─") + " Status  " + statusColor(cachedRelayStatus.replace("Relay: ", "")));
-      }
-
-      // Show active tunnels if we're at the main menu (use cached value, no scanning)
-      if (menuStack.length === 1 && cachedActiveTunnels) {
-        console.log(cachedActiveTunnels);
-      }
-      
-      console.log();
+      // Check if API is reachable based on cached relay status
+      const isConnected = cachedRelayStatus?.includes("ok") ?? false;
+      const role = isAdmin ? "admin" : "user";
+      renderHeader(role, isConnected);
       
       const currentMenu = getCurrentMenu();
       
-      // Breadcrumb navigation
+      // Breadcrumb navigation (for submenus)
       if (menuPath.length > 0) {
-        const breadcrumb = menuPath.map((p, i) => 
-          i === menuPath.length - 1 ? colorCyan(p) : colorDim(p)
-        ).join(colorDim(" › "));
-        console.log(breadcrumb);
         console.log();
+        const breadcrumb = menuPath.map((p, i) => 
+          i === menuPath.length - 1 ? colorAccent(p) : colorSoftGray(p)
+        ).join(colorSoftGray(" › "));
+        console.log("  " + breadcrumb);
       }
       
-      // Menu items with tree-style rendering
+      console.log();
+      
+      // Menu items - clean list style
       currentMenu.forEach((choice, idx) => {
-        const isLast = idx === currentMenu.length - 1;
         const isSelected = idx === selected;
-        const branch = isLast ? "└─" : "├─";
         
-        // Clean up labels - remove emojis for cleaner look
+        // Clean up labels
         let cleanLabel = choice.label
           .replace(/^🚀\s*/, "")
           .replace(/^⚠️\s*/, "")
           .replace(/^✅\s*/, "")
           .replace(/^❌\s*/, "");
         
+        // Selection indicator
+        const pointer = isSelected ? colorAccent("›") : " ";
+        
         // Style based on selection and type
         let label: string;
-        let branchColor: string;
         
-        if (isSelected) {
-          branchColor = colorCyan(branch);
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
-          } else {
-            label = colorCyan(cleanLabel);
-          }
+        if (cleanLabel.toLowerCase().includes("exit")) {
+          label = colorSoftGray(cleanLabel);
+        } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
+          label = isSelected ? colorRed(cleanLabel) : colorSoftGray(cleanLabel);
+        } else if (cleanLabel.toLowerCase().includes("get started")) {
+          label = isSelected ? colorGreen(cleanLabel) : colorGreen(cleanLabel);
+        } else if (isSelected) {
+          label = colorBold(cleanLabel);
         } else {
-          branchColor = colorDim(branch);
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
-          } else {
-            label = cleanLabel;
-          }
+          label = cleanLabel;
         }
         
         // Submenu indicator
-        const indicator = choice.subMenu ? colorDim(" ›") : "";
+        const indicator = choice.subMenu ? colorSoftGray(" →") : "";
         
-        console.log(`${branchColor} ${label}${indicator}`);
+        console.log(`  ${pointer} ${label}${indicator}`);
       });
       
       // Message area
@@ -1162,30 +1179,30 @@ export const menuCommand = new Command("menu")
         // Format multi-line messages nicely
         const lines = message.split("\n");
         lines.forEach((line) => {
-          // Color success/error indicators
+          // Color success/error indicators - clean symbols
           let styledLine = line
             .replace(/^✅/, colorGreen("✓"))
             .replace(/^❌/, colorRed("✗"))
             .replace(/^⚠️/, colorYellow("!"))
-            .replace(/^🔑/, colorCyan("→"))
-            .replace(/^🌐/, colorCyan("→"))
-            .replace(/^📡/, colorCyan("→"))
+            .replace(/^🔑/, colorAccent("→"))
+            .replace(/^🌐/, colorAccent("→"))
+            .replace(/^📡/, colorAccent("→"))
             .replace(/^💡/, colorYellow("→"));
-          console.log(colorDim("│ ") + styledLine);
+          console.log("  " + colorSoftGray("│") + " " + styledLine);
         });
       }
       
-      // Footer hints
+      // Footer hints - clean and subtle
       console.log();
       const hints = [
-        colorDim("↑↓") + " navigate",
-        colorDim("↵") + " select",
+        "↑↓ navigate",
+        "enter select",
       ];
       if (menuStack.length > 1) {
-        hints.push(colorDim("←") + " back");
+        hints.push("← back");
       }
-      hints.push(colorDim("^C") + " exit");
-      console.log(colorDim(hints.join("  ")));
+      hints.push("ctrl+c quit");
+      console.log("  " + colorSoftGray(hints.join("  •  ")));
     };
 
     const cleanup = () => {
