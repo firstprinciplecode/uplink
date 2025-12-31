@@ -943,72 +943,92 @@ export const menuCommand = new Command("menu")
               }
             },
           },
-        ],
-      });
-
-    mainMenu.push({
-      label: "Usage",
-      subMenu: [
-        {
-          label: isAdmin ? "List All Tunnels" : "List My Tunnels",
-          action: async () => {
-            const runningClients = findTunnelClients();
-            const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
-            const result = await apiRequest("GET", path);
-            const tunnels = result.tunnels || result?.items || [];
-            if (!tunnels || tunnels.length === 0) {
-              return "No tunnels found.";
-            }
-            
-            const lines = tunnels.map(
-              (t: any) => {
+          {
+            label: "My Tunnels",
+            action: async () => {
+              const runningClients = findTunnelClients();
+              const result = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = result.tunnels || [];
+              if (!tunnels.length) return "No tunnels found.";
+              
+              const lines = tunnels.map((t: any) => {
                 const token = t.token || "";
-                const connectedFromApi = t.connected ?? false;
                 const connectedLocal = runningClients.some((c) => c.token === token);
-                const connectionStatus = isAdmin
-                  ? (connectedFromApi ? "connected" : "disconnected")
-                  : (connectedLocal ? "connected" : "unknown");
+                const connectionStatus = connectedLocal ? "connected" : "unknown";
                 const alias = t.alias ? String(t.alias) : "";
                 const permanentUrl = alias ? `${alias}.x.uplink.spot` : "-";
                 
                 return `${truncate(token, 12).padEnd(14)}  ${String(
                   t.target_port ?? t.targetPort ?? "-"
                 ).padEnd(5)}  ${connectionStatus.padEnd(11)}  ${truncate(permanentUrl, 24).padEnd(26)}`;
+              });
+              return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join("\n");
+            },
+          },
+        ],
+      });
+
+    // Admin-only: Usage section with all tunnels and databases
+    if (isAdmin) {
+      mainMenu.push({
+        label: "Usage",
+        subMenu: [
+          {
+            label: "List All Tunnels",
+            action: async () => {
+              const runningClients = findTunnelClients();
+              const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
+              const tunnels = result.tunnels || result?.items || [];
+              if (!tunnels || tunnels.length === 0) {
+                return "No tunnels found.";
               }
-            );
-            return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join(
-              "\n"
-            );
+              
+              const lines = tunnels.map(
+                (t: any) => {
+                  const token = t.token || "";
+                  const connectedFromApi = t.connected ?? false;
+                  const connectionStatus = connectedFromApi ? "connected" : "disconnected";
+                  const alias = t.alias ? String(t.alias) : "";
+                  const permanentUrl = alias ? `${alias}.x.uplink.spot` : "-";
+                  
+                  return `${truncate(token, 12).padEnd(14)}  ${String(
+                    t.target_port ?? t.targetPort ?? "-"
+                  ).padEnd(5)}  ${connectionStatus.padEnd(11)}  ${truncate(permanentUrl, 24).padEnd(26)}`;
+                }
+              );
+              return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join(
+                "\n"
+              );
+            },
           },
-        },
-        {
-          label: isAdmin ? "List All Databases" : "List My Databases",
-          action: async () => {
-            const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
-            const result = await apiRequest("GET", path);
-            const databases = result.databases || result.items || [];
-            if (!databases || databases.length === 0) {
-              return "No databases found.";
-            }
-            const lines = databases.map(
-              (db: any) =>
-                `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
-                  db.provider ?? "-",
-                  8
-                ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
-                  db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
-                  10
-                ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
-            );
-            return [
-              "ID           Name            Prov     Region     Status      Created",
-              "-".repeat(80),
-              ...lines,
-            ].join("\n");
+          {
+            label: "List All Databases",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
+              const databases = result.databases || result.items || [];
+              if (!databases || databases.length === 0) {
+                return "No databases found.";
+              }
+              const lines = databases.map(
+                (db: any) =>
+                  `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
+                    db.provider ?? "-",
+                    8
+                  ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
+                    db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
+                    10
+                  ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
+              );
+              return [
+                "ID           Name            Prov     Region     Status      Created",
+                "-".repeat(80),
+                ...lines,
+              ].join("\n");
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    }
 
     // Admin-only: Manage Tokens
     if (isAdmin) {
@@ -1422,8 +1442,8 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
     const clients: Array<{ pid: number; port: number; token: string }> = [];
     
     for (const line of lines) {
-      // Parse process line: USER PID ... node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
-      const pidMatch = line.match(/^\S+\s+(\d+)/);
+      // Parse process line: PID node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
+      const pidMatch = line.match(/^\s*(\d+)/);
       const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
       
