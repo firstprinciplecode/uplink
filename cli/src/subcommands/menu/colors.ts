@@ -1,8 +1,10 @@
 // Color palette and helpers for the interactive menu UI.
+// Claude Code-inspired - clean, minimal aesthetic
 export const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
+  italic: "\x1b[3m",
   // Colors
   cyan: "\x1b[36m",
   green: "\x1b[32m",
@@ -11,11 +13,17 @@ export const c = {
   magenta: "\x1b[35m",
   white: "\x1b[97m",
   gray: "\x1b[90m",
+  blue: "\x1b[34m",
   // Bright variants
   brightCyan: "\x1b[96m",
   brightGreen: "\x1b[92m",
   brightYellow: "\x1b[93m",
   brightWhite: "\x1b[97m",
+  brightBlue: "\x1b[94m",
+  // 256 color for subtle tones
+  softBlue: "\x1b[38;5;75m",
+  softGray: "\x1b[38;5;245m",
+  darkGray: "\x1b[38;5;240m",
 };
 
 export function colorCyan(text: string) {
@@ -46,11 +54,14 @@ export function colorWhite(text: string) {
   return `${c.brightWhite}${text}${c.reset}`;
 }
 
-export const ASCII_UPLINK = colorWhite([
-  "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
-  "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
-  "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
-  "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
-  "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
-  " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
-].join("\n"));
+export function colorBlue(text: string) {
+  return `${c.softBlue}${text}${c.reset}`;
+}
+
+export function colorSoftGray(text: string) {
+  return `${c.softGray}${text}${c.reset}`;
+}
+
+export function colorAccent(text: string) {
+  return `${c.brightBlue}${text}${c.reset}`;
+}

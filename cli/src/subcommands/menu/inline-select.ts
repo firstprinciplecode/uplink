@@ -1,8 +1,9 @@
-import { colorCyan, colorDim, colorWhite } from "./colors";
+import { colorAccent, colorBold, colorDim, colorSoftGray } from "./colors";
 
 export type SelectOption = { label: string; value: string | number | null };
 
 // Inline arrow-key selector (returns selected index, or null for "Back")
+// Clean, minimal styling inspired by Claude Code
 export async function inlineSelect(
   title: string,
   options: SelectOption[],
@@ -17,38 +18,34 @@ export async function inlineSelect(
       process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
 
       console.log();
-      console.log(colorDim(title));
+      console.log("  " + colorSoftGray(title));
       console.log();
 
       allOptions.forEach((opt, idx) => {
-        const isLast = idx === allOptions.length - 1;
         const isSelected = idx === selected;
-        const branch = isLast ? "└─" : "├─";
-
+        const pointer = isSelected ? colorAccent("›") : " ";
+        
         let label: string;
-        let branchColor: string;
-
-        if (isSelected) {
-          branchColor = colorCyan(branch);
-          label = opt.label === "Back" ? colorDim(opt.label) : colorCyan(opt.label);
+        if (opt.label === "Back") {
+          label = colorSoftGray(opt.label);
+        } else if (isSelected) {
+          label = colorBold(opt.label);
         } else {
-          branchColor = colorWhite(branch);
-          label = opt.label === "Back" ? colorDim(opt.label) : colorWhite(opt.label);
+          label = opt.label;
         }
 
-        console.log(`${branchColor} ${label}`);
+        console.log(`  ${pointer} ${label}`);
       });
     };
 
     console.log();
-    console.log(colorDim(title));
+    console.log("  " + colorSoftGray(title));
     console.log();
     allOptions.forEach((opt, idx) => {
-      const isLast = idx === allOptions.length - 1;
-      const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorCyan(branch) : colorWhite(branch);
-      const label = idx === 0 ? colorCyan(opt.label) : opt.label === "Back" ? colorDim(opt.label) : colorWhite(opt.label);
-      console.log(`${branchColor} ${label}`);
+      const isSelected = idx === 0;
+      const pointer = isSelected ? colorAccent("›") : " ";
+      const label = opt.label === "Back" ? colorSoftGray(opt.label) : (isSelected ? colorBold(opt.label) : opt.label);
+      console.log(`  ${pointer} ${label}`);
     });
 
     try {
