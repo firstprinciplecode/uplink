@@ -8,11 +8,6 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 
-// Check if running from project directory (smoke tests require local scripts)
-function isInProjectDir(): boolean {
-  return existsSync("scripts/test-comprehensive.sh") && existsSync("package.json");
-}
-
 type MenuChoice = {
   label: string;
   action?: () => Promise<string>;
@@ -39,14 +34,12 @@ function clearScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Color palette (Claude Code-inspired - clean, minimal)
+// Color palette (Oxide-inspired)
 // ─────────────────────────────────────────────────────────────
 const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
-  italic: "\x1b[3m",
-  underline: "\x1b[4m",
   // Colors
   cyan: "\x1b[36m",
   green: "\x1b[32m",
@@ -55,17 +48,11 @@ const c = {
   magenta: "\x1b[35m",
   white: "\x1b[97m",
   gray: "\x1b[90m",
-  blue: "\x1b[34m",
   // Bright variants
   brightCyan: "\x1b[96m",
   brightGreen: "\x1b[92m",
   brightYellow: "\x1b[93m",
   brightWhite: "\x1b[97m",
-  brightBlue: "\x1b[94m",
-  // 256 color for subtle tones
-  softBlue: "\x1b[38;5;75m",
-  softGray: "\x1b[38;5;245m",
-  darkGray: "\x1b[38;5;240m",
 };
 
 function colorCyan(text: string) {
@@ -96,58 +83,19 @@ function colorMagenta(text: string) {
   return `${c.magenta}${text}${c.reset}`;
 }
 
-function colorBlue(text: string) {
-  return `${c.softBlue}${text}${c.reset}`;
-}
-
-function colorSoftGray(text: string) {
-  return `${c.softGray}${text}${c.reset}`;
-}
-
-function colorAccent(text: string) {
-  return `${c.brightBlue}${text}${c.reset}`;
-}
-
-// ASCII banner with status indicator
-const ASCII_BANNER = [
+// ASCII banner with color styling
+const ASCII_UPLINK = colorCyan([
   "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
   "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
   "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
   "██║   ██║██╔═══╝ ██║     ██║██║╚██╗██║██╔═██╗ ",
   "╚██████╔╝██║     ███████╗██║██║ ╚████║██║  ██╗",
   " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
-];
-
-function renderHeader(role: string, connected: boolean) {
-  const status = connected 
-    ? colorGreen("●") + colorSoftGray(" connected")
-    : colorYellow("●") + colorSoftGray(" offline");
-  const roleTag = role === "admin" 
-    ? colorSoftGray(" • ") + colorYellow("admin")
-    : "";
-  
-  // ASCII banner in accent color
-  console.log();
-  ASCII_BANNER.forEach(line => console.log("  " + colorAccent(line)));
-  
-  // Status line below banner
-  console.log();
-  console.log("  " + status + roleTag);
-  console.log();
-}
+].join("\n"));
 
 function truncate(text: string, max: number) {
   if (text.length <= max) return text;
   return text.slice(0, max - 1) + "…";
-}
-
-function formatBytes(bytes: number): string {
-  const n = Number(bytes || 0);
-  if (!Number.isFinite(n) || n <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const idx = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
-  const val = n / Math.pow(1024, idx);
-  return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
 function restoreRawMode() {
@@ -315,7 +263,7 @@ export const menuCommand = new Command("menu")
     // If authentication failed, show ONLY "Get Started" and "Exit"
     if (authFailed) {
       mainMenu.push({
-        label: "Get Started",
+        label: "🚀 Get Started (Create Account)",
         action: async () => {
           restoreRawMode();
           clearScreen();
@@ -514,36 +462,33 @@ export const menuCommand = new Command("menu")
       // Only show other menu items if authentication succeeded
 
     if (isAdmin) {
-      const systemStatusItems: MenuChoice[] = [
-        {
-          label: "View Status",
-          action: async () => {
-            let health = "unknown";
-            try {
-              const res = await fetch(`${apiBase}/health`);
-              const json = await res.json().catch(() => ({}));
-              health = json.status || res.statusText || "unknown";
-            } catch {
-              health = "unreachable";
-            }
+      mainMenu.push({
+        label: "System Status",
+        subMenu: [
+          {
+            label: "View Status",
+            action: async () => {
+              let health = "unknown";
+              try {
+                const res = await fetch(`${apiBase}/health`);
+                const json = await res.json().catch(() => ({}));
+                health = json.status || res.statusText || "unknown";
+              } catch {
+                health = "unreachable";
+              }
 
-            const stats = await apiRequest("GET", "/v1/admin/stats");
-            return [
-              `API health: ${health}`,
-              "Tunnels:",
-              `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
-              `  Created last 24h: ${stats.tunnels.createdLast24h}`,
-              "Databases:",
-              `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
-              `  Created last 24h: ${stats.databases.createdLast24h}`,
-            ].join("\n");
+              const stats = await apiRequest("GET", "/v1/admin/stats");
+              return [
+                `API health: ${health}`,
+                "Tunnels:",
+                `  Active ${stats.tunnels.active} | Inactive ${stats.tunnels.inactive} | Deleted ${stats.tunnels.deleted} | Total ${stats.tunnels.total}`,
+                `  Created last 24h: ${stats.tunnels.createdLast24h}`,
+                "Databases:",
+                `  Ready ${stats.databases.ready} | Provisioning ${stats.databases.provisioning} | Failed ${stats.databases.failed} | Deleted ${stats.databases.deleted} | Total ${stats.databases.total}`,
+                `  Created last 24h: ${stats.databases.createdLast24h}`,
+              ].join("\n");
+            },
           },
-        },
-      ];
-
-      // Smoke tests only available when running from project directory
-      if (isInProjectDir()) {
-        systemStatusItems.push(
           {
             label: "Test: Tunnel",
             action: async () => {
@@ -571,80 +516,8 @@ export const menuCommand = new Command("menu")
               await runSmoke("test:comprehensive");
               return "test:comprehensive completed";
             },
-          }
-        );
-      }
-
-      systemStatusItems.push(
-        {
-          label: "View Connected Tunnels",
-          action: async () => {
-            try {
-              const data = await apiRequest("GET", "/v1/admin/relay-status") as {
-                connectedTunnels?: number;
-                tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
-                timestamp?: string;
-                error?: string;
-                message?: string;
-              };
-
-              if (data.error) {
-                return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
-              }
-              if (!data.tunnels || data.tunnels.length === 0) {
-                return "No tunnels currently connected to the relay.";
-              }
-
-              const lines = data.tunnels.map((t) =>
-                `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
-              );
-
-              return [
-                `Connected Tunnels: ${data.connectedTunnels}`,
-                "",
-                "Token          Client IP        Port   Uptime     Connected At",
-                "-".repeat(75),
-                ...lines,
-              ].join("\n");
-            } catch (err: any) {
-              return `Error: Failed to get relay status - ${err.message}`;
-            }
           },
-        },
-        {
-          label: "View Traffic Stats",
-          action: async () => {
-            const data = await apiRequest("GET", "/v1/admin/traffic-stats?sync=true") as {
-              count?: number;
-              aliases?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: string | null; lastStatus: number | null }>;
-            };
-
-            const aliases = data.aliases || [];
-            if (aliases.length === 0) return "No persisted alias stats yet.";
-
-            const top = aliases.slice(0, 25);
-            const lines = top.map((a) => {
-              const last = a.lastSeenAt ? truncate(a.lastSeenAt, 19) : "-";
-              return `${truncate(a.alias, 22).padEnd(24)} ${String(a.requests || 0).padStart(8)}  ${formatBytes(a.bytesIn || 0).padStart(9)}  ${formatBytes(a.bytesOut || 0).padStart(9)}  ${String(a.lastStatus ?? "-").padStart(3)}  ${last}`;
-            });
-
-            return [
-              `Aliases tracked: ${aliases.length}`,
-              "",
-              "Alias                    Requests   In         Out        Sts  Last Seen",
-              "-".repeat(75),
-              ...lines,
-              aliases.length > top.length ? `\nShowing top ${top.length} by requests.` : "",
-            ]
-              .filter(Boolean)
-              .join("\n");
-          },
-        }
-      );
-
-      mainMenu.push({
-        label: "System Status",
-        subMenu: systemStatusItems,
+        ],
       });
     }
 
@@ -819,221 +692,78 @@ export const menuCommand = new Command("menu")
               }
             },
           },
-          {
-            label: "View Tunnel Stats",
-            action: async () => {
-              const data = await apiRequest("GET", "/v1/tunnels");
-              const tunnels = data.tunnels || [];
-              if (!tunnels.length) return "No tunnels found.";
+        ],
+      });
 
-              const options: SelectOption[] = tunnels.map((t: any) => {
-                const token = truncate(t.token || "", 12);
-                const permanentUrl = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
-                return {
-                  label: `${token.padEnd(14)} ${truncate(permanentUrl, 30)}`,
-                  value: t.id,
-                };
-              });
-
-              const choice = await inlineSelect("Select tunnel", options, true);
-              if (choice === null) return "";
-
-              const stats = await apiRequest("GET", `/v1/tunnels/${choice.value}/stats`) as any;
-              const connected = stats.connected ? "yes" : "no";
-              const alias = stats.alias || null;
-
-              if (!alias) {
-                const s = stats.inMemory || {};
-                return [
-                  `Connected: ${connected}`,
-                  `Requests:  ${s.requests || 0}`,
-                  `In:        ${formatBytes(s.bytesIn || 0)}`,
-                  `Out:       ${formatBytes(s.bytesOut || 0)}`,
-                  `LastSeen:  ${s.lastSeenAt ? new Date(s.lastSeenAt).toISOString() : "-"}`,
-                  `Status:    ${s.lastStatus ?? "-"}`,
-                ].join("\n");
-              }
-
-              const totals = stats.totals || {};
-              const run = stats.currentRun || {};
-              const permanentUrl = `https://${alias}.x.uplink.spot`;
-              return [
-                `Permanent URL: ${permanentUrl}`,
-                `Connected:     ${connected}`,
-                "",
-                "Totals (persisted):",
-                `  Requests  ${totals.requests || 0}`,
-                `  In        ${formatBytes(totals.bytesIn || 0)}`,
-                `  Out       ${formatBytes(totals.bytesOut || 0)}`,
-                `  LastSeen  ${totals.lastSeenAt ? truncate(String(totals.lastSeenAt), 19) : "-"}`,
-                "",
-                "Current run (relay):",
-                `  Requests  ${run.requests || 0}`,
-                `  In        ${formatBytes(run.bytesIn || 0)}`,
-                `  Out       ${formatBytes(run.bytesOut || 0)}`,
-                `  LastSeen  ${run.lastSeenAt ? new Date(run.lastSeenAt).toISOString() : "-"}`,
-              ].join("\n");
-            },
-          },
-          {
-            label: "Create Permanent URL",
-            action: async () => {
-              // Get user's tunnels
-              const data = await apiRequest("GET", "/v1/tunnels");
-              const tunnels = data.tunnels || [];
-              if (!tunnels.length) return "No tunnels found. Create a tunnel first.";
-
-              // Build options from tunnels
-              const options: SelectOption[] = tunnels.map((t: any) => {
-                const token = truncate(t.token || "", 12);
-                const currentUrl = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
-                return {
-                  label: `${token.padEnd(14)} ${truncate(currentUrl, 30)}`,
-                  value: t.id,
-                };
-              });
-
-              const choice = await inlineSelect("Select tunnel to set alias for", options, true);
-              if (choice === null) return "";
-
-              // Prompt for alias
-              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-              const aliasAnswer = await promptLine("Enter alias name (e.g. my-app): ");
-              const alias = aliasAnswer.trim().toLowerCase();
-              restoreRawMode();
-
-              if (!alias) return "No alias provided.";
-
-              // Validate alias format
-              if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(alias)) {
-                return "Invalid alias. Must be 1-63 chars, alphanumeric + hyphen, cannot start/end with hyphen.";
-              }
-
-              try {
-                const result = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, { alias });
-                const aliasUrl = result.aliasUrl || `https://${alias}.x.uplink.spot`;
-                return [
-                  "✓ Permanent alias set",
-                  "",
-                  `→ Alias     ${alias}`,
-                  `→ URL       ${aliasUrl}`,
-                  "",
-                  "Your tunnel will now be accessible at this permanent URL.",
-                ].join("\n");
-              } catch (err: any) {
-                const msg = err?.message || String(err);
-                if (msg.includes("ALIAS_NOT_ENABLED")) {
-                  return [
-                    "❌ Permanent aliases are a premium feature",
-                    "",
-                    "Contact us on Discord at uplink.spot to upgrade your account.",
-                  ].join("\n");
-                }
-                if (msg.includes("ALIAS_LIMIT_REACHED")) {
-                  return [
-                    "❌ Alias limit reached",
-                    "",
-                    "You've reached your alias limit. Contact us to increase it.",
-                  ].join("\n");
-                }
-                if (msg.includes("ALIAS_TAKEN")) {
-                  return `❌ Alias "${alias}" is already in use. Try a different name.`;
-                }
-                throw err;
-              }
-            },
-          },
-          {
-            label: "My Tunnels",
-            action: async () => {
-              const runningClients = findTunnelClients();
-              const result = await apiRequest("GET", "/v1/tunnels");
-              const tunnels = result.tunnels || [];
-              if (!tunnels.length) return "No tunnels found.";
-              
-              const lines = tunnels.map((t: any) => {
+    mainMenu.push({
+      label: "Usage",
+      subMenu: [
+        {
+          label: isAdmin ? "List Tunnels (admin)" : "List My Tunnels",
+          action: async () => {
+            const runningClients = findTunnelClients();
+            const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
+            const result = await apiRequest("GET", path);
+            const tunnels = result.tunnels || result?.items || [];
+            if (!tunnels || tunnels.length === 0) {
+              return "No tunnels found.";
+            }
+            
+            const lines = tunnels.map(
+              (t: any) => {
                 const token = t.token || "";
+                const connectedFromApi = t.connected ?? false;
                 const connectedLocal = runningClients.some((c) => c.token === token);
-                const connectionStatus = connectedLocal ? "connected" : "unknown";
-                const alias = t.alias ? String(t.alias) : "";
-                const permanentUrl = alias ? `${alias}.x.uplink.spot` : "-";
+                const connectionStatus = isAdmin
+                  ? (connectedFromApi ? "connected" : "disconnected")
+                  : (connectedLocal ? "connected" : "unknown");
                 
-                return `${truncate(token, 12).padEnd(14)}  ${String(
+                return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
                   t.target_port ?? t.targetPort ?? "-"
-                ).padEnd(5)}  ${connectionStatus.padEnd(11)}  ${truncate(permanentUrl, 24).padEnd(26)}`;
-              });
-              return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join("\n");
-            },
-          },
-        ],
-      });
-
-    // Admin-only: Usage section with all tunnels and databases
-    if (isAdmin) {
-      mainMenu.push({
-        label: "Usage",
-        subMenu: [
-          {
-            label: "List All Tunnels",
-            action: async () => {
-              const runningClients = findTunnelClients();
-              const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
-              const tunnels = result.tunnels || result?.items || [];
-              if (!tunnels || tunnels.length === 0) {
-                return "No tunnels found.";
+                ).padEnd(5)}  ${connectionStatus.padEnd(12)}  ${truncate(
+                  t.created_at ?? t.createdAt ?? "",
+                  19
+                )}`;
               }
-              
-              const lines = tunnels.map(
-                (t: any) => {
-                  const token = t.token || "";
-                  const connectedFromApi = t.connected ?? false;
-                  const connectionStatus = connectedFromApi ? "connected" : "disconnected";
-                  const alias = t.alias ? String(t.alias) : "";
-                  const permanentUrl = alias ? `${alias}.x.uplink.spot` : "-";
-                  
-                  return `${truncate(token, 12).padEnd(14)}  ${String(
-                    t.target_port ?? t.targetPort ?? "-"
-                  ).padEnd(5)}  ${connectionStatus.padEnd(11)}  ${truncate(permanentUrl, 24).padEnd(26)}`;
-                }
-              );
-              return ["Token          Port   Status       Permanent URL", "-".repeat(60), ...lines].join(
-                "\n"
-              );
-            },
+            );
+            return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
+              "\n"
+            );
           },
-          {
-            label: "List All Databases",
-            action: async () => {
-              const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
-              const databases = result.databases || result.items || [];
-              if (!databases || databases.length === 0) {
-                return "No databases found.";
-              }
-              const lines = databases.map(
-                (db: any) =>
-                  `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
-                    db.provider ?? "-",
-                    8
-                  ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
-                    db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
-                    10
-                  ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
-              );
-              return [
-                "ID           Name            Prov     Region     Status      Created",
-                "-".repeat(80),
-                ...lines,
-              ].join("\n");
-            },
+        },
+        {
+          label: isAdmin ? "List Databases (admin)" : "List My Databases",
+          action: async () => {
+            const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
+            const result = await apiRequest("GET", path);
+            const databases = result.databases || result.items || [];
+            if (!databases || databases.length === 0) {
+              return "No databases found.";
+            }
+            const lines = databases.map(
+              (db: any) =>
+                `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
+                  db.provider ?? "-",
+                  8
+                ).padEnd(8)}  ${truncate(db.region ?? "-", 10).padEnd(10)}  ${truncate(
+                  db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
+                  10
+                ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
+            );
+            return [
+              "ID           Name            Prov     Region     Status      Created",
+              "-".repeat(80),
+              ...lines,
+            ].join("\n");
           },
-        ],
-      });
-    }
+        },
+      ],
+    });
 
     // Admin-only: Manage Tokens
     if (isAdmin) {
       mainMenu.push({
-        label: "Manage Tokens",
+        label: "Manage Tokens (admin)",
         subMenu: [
           {
             label: "List Tokens",
@@ -1105,7 +835,7 @@ export const menuCommand = new Command("menu")
 
       // Admin-only: Stop ALL Tunnel Clients (kill switch)
       mainMenu.push({
-        label: "Stop All Tunnel Clients",
+        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
         action: async () => {
           const clients = findTunnelClients();
           if (clients.length === 0) {
@@ -1169,11 +899,8 @@ export const menuCommand = new Command("menu")
     };
 
     const updateRelayStatusCache = async () => {
-      const relayHealthUrl = process.env.RELAY_HEALTH_URL || "";
-      if (!relayHealthUrl) {
-        cachedRelayStatus = "";
-        return;
-      }
+      const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+      const healthUrl = process.env.RELAY_HEALTH_URL || `${apiBase}/health`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2000);
       try {
@@ -1181,14 +908,14 @@ export const menuCommand = new Command("menu")
         if (process.env.RELAY_INTERNAL_SECRET) {
           headers["x-relay-internal-secret"] = process.env.RELAY_INTERNAL_SECRET;
         }
-        const res = await fetch(relayHealthUrl, { signal: controller.signal, headers });
+        const res = await fetch(healthUrl, { signal: controller.signal, headers });
         if (res.ok) {
-          cachedRelayStatus = "Relay: ok";
+          cachedRelayStatus = "API: ok";
         } else {
-          cachedRelayStatus = `Relay: unreachable (HTTP ${res.status})`;
+          cachedRelayStatus = `API: unreachable (HTTP ${res.status})`;
         }
       } catch {
-        cachedRelayStatus = "Relay: unreachable";
+        cachedRelayStatus = "API: unreachable";
       } finally {
         clearTimeout(timer);
       }
@@ -1202,58 +929,79 @@ export const menuCommand = new Command("menu")
 
     const render = () => {
       clearScreen();
+      console.log();
+      console.log(ASCII_UPLINK);
+      console.log();
       
-      // Check if API is reachable based on cached relay status
-      const isConnected = cachedRelayStatus?.includes("ok") ?? false;
-      const role = isAdmin ? "admin" : "user";
-      renderHeader(role, isConnected);
-      
-      const currentMenu = getCurrentMenu();
-      
-      // Breadcrumb navigation (for submenus)
-      if (menuPath.length > 0) {
-        console.log();
-        const breadcrumb = menuPath.map((p, i) => 
-          i === menuPath.length - 1 ? colorAccent(p) : colorSoftGray(p)
-        ).join(colorSoftGray(" › "));
-        console.log("  " + breadcrumb);
+      // Status bar - relay and API status
+      if (menuStack.length === 1 && cachedRelayStatus) {
+        const statusColor = cachedRelayStatus.includes("ok") ? colorGreen : colorRed;
+        console.log(colorDim("├─") + " Status  " + statusColor(cachedRelayStatus.replace("API: ", "")));
+      }
+
+      // Show active tunnels if we're at the main menu (use cached value, no scanning)
+      if (menuStack.length === 1 && cachedActiveTunnels) {
+        console.log(cachedActiveTunnels);
       }
       
       console.log();
       
-      // Menu items - clean list style
+      const currentMenu = getCurrentMenu();
+      
+      // Breadcrumb navigation
+      if (menuPath.length > 0) {
+        const breadcrumb = menuPath.map((p, i) => 
+          i === menuPath.length - 1 ? colorCyan(p) : colorDim(p)
+        ).join(colorDim(" › "));
+        console.log(breadcrumb);
+        console.log();
+      }
+      
+      // Menu items with tree-style rendering
       currentMenu.forEach((choice, idx) => {
+        const isLast = idx === currentMenu.length - 1;
         const isSelected = idx === selected;
+        const branch = isLast ? "└─" : "├─";
         
-        // Clean up labels
+        // Clean up labels - remove emojis for cleaner look
         let cleanLabel = choice.label
           .replace(/^🚀\s*/, "")
           .replace(/^⚠️\s*/, "")
           .replace(/^✅\s*/, "")
           .replace(/^❌\s*/, "");
         
-        // Selection indicator
-        const pointer = isSelected ? colorAccent("›") : " ";
-        
         // Style based on selection and type
         let label: string;
+        let branchColor: string;
         
-        if (cleanLabel.toLowerCase().includes("exit")) {
-          label = colorSoftGray(cleanLabel);
-        } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-          label = isSelected ? colorRed(cleanLabel) : colorSoftGray(cleanLabel);
-        } else if (cleanLabel.toLowerCase().includes("get started")) {
-          label = isSelected ? colorGreen(cleanLabel) : colorGreen(cleanLabel);
-        } else if (isSelected) {
-          label = colorBold(cleanLabel);
+        if (isSelected) {
+          branchColor = colorCyan(branch);
+          if (cleanLabel.toLowerCase().includes("exit")) {
+            label = colorDim(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
+            label = colorRed(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("get started")) {
+            label = colorGreen(cleanLabel);
+          } else {
+            label = colorCyan(cleanLabel);
+          }
         } else {
-          label = cleanLabel;
+          branchColor = colorDim(branch);
+          if (cleanLabel.toLowerCase().includes("exit")) {
+            label = colorDim(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
+            label = colorRed(cleanLabel);
+          } else if (cleanLabel.toLowerCase().includes("get started")) {
+            label = colorGreen(cleanLabel);
+          } else {
+            label = cleanLabel;
+          }
         }
         
         // Submenu indicator
-        const indicator = choice.subMenu ? colorSoftGray(" →") : "";
+        const indicator = choice.subMenu ? colorDim(" ›") : "";
         
-        console.log(`  ${pointer} ${label}${indicator}`);
+        console.log(`${branchColor} ${label}${indicator}`);
       });
       
       // Message area
@@ -1266,30 +1014,30 @@ export const menuCommand = new Command("menu")
         // Format multi-line messages nicely
         const lines = message.split("\n");
         lines.forEach((line) => {
-          // Color success/error indicators - clean symbols
+          // Color success/error indicators
           let styledLine = line
             .replace(/^✅/, colorGreen("✓"))
             .replace(/^❌/, colorRed("✗"))
             .replace(/^⚠️/, colorYellow("!"))
-            .replace(/^🔑/, colorAccent("→"))
-            .replace(/^🌐/, colorAccent("→"))
-            .replace(/^📡/, colorAccent("→"))
+            .replace(/^🔑/, colorCyan("→"))
+            .replace(/^🌐/, colorCyan("→"))
+            .replace(/^📡/, colorCyan("→"))
             .replace(/^💡/, colorYellow("→"));
-          console.log("  " + colorSoftGray("│") + " " + styledLine);
+          console.log(colorDim("│ ") + styledLine);
         });
       }
       
-      // Footer hints - clean and subtle
+      // Footer hints
       console.log();
       const hints = [
-        "↑↓ navigate",
-        "enter select",
+        colorDim("↑↓") + " navigate",
+        colorDim("↵") + " select",
       ];
       if (menuStack.length > 1) {
-        hints.push("← back");
+        hints.push(colorDim("←") + " back");
       }
-      hints.push("ctrl+c quit");
-      console.log("  " + colorSoftGray(hints.join("  •  ")));
+      hints.push(colorDim("^C") + " exit");
+      console.log(colorDim(hints.join("  ")));
     };
 
     const cleanup = () => {
@@ -1442,8 +1190,8 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
     const clients: Array<{ pid: number; port: number; token: string }> = [];
     
     for (const line of lines) {
-      // Parse process line: PID node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
-      const pidMatch = line.match(/^\s*(\d+)/);
+      // Parse process line: USER PID ... node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
+      const pidMatch = line.match(/^\S+\s+(\d+)/);
       const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
       
