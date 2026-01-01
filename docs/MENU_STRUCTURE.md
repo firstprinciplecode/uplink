@@ -266,4 +266,3 @@ This would reduce top-level clutter for admin users while maintaining all functi
 - [AGENTS.md](./AGENTS.md) - Programmatic CLI usage for AI agents
 - [QUICKSTART.md](./guides/QUICKSTART.md) - Getting started guide
 - [TUNNEL_SETUP.md](./guides/TUNNEL_SETUP.md) - Tunnel configuration
-git push origin master
