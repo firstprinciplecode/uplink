@@ -99,7 +99,13 @@ app.get("/internal/allow-tls", internalAllowTlsRateLimiter, async (req, res) => 
       // In production we fail at startup if missing; this is a safe fallback.
       return res.status(503).json({ allow: false });
     }
-    const provided = req.headers["x-relay-internal-secret"];
+    // Caddy's on-demand TLS `ask` URL can't easily attach custom headers, so we allow either:
+    // - header: x-relay-internal-secret
+    // - query:  ?secret=...
+    // SECURITY: this endpoint is still rate-limited; do not log the secret.
+    const providedHeader = req.headers["x-relay-internal-secret"];
+    const providedQuery = (req.query.secret as string) || "";
+    const provided = providedHeader || providedQuery;
     if (provided !== secret) {
       return res.status(403).json({ allow: false });
     }
