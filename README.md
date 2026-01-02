@@ -5,7 +5,7 @@ Localhost to public URL in seconds. Fully terminal-native and agent-friendly.
 ![Uplink CLI](./assets/cli-screenshot.png)
 
 ## What it does
-- Expose `localhost:3000` as `https://abc123.x.uplink.spot`
+- Expose any local port (e.g., `localhost:3000`) as `https://abc123.x.uplink.spot`
 - Create permanent URLs (if enabled on your account)
 - Works great with agents (Cursor, Claude Code, GPT‑5, Windsurf)
 
@@ -33,7 +33,7 @@ uplink        # open menu
 
 ## Quick start (non-interactive)
 ```bash
-# Create tunnel
+# Create tunnel (any port: 3000, 8080, 5173, etc.)
 echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel create --port 3000 --json
 
 # List tunnels
