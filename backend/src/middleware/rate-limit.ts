@@ -104,6 +104,10 @@ export const signupRateLimiter = rateLimit({
 export const internalAllowTlsRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 120, // 120/min per IP
+  // SECURITY: we want to rate-limit even unauthorized attempts (403), otherwise this endpoint
+  // can be abused for DoS/enumeration without ever tripping the limiter.
+  skipFailedRequests: false,
+  skipSuccessfulRequests: false,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
