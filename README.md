@@ -1,13 +1,22 @@
 # Uplink CLI
 
-Localhost to public URL in seconds. Fully terminal-native and agent-friendly.
+Share your local app with others for demos, testing, review, and quick feedback — without deploying.
 
 ![Uplink CLI](./assets/cli-screenshot.png)
 
-## What it does
-- Expose any local port (e.g., `localhost:3000`) as `https://abc123.x.uplink.spot`
-- Create permanent URLs (if enabled on your account)
-- Works great with agents (Cursor, Claude Code, GPT‑5, Windsurf)
+## Key features
+- **Expose any local port**: Turn `localhost:<port>` into a public HTTPS URL like `https://abc123.x.uplink.spot`
+- **Agent-first**: Works well with Cursor, Claude Code, Codex, Windsurf (and other agentic tools)
+- **Terminal-native**: Start/stop tunnels and manage URLs from an interactive menu
+- **No browser required**: Create an account + token from the CLI (`uplink signup`), then automate everything
+- **Open source CLI**: Inspect, extend, and contribute
+
+## Why use Uplink
+- **Fastest way to share localhost**: Great for “can you look at this?” moments
+- **Works great with agents**: machine-readable `--json`, stable exit codes, and stdin token support
+- **Share links + optional permanent URLs**: Permanent URLs are available if enabled on your account
+
+Learn more at [uplink.spot](https://uplink.spot)
 
 ## Install
 ```bash
@@ -44,11 +53,11 @@ echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel alias-set --id tun_xxx --
 ```
 
 ## Agent essentials
-- `--json` → stdout JSON only; stderr logs/errors.
-- `--token-stdin` → read token once from stdin (avoid argv leaks).
-- `--api-base` → override API host if needed.
-- Exit codes: 0 ok; 2 usage; 10 auth missing/invalid; 20 network; 30 server/unknown.
-See `docs/AGENTS.md` for full contract.
+- **`--json`**: stdout = JSON only; stderr = logs/errors
+- **`--token-stdin`**: read token once from stdin (avoid argv leaks)
+- **`--api-base`**: override API host if needed
+- **Exit codes**: 0 ok; 2 usage; 10 auth missing/invalid; 20 network; 30 server/unknown  
+See `docs/AGENTS.md` for the full contract.
 
 ## Key commands
 - `uplink menu` — interactive UI
