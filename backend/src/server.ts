@@ -10,7 +10,7 @@ import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
 import { publicRouter } from "./routes/public";
 import { authMiddleware } from "./middleware/auth";
-import { apiRateLimiter } from "./middleware/rate-limit";
+import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-limit";
 import { logger } from "./utils/logger";
 import { config } from "./utils/config";
 import { makeError } from "./schemas/error";
@@ -90,9 +90,26 @@ app.get("/health/ready", async (req, res) => {
   }
 });
 
-// Allow on-demand TLS (Caddy ask endpoint) - no auth, no rate limit
-app.get("/internal/allow-tls", async (req, res) => {
+// Allow on-demand TLS (Caddy ask endpoint)
+// SECURITY: protected by RELAY_INTERNAL_SECRET header + rate-limited.
+app.get("/internal/allow-tls", internalAllowTlsRateLimiter, async (req, res) => {
   try {
+    const secret = process.env.RELAY_INTERNAL_SECRET || "";
+    if (!secret) {
+      // In production we fail at startup if missing; this is a safe fallback.
+      return res.status(503).json({ allow: false });
+    }
+    // Caddy's on-demand TLS `ask` URL can't easily attach custom headers, so we allow either:
+    // - header: x-relay-internal-secret
+    // - query:  ?secret=...
+    // SECURITY: this endpoint is still rate-limited; do not log the secret.
+    const providedHeader = req.headers["x-relay-internal-secret"];
+    const providedQuery = (req.query.secret as string) || "";
+    const provided = providedHeader || providedQuery;
+    if (provided !== secret) {
+      return res.status(403).json({ allow: false });
+    }
+
     const domain = (req.query.domain as string) || (req.query.host as string) || "";
     const host = domain.split(":")[0].trim().toLowerCase();
 

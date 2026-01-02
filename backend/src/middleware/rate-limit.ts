@@ -98,3 +98,27 @@ export const signupRateLimiter = rateLimit({
   },
 });
 
+// Rate limiter for unauthenticated internal endpoints (e.g., Caddy ask endpoint)
+// NOTE: Keep this fairly high because legitimate usage can spike during certificate issuance/renewal,
+// but still protect against DoS and enumeration attempts.
+export const internalAllowTlsRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120, // 120/min per IP
+  // SECURITY: we want to rate-limit even unauthorized attempts (403), otherwise this endpoint
+  // can be abused for DoS/enumeration without ever tripping the limiter.
+  skipFailedRequests: false,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    logger.warn({
+      event: "rate_limit.internal_allow_tls_exceeded",
+      ip: req.ip,
+      path: req.path,
+    });
+    res.status(429).json(
+      makeError("RATE_LIMIT_EXCEEDED", "Too many requests, please try again later.")
+    );
+  },
+});
+

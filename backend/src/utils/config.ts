@@ -67,11 +67,8 @@ export function validateConfig(): Config {
   const isProduction = process.env.NODE_ENV === "production";
   
   if (isProduction && !process.env.CONTROL_PLANE_TOKEN_PEPPER) {
-    logger.warn({
-      event: "security.warning",
-      message: "CONTROL_PLANE_TOKEN_PEPPER not set - tokens are less secure without a pepper",
-      severity: "high",
-    });
+    // Fail closed in production. Without a pepper, a DB leak enables offline guessing against token hashes.
+    throw new Error("SECURITY: CONTROL_PLANE_TOKEN_PEPPER must be set in production");
   }
   
   if (isProduction && isSqlite) {
@@ -90,12 +87,9 @@ export function validateConfig(): Config {
     });
   }
 
-  if (!process.env.RELAY_INTERNAL_SECRET) {
-    logger.warn({
-      event: "security.warning",
-      message: "RELAY_INTERNAL_SECRET not set - internal endpoints have no authentication",
-      severity: "high",
-    });
+  if (isProduction && !process.env.RELAY_INTERNAL_SECRET) {
+    // Fail closed in production; internal endpoints (relay, on-demand TLS) must be authenticated.
+    throw new Error("SECURITY: RELAY_INTERNAL_SECRET must be set in production");
   }
 
   logger.info({
