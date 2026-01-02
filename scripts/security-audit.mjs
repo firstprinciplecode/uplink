@@ -34,6 +34,16 @@ function pickHeaders(res) {
     "content-security-policy": h.get("content-security-policy"),
     "referrer-policy": h.get("referrer-policy"),
     "permissions-policy": h.get("permissions-policy"),
+    // Cache/proxy visibility (useful to detect CDN caching of 403s)
+    "cache-control": h.get("cache-control"),
+    "cf-cache-status": h.get("cf-cache-status"),
+    "cf-ray": h.get("cf-ray"),
+    "via": h.get("via"),
+    "x-cache": h.get("x-cache"),
+    // RateLimit-* headers (express-rate-limit)
+    "ratelimit-limit": h.get("ratelimit-limit"),
+    "ratelimit-remaining": h.get("ratelimit-remaining"),
+    "ratelimit-reset": h.get("ratelimit-reset"),
     "server": h.get("server"),
   };
 }
@@ -105,7 +115,8 @@ async function main() {
   const burstN = Number(process.env.ALLOW_TLS_BURST || 20);
   const burst = [];
   for (let i = 0; i < burstN; i++) {
-    burst.push(fetchWithMeta(allowTlsUrl, { method: "GET" }));
+    // IMPORTANT: add per-request nonce to prevent upstream caching from hiding rate limiting.
+    burst.push(fetchWithMeta(`${allowTlsUrl}&nonce=${i}_${Date.now()}`, { method: "GET" }));
   }
   const burstRes = await Promise.all(burst);
   const statusCounts = burstRes.reduce((acc, r) => {
