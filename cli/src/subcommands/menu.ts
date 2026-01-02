@@ -98,6 +98,14 @@ function truncate(text: string, max: number) {
   return text.slice(0, max - 1) + "…";
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
 function restoreRawMode() {
   try {
     process.stdin.setRawMode(true);
@@ -256,7 +264,6 @@ export const menuCommand = new Command("menu")
         errorMsg.includes("Missing AGENTCLOUD_TOKEN");
       isAdmin = false;
     }
-
     // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
     
@@ -490,6 +497,72 @@ export const menuCommand = new Command("menu")
             },
           },
           {
+            label: "View Connected Tunnels",
+            action: async () => {
+              try {
+                const data = await apiRequest("GET", "/v1/admin/relay-status") as {
+                  connectedTunnels?: number;
+                  tunnels?: Array<{ token: string; clientIp: string; targetPort: number; connectedAt: string; connectedFor: string }>;
+                  timestamp?: string;
+                  error?: string;
+                  message?: string;
+                };
+
+                if (data.error) {
+                  return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+                }
+                if (!data.tunnels || data.tunnels.length === 0) {
+                  return "No tunnels currently connected to the relay.";
+                }
+
+                const lines = data.tunnels.map((t) =>
+                  `${truncate(t.token, 12).padEnd(14)} ${t.clientIp.padEnd(16)} ${String(t.targetPort).padEnd(6)} ${t.connectedFor.padEnd(10)} ${truncate(t.connectedAt, 19)}`
+                );
+
+                return [
+                  `Connected Tunnels: ${data.connectedTunnels}`,
+                  "",
+                  "Token          Client IP        Port   Uptime     Connected At",
+                  "-".repeat(75),
+                  ...lines,
+                ].join("\n");
+              } catch (err: any) {
+                return `Error fetching relay status: ${err.message || err}`;
+              }
+            },
+          },
+          {
+            label: "View Traffic Stats",
+            action: async () => {
+              try {
+                const data = await apiRequest("GET", "/v1/admin/traffic-stats") as {
+                  stats?: Array<{ alias: string; requests: number; bytesIn: number; bytesOut: number; lastStatus: number; lastSeen: string }>;
+                  error?: string;
+                  message?: string;
+                };
+
+                if (data.error) {
+                  return `Error: ${data.error}${data.message ? ` - ${data.message}` : ""}`;
+                }
+                if (!data.stats || data.stats.length === 0) {
+                  return "No traffic stats available.";
+                }
+
+                const lines = data.stats.map((s) =>
+                  `${truncate(s.alias || "-", 24).padEnd(26)} ${String(s.requests).padEnd(10)} ${formatBytes(s.bytesIn).padEnd(10)} ${formatBytes(s.bytesOut).padEnd(10)} ${String(s.lastStatus).padEnd(4)} ${truncate(s.lastSeen, 19)}`
+                );
+
+                return [
+                  "Alias                      Requests   In         Out        Sts  Last Seen",
+                  "-".repeat(85),
+                  ...lines,
+                ].join("\n");
+              } catch (err: any) {
+                return `Error fetching traffic stats: ${err.message || err}`;
+              }
+            },
+          },
+          {
             label: "Test: Tunnel",
             action: async () => {
               await runSmoke("smoke:tunnel");
@@ -692,31 +765,191 @@ export const menuCommand = new Command("menu")
               }
             },
           },
+          {
+            label: "View Tunnel Stats",
+            action: async () => {
+              try {
+                const result = await apiRequest("GET", "/v1/tunnels");
+                const tunnels = result.tunnels || result?.items || [];
+                if (!tunnels || tunnels.length === 0) {
+                  restoreRawMode();
+                  return "No tunnels found.";
+                }
+
+                const options: SelectOption[] = tunnels.map((t: any) => {
+                  const token = truncate(t.token || t.id, 12);
+                  const alias = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
+                  return {
+                    label: `${token}    ${alias}`,
+                    value: t.id,
+                  };
+                });
+
+                const choice = await inlineSelect("Select tunnel to view stats", options, true);
+                if (choice === null) {
+                  restoreRawMode();
+                  return "";
+                }
+
+                const stats = await apiRequest("GET", `/v1/tunnels/${choice.value}/stats`) as any;
+                const connected = stats.connected ? "yes" : "no";
+                const alias = stats.alias || null;
+
+                if (!alias) {
+                  const s = stats.inMemory || {};
+                  return [
+                    `Connected: ${connected}`,
+                    `Requests:  ${s.requests || 0}`,
+                    `In:        ${formatBytes(s.bytesIn || 0)}`,
+                    `Out:       ${formatBytes(s.bytesOut || 0)}`,
+                  ].join("\n");
+                }
+
+                const totals = stats.totals || {};
+                const current = stats.currentRun || {};
+                const permanentUrl = `https://${alias}.x.uplink.spot`;
+                return [
+                  `Permanent URL: ${permanentUrl}`,
+                  `Connected:     ${connected}`,
+                  "",
+                  "Totals (persisted):",
+                  `  Requests  ${totals.requests || 0}`,
+                  `  In        ${formatBytes(totals.bytesIn || 0)}`,
+                  `  Out       ${formatBytes(totals.bytesOut || 0)}`,
+                  "",
+                  "Current run:",
+                  `  Requests  ${current.requests || 0}`,
+                  `  In        ${formatBytes(current.bytesIn || 0)}`,
+                  `  Out       ${formatBytes(current.bytesOut || 0)}`,
+                ].join("\n");
+              } catch (err: any) {
+                restoreRawMode();
+                throw err;
+              }
+            },
+          },
+          {
+            label: "Create Permanent URL",
+            action: async () => {
+              try {
+                const result = await apiRequest("GET", "/v1/tunnels");
+                const tunnels = result.tunnels || result?.items || [];
+                if (!tunnels || tunnels.length === 0) {
+                  restoreRawMode();
+                  return "No tunnels found. Create a tunnel first.";
+                }
+
+                const options: SelectOption[] = tunnels.map((t: any) => {
+                  const token = truncate(t.token || t.id, 12);
+                  const alias = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
+                  return {
+                    label: `${token}    ${alias}`,
+                    value: t.id,
+                  };
+                });
+
+                const choice = await inlineSelect("Select tunnel to set permanent URL", options, true);
+                if (choice === null) {
+                  restoreRawMode();
+                  return "";
+                }
+
+                try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+                const aliasName = await promptLine("Enter alias name (e.g. my-app): ");
+                restoreRawMode();
+
+                if (!aliasName.trim()) {
+                  return "No alias provided.";
+                }
+
+                try {
+                  const aliasResult = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
+                    alias: aliasName.trim(),
+                  });
+                  const permanentUrl = `https://${aliasResult.alias}.x.uplink.spot`;
+                  return [
+                    "✓ Permanent URL created",
+                    "",
+                    `→ Alias     ${aliasResult.alias}`,
+                    `→ URL       ${permanentUrl}`,
+                    "",
+                    "Your tunnel will now be accessible at this permanent URL.",
+                  ].join("\n");
+                } catch (err: any) {
+                  const msg = err?.message || String(err);
+                  if (msg.includes("ALIAS_NOT_ENABLED")) {
+                    return [
+                      "❌ Permanent URLs are a premium feature",
+                      "",
+                      "Contact us on Discord at uplink.spot to upgrade your account.",
+                    ].join("\n");
+                  }
+                  if (msg.includes("ALIAS_LIMIT_REACHED")) {
+                    return [
+                      "❌ URL limit reached",
+                      "",
+                      "You've reached your URL limit. Contact us to increase it.",
+                    ].join("\n");
+                  }
+                  if (msg.includes("ALIAS_TAKEN") || msg.includes("already in use")) {
+                    return `❌ Alias "${aliasName.trim()}" is already in use. Try a different name.`;
+                  }
+                  throw err;
+                }
+              } catch (err: any) {
+                restoreRawMode();
+                throw err;
+              }
+            },
+          },
+          {
+            label: "My Tunnels",
+            action: async () => {
+              const runningClients = findTunnelClients();
+              const result = await apiRequest("GET", "/v1/tunnels");
+              const tunnels = result.tunnels || result?.items || [];
+              if (!tunnels || tunnels.length === 0) {
+                return "No tunnels found.";
+              }
+              
+              const lines = tunnels.map((t: any) => {
+                const token = truncate(t.token || "", 12);
+                const port = String(t.target_port ?? t.targetPort ?? "-").padEnd(5);
+                const connectedLocal = runningClients.some((c) => c.token === (t.token || ""));
+                const status = connectedLocal ? "connected" : "unknown";
+                const alias = t.alias ? `${t.alias}.x.uplink.spot` : "-";
+                return `${token.padEnd(14)}  ${port}  ${status.padEnd(11)}  ${alias}`;
+              });
+              
+              return [
+                "Token          Port   Status       Permanent URL",
+                "-".repeat(60),
+                ...lines,
+              ].join("\n");
+            },
+          },
         ],
       });
 
-    mainMenu.push({
-      label: "Usage",
-      subMenu: [
-        {
-          label: isAdmin ? "List Tunnels (admin)" : "List My Tunnels",
-          action: async () => {
-            const runningClients = findTunnelClients();
-            const path = isAdmin ? "/v1/admin/tunnels?limit=20" : "/v1/tunnels";
-            const result = await apiRequest("GET", path);
-            const tunnels = result.tunnels || result?.items || [];
-            if (!tunnels || tunnels.length === 0) {
-              return "No tunnels found.";
-            }
-            
-            const lines = tunnels.map(
-              (t: any) => {
+    // Admin-only: Usage section
+    if (isAdmin) {
+      mainMenu.push({
+        label: "Usage",
+        subMenu: [
+          {
+            label: "List All Tunnels",
+            action: async () => {
+              const runningClients = findTunnelClients();
+              const result = await apiRequest("GET", "/v1/admin/tunnels?limit=20");
+              const tunnels = result.tunnels || result?.items || [];
+              if (!tunnels || tunnels.length === 0) {
+                return "No tunnels found.";
+              }
+              
+              const lines = tunnels.map((t: any) => {
                 const token = t.token || "";
                 const connectedFromApi = t.connected ?? false;
-                const connectedLocal = runningClients.some((c) => c.token === token);
-                const connectionStatus = isAdmin
-                  ? (connectedFromApi ? "connected" : "disconnected")
-                  : (connectedLocal ? "connected" : "unknown");
+                const connectionStatus = connectedFromApi ? "connected" : "disconnected";
                 
                 return `${truncate(t.id, 12)}  ${truncate(token, 10).padEnd(12)}  ${String(
                   t.target_port ?? t.targetPort ?? "-"
@@ -724,24 +957,19 @@ export const menuCommand = new Command("menu")
                   t.created_at ?? t.createdAt ?? "",
                   19
                 )}`;
-              }
-            );
-            return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join(
-              "\n"
-            );
+              });
+              return ["ID           Token         Port   Connection   Created", "-".repeat(70), ...lines].join("\n");
+            },
           },
-        },
-        {
-          label: isAdmin ? "List Databases (admin)" : "List My Databases",
-          action: async () => {
-            const path = isAdmin ? "/v1/admin/databases?limit=20" : "/v1/dbs";
-            const result = await apiRequest("GET", path);
-            const databases = result.databases || result.items || [];
-            if (!databases || databases.length === 0) {
-              return "No databases found.";
-            }
-            const lines = databases.map(
-              (db: any) =>
+          {
+            label: "List All Databases",
+            action: async () => {
+              const result = await apiRequest("GET", "/v1/admin/databases?limit=20");
+              const databases = result.databases || result.items || [];
+              if (!databases || databases.length === 0) {
+                return "No databases found.";
+              }
+              const lines = databases.map((db: any) =>
                 `${truncate(db.id, 12)}  ${truncate(db.name ?? "-", 14).padEnd(14)}  ${truncate(
                   db.provider ?? "-",
                   8
@@ -749,21 +977,22 @@ export const menuCommand = new Command("menu")
                   db.status ?? (db.ready ? "ready" : db.status ?? "unknown"),
                   10
                 ).padEnd(10)}  ${truncate(db.created_at ?? db.createdAt ?? "", 19)}`
-            );
-            return [
-              "ID           Name            Prov     Region     Status      Created",
-              "-".repeat(80),
-              ...lines,
-            ].join("\n");
+              );
+              return [
+                "ID           Name            Prov     Region     Status      Created",
+                "-".repeat(80),
+                ...lines,
+              ].join("\n");
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    }
 
     // Admin-only: Manage Tokens
     if (isAdmin) {
       mainMenu.push({
-        label: "Manage Tokens (admin)",
+        label: "Manage Tokens",
         subMenu: [
           {
             label: "List Tokens",
@@ -855,10 +1084,10 @@ export const menuCommand = new Command("menu")
       });
     }
 
-      mainMenu.push({
-        label: "Exit",
-        action: async () => "Goodbye!",
-      });
+    mainMenu.push({
+      label: "Exit",
+      action: async () => "Goodbye!",
+    });
     }
 
     // Menu navigation state
