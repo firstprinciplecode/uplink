@@ -3,6 +3,11 @@
 
 set -e
 
+# SECURITY NOTE:
+# This script supports password-based SSH via sshpass for convenience.
+# Never hardcode passwords/tokens in this repo. Use env vars (e.g. DIGITAL_SSH_PASSWORD).
+# Rotate credentials immediately if you suspect exposure.
+
 # Load .env if it is readable (Cursor sandbox may block reading ignored files like .env)
 if [ -r .env ]; then
   set -a
