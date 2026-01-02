@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
 import { makeError } from "../schemas/error";
 import { pool } from "../db/pool";
 import { TunnelRecord, TunnelStatus, toTunnelResponse } from "../models/tunnel";
@@ -41,7 +41,8 @@ function isReservedAlias(alias: string): boolean {
 }
 
 function isAuthorizedRelay(req: Request): boolean {
-  if (!RELAY_INTERNAL_SECRET) return true;
+  // Fail closed: internal endpoints must be protected by a shared secret.
+  if (!RELAY_INTERNAL_SECRET) return false;
   const provided = req.headers["x-relay-internal-secret"];
   return provided === RELAY_INTERNAL_SECRET;
 }
@@ -140,7 +141,9 @@ tunnelRouter.post(
       const project = (req.body as { project?: string }).project;
 
       const id = `tun_${randomUUID()}`;
-      const token = randomUUID().replace(/-/g, "").slice(0, 12); // Shorter token for subdomain
+      // SECURITY: tunnel URL tokens are public identifiers; make them high-entropy to prevent guessing.
+      // 16 bytes => 128-bit, encoded as 32 hex chars (safe for DNS labels).
+      const token = randomBytes(16).toString("hex");
       const projectId = project || null;
       const status: TunnelStatus = "active";
       const now = new Date().toISOString();
