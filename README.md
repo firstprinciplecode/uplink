@@ -2,7 +2,7 @@
 
 Localhost to public URL in seconds. Fully terminal-native and agent-friendly.
 
-![Uplink CLI](https://cdn.jsdelivr.net/gh/firstprinciplecode/uplink@master/assets/cli-screenshot.png)
+![Uplink CLI](./assets/cli-screenshot.png)
 
 ## What it does
 - Expose `localhost:3000` as `https://abc123.x.uplink.spot`
