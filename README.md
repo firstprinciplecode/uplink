@@ -2,6 +2,8 @@
 
 Localhost to public URL in seconds. Fully terminal-native and agent-friendly.
 
+![Uplink CLI](assets/cli-screenshot.png)
+
 ## What it does
 - Expose `localhost:3000` as `https://abc123.x.uplink.spot`
 - Create permanent URLs (if enabled on your account)
