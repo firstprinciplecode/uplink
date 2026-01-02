@@ -93,6 +93,7 @@ const ASCII_UPLINK = colorCyan([
   " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
 ].join("\n"));
 
+
 function truncate(text: string, max: number) {
   if (text.length <= max) return text;
   return text.slice(0, max - 1) + "…";
@@ -1160,18 +1161,14 @@ export const menuCommand = new Command("menu")
       clearScreen();
       console.log();
       console.log(ASCII_UPLINK);
-      console.log();
       
-      // Status bar - relay and API status
+      // Status indicator below logo
       if (menuStack.length === 1 && cachedRelayStatus) {
-        const statusColor = cachedRelayStatus.includes("ok") ? colorGreen : colorRed;
-        console.log(colorDim("├─") + " Status  " + statusColor(cachedRelayStatus.replace("API: ", "")));
+        const statusIndicator = cachedRelayStatus.includes("ok") ? colorGreen("›") : colorRed("›");
+        const statusText = cachedRelayStatus.includes("ok") ? "connected" : "offline";
+        console.log(statusIndicator + colorDim(" " + statusText));
       }
-
-      // Show active tunnels if we're at the main menu (use cached value, no scanning)
-      if (menuStack.length === 1 && cachedActiveTunnels) {
-        console.log(cachedActiveTunnels);
-      }
+      console.log();
       
       console.log();
       
@@ -1180,64 +1177,54 @@ export const menuCommand = new Command("menu")
       // Breadcrumb navigation
       if (menuPath.length > 0) {
         const breadcrumb = menuPath.map((p, i) => 
-          i === menuPath.length - 1 ? colorCyan(p) : colorDim(p)
+          i === menuPath.length - 1 ? colorBold(p) : colorDim(p)
         ).join(colorDim(" › "));
         console.log(breadcrumb);
         console.log();
       }
       
-      // Menu items with tree-style rendering
+      // Menu items - simple list style
       currentMenu.forEach((choice, idx) => {
-        const isLast = idx === currentMenu.length - 1;
         const isSelected = idx === selected;
-        const branch = isLast ? "└─" : "├─";
         
         // Clean up labels - remove emojis for cleaner look
         let cleanLabel = choice.label
           .replace(/^🚀\s*/, "")
-          .replace(/^⚠️\s*/, "")
+          .replace(/^⚠️\s*/, "⚠ ")
           .replace(/^✅\s*/, "")
           .replace(/^❌\s*/, "");
         
-        // Style based on selection and type
-        let label: string;
-        let branchColor: string;
+        // Has submenu indicator
+        const hasSubmenu = !!choice.subMenu;
+        const suffix = hasSubmenu ? " ›" : "";
         
+        // Style based on selection
+        let line: string;
         if (isSelected) {
-          branchColor = colorCyan(branch);
           if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
+            line = colorDim("› " + cleanLabel + suffix);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("⚠")) {
+            line = colorRed("› " + cleanLabel + suffix);
           } else {
-            label = colorCyan(cleanLabel);
+            line = colorBold("› " + cleanLabel + suffix);
           }
         } else {
-          branchColor = colorDim(branch);
           if (cleanLabel.toLowerCase().includes("exit")) {
-            label = colorDim(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("kill")) {
-            label = colorRed(cleanLabel);
-          } else if (cleanLabel.toLowerCase().includes("get started")) {
-            label = colorGreen(cleanLabel);
+            line = colorDim("  " + cleanLabel + suffix);
+          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("⚠")) {
+            line = colorDim("  ") + colorRed(cleanLabel + suffix);
           } else {
-            label = cleanLabel;
+            line = colorDim("  " + cleanLabel + suffix);
           }
         }
         
-        // Submenu indicator
-        const indicator = choice.subMenu ? colorDim(" ›") : "";
-        
-        console.log(`${branchColor} ${label}${indicator}`);
+        console.log(line);
       });
       
       // Message area
       if (busy) {
         console.log();
-        console.log(colorDim("│"));
-        console.log(colorCyan("│ ") + colorDim("Working..."));
+        console.log(colorDim("Working..."));
       } else if (message && message !== "Use ↑/↓ and Enter. ← to go back. Ctrl+C to quit.") {
         console.log();
         // Format multi-line messages nicely
@@ -1245,28 +1232,16 @@ export const menuCommand = new Command("menu")
         lines.forEach((line) => {
           // Color success/error indicators
           let styledLine = line
-            .replace(/^✅/, colorGreen("✓"))
-            .replace(/^❌/, colorRed("✗"))
-            .replace(/^⚠️/, colorYellow("!"))
-            .replace(/^🔑/, colorCyan("→"))
-            .replace(/^🌐/, colorCyan("→"))
-            .replace(/^📡/, colorCyan("→"))
-            .replace(/^💡/, colorYellow("→"));
-          console.log(colorDim("│ ") + styledLine);
+            .replace(/^✓/, colorGreen("✓"))
+            .replace(/^✗/, colorRed("✗"))
+            .replace(/^→/, colorCyan("→"));
+          console.log(styledLine);
         });
       }
       
       // Footer hints
       console.log();
-      const hints = [
-        colorDim("↑↓") + " navigate",
-        colorDim("↵") + " select",
-      ];
-      if (menuStack.length > 1) {
-        hints.push(colorDim("←") + " back");
-      }
-      hints.push(colorDim("^C") + " exit");
-      console.log(colorDim(hints.join("  ")));
+      console.log(colorDim("↑↓ navigate  ↵ select  ^C exit"));
     };
 
     const cleanup = () => {
