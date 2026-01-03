@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Expose localhost to the internet in seconds. Interactive terminal UI, permanent custom domains, zero config. A modern ngrok alternative.",
   "keywords": [
     "tunnel",
@@ -19,7 +19,7 @@
     "https-tunnel",
     "custom-domain"
   ],
-  "homepage": "https://github.com/firstprinciplecode/uplink#readme",
+  "homepage": "https://uplink.spot",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/firstprinciplecode/uplink.git"
