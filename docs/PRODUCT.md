@@ -277,6 +277,15 @@ See [DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) for production setup.
 
 ---
 
+## TLS and Internal Secrets
+
+- **Primary TLS**: wildcard DNS-01 (Cloudflare) for `*.x.uplink.spot` and `*.uplink.spot`.
+- **Optional on-demand TLS**: backend ask endpoint `/internal/allow-tls` (protected by `RELAY_INTERNAL_SECRET`) for future custom domains.
+- **Required secrets**: set `RELAY_INTERNAL_SECRET`, `TUNNEL_DOMAIN`, `ALIAS_DOMAIN` in `/opt/agentcloud/.env` on servers; relay and backend services load from that file.
+- **Diagnostics**: `uplink system status` (admin) checks relay reachability, internal secret, TLS mode.
+
+---
+
 ## Roadmap
 
 Based on the CLI-first philosophy, planned expansions:
