@@ -1339,6 +1339,19 @@ export const menuCommand = new Command("menu")
   });
 
 async function createAndStartTunnel(port: number): Promise<string> {
+  // Check if tunnel already running on this port
+  const existing = findTunnelClients().filter(c => c.port === port);
+  if (existing.length > 0) {
+    return [
+      `⚠ Tunnel already running on port ${port}`,
+      ``,
+      `→ PID: ${existing[0].pid}`,
+      `→ Token: ${existing[0].token.substring(0, 8)}...`,
+      ``,
+      `Use "Stop Tunnel" first to disconnect the existing tunnel.`,
+    ].join("\n");
+  }
+
   // Create tunnel
   const result = await apiRequest("POST", "/v1/tunnels", { port });
   const url = result.url || "(no url)";
