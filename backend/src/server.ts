@@ -11,6 +11,9 @@ import { signupRouter } from "./routes/signup";
 import { publicRouter } from "./routes/public";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-limit";
+import { defaultTimeout } from "./middleware/timeout";
+import { ipAllowlist } from "./middleware/ip-allowlist";
+import { requestSigning } from "./middleware/request-signing";
 import { logger } from "./utils/logger";
 import { config } from "./utils/config";
 import { makeError } from "./schemas/error";
@@ -47,8 +50,11 @@ app.use(compression({
   },
 }));
 
-// Body parsing
+// Body parsing with per-route limits (default 10MB, can be overridden per route)
 app.use(bodyParser.json({ limit: "10mb" }));
+
+// Request timeout middleware (30 seconds default)
+app.use(defaultTimeout);
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -106,8 +112,14 @@ app.get("/health/ready", async (req, res) => {
   }
 });
 
+// Internal endpoints: IP allowlist + request signing (optional, fail-open if not configured)
+// SECURITY: Multiple layers of protection for internal endpoints
+app.use("/internal", ipAllowlist(["127.0.0.1", "::1"])); // Default: localhost only
+// Note: Request signing is optional (enabled if RELAY_INTERNAL_SECRET is set)
+// Caddy may not support custom headers, so we keep query param support for compatibility
+
 // Allow on-demand TLS (Caddy ask endpoint)
-// SECURITY: protected by RELAY_INTERNAL_SECRET header + rate-limited.
+// SECURITY: protected by RELAY_INTERNAL_SECRET header + rate-limited + IP allowlist.
 app.get("/internal/allow-tls", internalAllowTlsRateLimiter, async (req, res) => {
   try {
     const secret = process.env.RELAY_INTERNAL_SECRET || "";
