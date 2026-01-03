@@ -1406,9 +1406,10 @@ async function createAndStartTunnel(port: number): Promise<string> {
   ];
   
   if (alias) {
-    const aliasDomain = process.env.ALIAS_DOMAIN || "uplink.spot";
-    lines.push(`→ Alias         ${alias}.${aliasDomain}`);
-    lines.push(`→ Alias URL     https://${alias}.${aliasDomain}`);
+    // Use aliasUrl from backend if available, otherwise construct it
+    const aliasUrl = result.aliasUrl || `https://${alias}.uplink.spot`;
+    lines.push(`→ Alias         ${alias}`);
+    lines.push(`→ Alias URL     ${aliasUrl}`);
   }
   
   lines.push(
