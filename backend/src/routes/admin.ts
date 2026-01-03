@@ -377,9 +377,6 @@ adminRouter.get("/tunnels", validateQuery(listQuerySchema), async (req: AuthedRe
       connected: connectedTokens.has(row.token),
     }));
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H4',location:'backend/src/routes/admin.ts:adminListTunnels',message:'Admin tunnel list requested',data:{adminUserId:String(user.id),returned:tunnels.length,connectedTokens:connectedTokens.size},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.json({
       tunnels,
       count: tunnels.length,
