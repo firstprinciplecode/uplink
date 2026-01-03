@@ -187,9 +187,6 @@ tunnelRouter.post(
  * This is exported so it can be mounted at /internal/resolve-alias (outside /v1) to bypass auth
  */
 export async function resolveAliasHandler(req: Request, res: Response) {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'backend/src/routes/tunnels.ts:resolveAliasHandler:entry',message:'resolveAliasHandler called',data:{hasAuthHeader:!!req.headers['x-relay-internal-secret'],aliasRaw:typeof req.query.alias==='string'?String(req.query.alias).slice(0,80):''},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if (!isAuthorizedRelay(req)) {
     return res.status(403).json(makeError("FORBIDDEN", "Invalid relay secret"));
   }
@@ -213,15 +210,9 @@ export async function resolveAliasHandler(req: Request, res: Response) {
   );
 
   if (result.rowCount === 0) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H2',location:'backend/src/routes/tunnels.ts:resolveAliasHandler:notFound',message:'Alias not found or inactive',data:{alias},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.status(404).json(makeError("NOT_FOUND", "Alias not found"));
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'backend/src/routes/tunnels.ts:resolveAliasHandler:resolved',message:'Alias resolved to tunnel',data:{alias,tunnelId:String(result.rows[0]?.tunnel_id||''),ownerUserId:String(result.rows[0]?.owner_user_id||'')},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   return res.json({ token: result.rows[0].token });
 }
 
@@ -506,9 +497,6 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
       toTunnelResponse(row, TUNNEL_DOMAIN, USE_HOST_ROUTING, ALIAS_DOMAIN, row.alias || null)
     );
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H3',location:'backend/src/routes/tunnels.ts:listTunnels',message:'User tunnel list requested',data:{userId:String(user.id),count:tunnels.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return res.json({
       tunnels,
       count: tunnels.length,
