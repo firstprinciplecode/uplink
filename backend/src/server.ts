@@ -14,6 +14,22 @@ import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-l
 import { logger } from "./utils/logger";
 import { config } from "./utils/config";
 import { makeError } from "./schemas/error";
+const ALIAS_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+const RESERVED_ALIASES = new Set(["www", "api", "x", "t", "docs", "support", "status", "health", "mail"]);
+
+async function findTokenForAlias(alias: string): Promise<string | null> {
+  const { pool } = await import("./db/pool");
+  const result = await pool.query(
+    `SELECT t.token
+     FROM tunnel_aliases a
+     JOIN tunnels t ON t.owner_user_id = a.owner_user_id AND t.target_port = a.target_port
+     WHERE a.alias = $1 AND t.status = 'active'
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [alias]
+  );
+  return result.rows?.[0]?.token ?? null;
+}
 
 const app = express();
 
@@ -113,20 +129,27 @@ app.get("/internal/allow-tls", internalAllowTlsRateLimiter, async (req, res) => 
     const domain = (req.query.domain as string) || (req.query.host as string) || "";
     const host = domain.split(":")[0].trim().toLowerCase();
 
-    // Expect <token>.<TUNNEL_DOMAIN>
-    if (!host.endsWith(`.${config.tunnelDomain}`)) {
-      return res.status(403).json({ allow: false });
+    // Token-based hosts: <token>.<TUNNEL_DOMAIN>
+    if (host.endsWith(`.${config.tunnelDomain}`)) {
+      const token = host.slice(0, -(config.tunnelDomain.length + 1));
+      if (!/^[a-zA-Z0-9]{3,64}$/.test(token)) {
+        return res.status(403).json({ allow: false });
+      }
+      const exists = await tunnelTokenExists(token);
+      return exists ? res.json({ allow: true }) : res.status(403).json({ allow: false });
     }
 
-    const token = host.slice(0, -(config.tunnelDomain.length + 1));
-    if (!/^[a-zA-Z0-9]{3,64}$/.test(token)) {
-      return res.status(403).json({ allow: false });
+    // Alias-based hosts: <alias>.<ALIAS_DOMAIN>
+    if (host.endsWith(`.${config.aliasDomain}`)) {
+      const alias = host.slice(0, -(config.aliasDomain.length + 1));
+      if (!ALIAS_REGEX.test(alias) || RESERVED_ALIASES.has(alias)) {
+        return res.status(403).json({ allow: false });
+      }
+      const token = await findTokenForAlias(alias);
+      return token ? res.json({ allow: true }) : res.status(403).json({ allow: false });
     }
 
-    const exists = await tunnelTokenExists(token);
-    if (exists) {
-      return res.json({ allow: true });
-    }
+    // Everything else: deny
     return res.status(403).json({ allow: false });
   } catch (error) {
     logger.error({ event: "allow_tls.error", error });
