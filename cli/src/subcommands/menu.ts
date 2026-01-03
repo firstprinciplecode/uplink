@@ -1394,8 +1394,8 @@ function findTunnelClients(): Array<{ pid: number; port: number; token: string }
     const clients: Array<{ pid: number; port: number; token: string }> = [];
     
     for (const line of lines) {
-      // Parse process line: USER PID ... node scripts/tunnel/client-improved.js --token TOKEN --port PORT --ctrl CTRL
-      const pidMatch = line.match(/^\S+\s+(\d+)/);
+      // Parse process line: PID COMMAND (from ps -o pid=,command=)
+      const pidMatch = line.match(/^\s*(\d+)/);
       const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
       
