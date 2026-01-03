@@ -60,6 +60,7 @@ let reconnectTimer = null;
 let isConnected = false;
 let isRegistered = false;
 let healthCheckTimer = null;
+let lastHealthTimeoutLog = 0;
 let stats = {
   requests: 0,
   errors: 0,
@@ -93,12 +94,18 @@ function logError(err, context) {
 }
 
 function checkLocalService() {
+  // Allow disabling the health check if it is noisy or not needed
+  if ((process.env.TUNNEL_HEALTH_CHECK_DISABLE || "").toLowerCase() === "true") {
+    return;
+  }
+
+  const timeoutMs = Number(process.env.TUNNEL_HEALTH_CHECK_TIMEOUT_MS || 2000);
   const options = {
     hostname: "127.0.0.1",
     port,
     path: "/",
     method: "HEAD",
-    timeout: 2000,
+    timeout: timeoutMs,
   };
 
   const req = http.request(options, (res) => {
@@ -119,7 +126,12 @@ function checkLocalService() {
 
   req.on("timeout", () => {
     req.destroy();
-    log("warn", `Health check timeout. Local service may be slow or unresponsive.`);
+    // Rate-limit timeout warnings to avoid log spam
+    const now = Date.now();
+    if (now - lastHealthTimeoutLog > 60_000) {
+      lastHealthTimeoutLog = now;
+      log("warn", `Health check timeout. Local service may be slow or unresponsive.`);
+    }
   });
 
   req.end();
