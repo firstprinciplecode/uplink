@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Expose localhost to the internet in seconds. Interactive terminal UI, permanent custom domains, zero config. A modern ngrok alternative.",
   "keywords": [
     "tunnel",
