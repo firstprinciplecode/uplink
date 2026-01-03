@@ -7,11 +7,9 @@ import { menuCommand } from "./subcommands/menu";
 import { tunnelCommand } from "./subcommands/tunnel";
 import { signupCommand } from "./subcommands/signup";
 import { readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
 
-// Get version from package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// Get version from package.json (CommonJS build: __dirname available)
 const pkgPath = join(__dirname, "../../package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 

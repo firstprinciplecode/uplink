@@ -169,7 +169,28 @@ tunnelRouter.post(
 
       auditLog.tunnelCreated(user.id, id, token, port);
 
-      const response = toTunnelResponse(tunnelRecord, TUNNEL_DOMAIN, USE_HOST_ROUTING);
+      // Auto-assign existing aliases for this (owner_user_id, target_port) to the new tunnel
+      const existingAliases = await pool.query(
+        `SELECT id, alias FROM tunnel_aliases 
+         WHERE owner_user_id = $1 AND target_port = $2`,
+        [user.id, port]
+      );
+
+      const assignedAliases: string[] = [];
+      for (const aliasRow of existingAliases.rows) {
+        await pool.query(
+          `UPDATE tunnel_aliases 
+           SET tunnel_id = $1, updated_at = $2 
+           WHERE id = $3`,
+          [id, now, aliasRow.id]
+        );
+        assignedAliases.push(aliasRow.alias);
+      }
+
+      // Get alias for response (if any were assigned)
+      const alias = assignedAliases.length > 0 ? assignedAliases[0] : null;
+
+      const response = toTunnelResponse(tunnelRecord, TUNNEL_DOMAIN, USE_HOST_ROUTING, ALIAS_DOMAIN, alias);
 
       return res.status(201).json(response);
     } catch (error: unknown) {
@@ -203,8 +224,10 @@ export async function resolveAliasHandler(req: Request, res: Response) {
   const result = await pool.query(
     `SELECT t.token, t.id as tunnel_id, t.owner_user_id
      FROM tunnel_aliases a
-     JOIN tunnels t ON t.id = a.tunnel_id
+     JOIN tunnels t ON t.owner_user_id = a.owner_user_id 
+       AND t.target_port = a.target_port
      WHERE a.alias = $1 AND t.status = 'active'
+     ORDER BY t.created_at DESC
      LIMIT 1`,
     [alias]
   );
@@ -300,24 +323,34 @@ tunnelRouter.post("/:id/alias", async (req: Request, res: Response) => {
   try {
     await pool.query("BEGIN");
 
-    // Check if alias already exists for another tunnel
+    const targetPort = (tunnel.targetPort || (tunnel as any).target_port) as number;
+
+    // Check if alias already exists for another (owner_user_id, target_port) combination
     const existing = await pool.query(
-      "SELECT tunnel_id FROM tunnel_aliases WHERE alias = $1",
-      [alias]
+      `SELECT id, tunnel_id FROM tunnel_aliases 
+       WHERE alias = $1 AND owner_user_id = $2 AND target_port = $3`,
+      [alias, user.id, targetPort]
     );
     if (existing.rowCount > 0 && existing.rows[0].tunnel_id !== id) {
       await pool.query("ROLLBACK");
-      return res.status(409).json(makeError("ALIAS_TAKEN", "Alias is already in use"));
+      return res.status(409).json(makeError("ALIAS_TAKEN", "Alias is already in use for this port"));
     }
 
     // Remove any existing alias for this tunnel
     await pool.query("DELETE FROM tunnel_aliases WHERE tunnel_id = $1", [id]);
 
-    // Insert new alias
+    // Also remove any existing alias for this (owner_user_id, target_port) to ensure uniqueness
     await pool.query(
-      `INSERT INTO tunnel_aliases (id, owner_user_id, tunnel_id, alias, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [aliasId, user.id, id, alias, now, now]
+      `DELETE FROM tunnel_aliases 
+       WHERE owner_user_id = $1 AND target_port = $2 AND alias = $3`,
+      [user.id, targetPort, alias]
+    );
+
+    // Insert new alias with target_port
+    await pool.query(
+      `INSERT INTO tunnel_aliases (id, owner_user_id, tunnel_id, alias, target_port, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [aliasId, user.id, id, alias, targetPort, now, now]
     );
 
     await pool.query("COMMIT");
@@ -384,7 +417,8 @@ tunnelRouter.get("/:id", async (req: Request, res: Response) => {
     const result = await pool.query(
       `SELECT t.*, a.alias
        FROM tunnels t
-       LEFT JOIN tunnel_aliases a ON a.tunnel_id = t.id
+       LEFT JOIN tunnel_aliases a ON a.owner_user_id = t.owner_user_id 
+         AND a.target_port = t.target_port
        WHERE t.id = $1`,
       [id]
     );
@@ -487,7 +521,8 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
     const result = await pool.query(
       `SELECT t.*, a.alias
        FROM tunnels t
-       LEFT JOIN tunnel_aliases a ON a.tunnel_id = t.id
+       LEFT JOIN tunnel_aliases a ON a.owner_user_id = t.owner_user_id 
+         AND a.target_port = t.target_port
        WHERE t.owner_user_id = $1 AND t.status <> 'deleted'
        ORDER BY t.created_at DESC`,
       [user.id]
@@ -526,7 +561,8 @@ tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
     const result = await pool.query(
       `SELECT t.id, t.owner_user_id, t.token, t.target_port, t.status, t.created_at, t.updated_at, t.expires_at, a.alias
        FROM tunnels t
-       LEFT JOIN tunnel_aliases a ON a.tunnel_id = t.id
+       LEFT JOIN tunnel_aliases a ON a.owner_user_id = t.owner_user_id 
+         AND a.target_port = t.target_port
        WHERE t.id = $1 AND t.status <> 'deleted'
        LIMIT 1`,
       [id]

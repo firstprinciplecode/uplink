@@ -19,6 +19,7 @@ export async function createAndStartTunnel(port: number): Promise<string> {
   const result = await apiRequest("POST", "/v1/tunnels", { port });
   const url = result.url || "(no url)";
   const token = result.token || "(no token)";
+  const alias = result.alias || null;
   const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
 
   const path = require("path");
@@ -40,16 +41,27 @@ export async function createAndStartTunnel(port: number): Promise<string> {
     /* ignore */
   }
 
-  return [
+  const lines = [
     `✓ Tunnel created and client started`,
     ``,
     `→ Public URL    ${url}`,
+  ];
+  
+  if (alias) {
+    const aliasDomain = process.env.ALIAS_DOMAIN || "uplink.spot";
+    lines.push(`→ Alias         ${alias}.${aliasDomain}`);
+    lines.push(`→ Alias URL     https://${alias}.${aliasDomain}`);
+  }
+  
+  lines.push(
     `→ Token         ${token}`,
     `→ Local port    ${port}`,
     ``,
     `Tunnel client running in background.`,
     `Use "Stop Tunnel" to disconnect.`,
-  ].join("\n");
+  );
+  
+  return lines.join("\n");
 }
 
 export function findTunnelClients(): Array<{ pid: number; port: number; token: string }> {
