@@ -17,10 +17,6 @@ import { makeError } from "./schemas/error";
 
 const app = express();
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run2',hypothesisId:'H6',location:'backend/src/server.ts:startup',message:'Backend startup',data:{buildId:'aeba2a3',port:Number(config.port),tunnelDomain:String(config.tunnelDomain||''),aliasDomain:String(config.aliasDomain||''),hasRelaySecret:!!process.env.RELAY_INTERNAL_SECRET},timestamp:Date.now()})}).catch(()=>{});
-// #endregion
-
 // Security headers
 app.use(helmet());
 
