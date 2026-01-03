@@ -205,7 +205,8 @@ async function validateToken(token) {
   try {
     const url = `${API_BASE}/internal/allow-tls?domain=${token}.${TUNNEL_DOMAIN}`;
     const response = await new Promise((resolve, reject) => {
-      const req = http.get(url, { timeout: 2000, agent: httpAgent }, (res) => {
+      const headers = INTERNAL_SECRET ? { [INTERNAL_SECRET_HEADER]: INTERNAL_SECRET } : undefined;
+      const req = http.get(url, { timeout: 2000, agent: httpAgent, headers }, (res) => {
         let data = "";
         res.on("data", (chunk) => { data += chunk; });
         res.on("end", () => {
@@ -241,6 +242,9 @@ async function validateToken(token) {
 }
 
 async function resolveAliasToToken(alias) {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:entry',message:'Resolving alias via backend',data:{alias:String(alias||'')},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const cached = aliasCache.get(alias);
   if (cached && Date.now() - cached.timestamp < ALIAS_CACHE_TTL) {
     return cached.token;
@@ -285,9 +289,15 @@ async function resolveAliasToToken(alias) {
     if (token) {
       aliasCache.set(alias, { token, timestamp: Date.now() });
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H1',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:exit',message:'Alias resolution result',data:{alias:String(alias||''),resolved:!!token},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return token;
   } catch (err) {
     logError(err, "Alias resolution error");
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H5',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:error',message:'Alias resolution error',data:{alias:String(alias||'')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return null;
   }
 }
@@ -566,6 +576,9 @@ const httpServer = http.createServer(async (req, res) => {
       aliasKey = alias;
       token = await resolveAliasToToken(alias);
       if (!token) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H2',location:'scripts/tunnel/relay-improved.js:httpServer:aliasNotFound',message:'Alias not found/inactive at relay',data:{alias:String(aliasKey||'')},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         res.statusCode = 404;
         res.setHeader("Content-Type", "text/plain");
         return res.end("Alias not found or inactive");
@@ -590,6 +603,9 @@ const httpServer = http.createServer(async (req, res) => {
   // Check if client is connected
   const clientData = clients.get(token);
   if (!clientData) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H3',location:'scripts/tunnel/relay-improved.js:httpServer:notConnected',message:'Token resolved but no connected client',data:{viaAlias:!!aliasKey,alias:String(aliasKey||'')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     res.statusCode = 502;
     res.setHeader("Content-Type", "text/plain");
     return res.end("Tunnel not connected");
