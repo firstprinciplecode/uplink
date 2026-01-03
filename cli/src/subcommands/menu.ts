@@ -794,7 +794,7 @@ export const menuCommand = new Command("menu")
 
                 const options: SelectOption[] = tunnels.map((t: any) => {
                   const token = truncate(t.token || t.id, 12);
-                  const alias = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
+                  const alias = t.alias ? `${t.alias}.uplink.spot` : "(no permanent URL)";
                   return {
                     label: `${token}    ${alias}`,
                     value: t.id,
@@ -823,7 +823,7 @@ export const menuCommand = new Command("menu")
 
                 const totals = stats.totals || {};
                 const current = stats.currentRun || {};
-                const permanentUrl = `https://${alias}.x.uplink.spot`;
+                const permanentUrl = `https://${alias}.uplink.spot`;
                 return [
                   `Permanent URL: ${permanentUrl}`,
                   `Connected:     ${connected}`,
@@ -857,7 +857,7 @@ export const menuCommand = new Command("menu")
 
                 const options: SelectOption[] = tunnels.map((t: any) => {
                   const token = truncate(t.token || t.id, 12);
-                  const alias = t.alias ? `${t.alias}.x.uplink.spot` : "(no permanent URL)";
+                  const alias = t.alias ? `${t.alias}.uplink.spot` : "(no permanent URL)";
                   return {
                     label: `${token}    ${alias}`,
                     value: t.id,
@@ -882,7 +882,7 @@ export const menuCommand = new Command("menu")
                   const aliasResult = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
                     alias: aliasName.trim(),
                   });
-                  const permanentUrl = `https://${aliasResult.alias}.x.uplink.spot`;
+                  const permanentUrl = `https://${aliasResult.alias}.uplink.spot`;
                   return [
                     "✓ Permanent URL created",
                     "",
@@ -933,7 +933,7 @@ export const menuCommand = new Command("menu")
                 const port = String(t.target_port ?? t.targetPort ?? "-").padEnd(5);
                 const connectedLocal = runningClients.some((c) => c.token === (t.token || ""));
                 const status = connectedLocal ? "connected" : "unknown";
-                const alias = t.alias ? `${t.alias}.x.uplink.spot` : "-";
+                const alias = t.alias ? `${t.alias}.uplink.spot` : "-";
                 return `${token.padEnd(14)}  ${port}  ${status.padEnd(11)}  ${alias}`;
               });
               
