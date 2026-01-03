@@ -261,16 +261,18 @@ tokensCommand
           "Role".padEnd(8) +
           "Prefix".padEnd(10) +
           "User ID".padEnd(40) +
+          "Created By".padEnd(40) +
           "Status".padEnd(12) +
           "Created"
       );
-      console.log("-".repeat(100));
+      console.log("-".repeat(140));
 
       for (const t of result.tokens) {
         const id = String(t.id || "").slice(0, 16);
         const role = String(t.role || "-").slice(0, 6);
         const prefix = String(t.token_prefix || t.tokenPrefix || "-").slice(0, 8);
         const userId = String(t.user_id || t.userId || "-").slice(0, 38);
+        const createdBy = String(t.created_by_user_id || t.createdByUserId || "-").slice(0, 38);
         const status = t.revoked_at || t.revokedAt ? "revoked" : "active";
         const created = formatDate(t.created_at || t.createdAt || "");
         console.log(
@@ -278,6 +280,7 @@ tokensCommand
             role.padEnd(8) +
             prefix.padEnd(10) +
             userId.padEnd(40) +
+            createdBy.padEnd(40) +
             status.padEnd(12) +
             created
         );
