@@ -768,10 +768,6 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
       return response;
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'backend/src/routes/tunnels.ts:760',message:'Backend Tunnel List',data:{tunnelsCount:tunnels.length, sampleConnected:tunnels[0]?.connected, connectedTokensSize:connectedTokens.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
     return res.json({
       tunnels,
       count: tunnels.length,

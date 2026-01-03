@@ -872,9 +872,6 @@ export const menuCommand = new Command("menu")
               let connectedTunnels: Array<{ token: string; targetPort: number; url: string; alias?: string; aliasUrl?: string }> = [];
               try {
                 const tunnelsResult = await apiRequest("GET", "/v1/tunnels");
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'cli/src/subcommands/menu.ts:875',message:'Active Tunnels API Check',data:{tunnelsCount:tunnelsResult?.tunnels?.length, firstTunnelConnected:tunnelsResult?.tunnels?.[0]?.connected},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-                // #endregion
                 const tunnels = tunnelsResult.tunnels || [];
                 // Only show tunnels that are actually connected to the relay
                 connectedTunnels = tunnels.filter((t: any) => t.connected === true);
