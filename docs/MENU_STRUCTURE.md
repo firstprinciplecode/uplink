@@ -1,7 +1,7 @@
 # Uplink CLI Menu Structure
 
 > Reference document for the interactive menu hierarchy.  
-> Last updated: December 2024
+> Last updated: January 2025
 
 ---
 
@@ -43,59 +43,81 @@ Exit
 ```
 UPLINK
 ● connected
+├─ Active   2 tunnels
 
 Manage Tunnels
-├── Start (Auto)
+├── Start Tunnel
 │   └── [Port Selection]
-│       ├── Port 3000                    → Creates tunnel
-│       ├── Port 8080                    → Creates tunnel
+│       ├── Port 3000                    → Creates tunnel & starts client
+│       ├── Port 8080                    → Creates tunnel & starts client
 │       ├── Enter custom port            → Prompt → Creates tunnel
 │       └── ← Back
 │
-├── Start (Manual)
-│   └── Prompt: "Local port to expose (default 3000):"
-│       → Creates tunnel (no auto-start client)
-│       → Shows manual client command
-│
 ├── Stop Tunnel
 │   └── [Running Tunnels Selection]
-│       ├── Port 3000 (abc123...)        → Stops tunnel
-│       ├── Port 8080 (def456...)        → Stops tunnel
-│       ├── Stop all tunnels             → Stops all
+│       ├── Port 3000 (abc123...)        → Stops tunnel client
+│       ├── Port 8080 (def456...)        → Stops tunnel client
+│       ├── Stop all tunnels             → Stops all clients
 │       └── ← Back
 │
 ├── View Tunnel Stats
-│   └── [Tunnel Selection]
-│       ├── 0cc1ef17...    chat.x.uplink.spot
-│       ├── abc12345...    (no permanent URL)
+│   └── [Running Tunnel Selection]
+│       ├── abc123...  Port 3000
 │       └── ← Back
 │       
 │       → Displays:
 │         - Permanent URL (if set)
-│         - Connection status
+│         - Connection status (verified via relay)
 │         - Total stats (requests, bytes in/out)
 │         - Current run stats
 │
-├── Create Permanent URL
-│   └── [Tunnel Selection]
-│       ├── 0cc1ef17...    chat.x.uplink.spot
-│       ├── abc12345...    (no permanent URL)
-│       └── ← Back
-│       
-│       → Prompt: "Enter alias name (e.g. my-app):"
-│       → Creates permanent URL at {alias}.x.uplink.spot
-│
-└── My Tunnels
-    └── Displays table:
+└── Active Tunnels
+    └── Displays table (only shows tunnels connected to relay):
         Token          Port   Status       Permanent URL
         ────────────────────────────────────────────────
-        0cc1ef17...    3000   connected    chat.x.uplink.spot
-        abc12345...    8080   unknown      -
+        abc123...      3000   connected    myapp.uplink.spot
+        def456...      8080   connected    -
+
+Manage Aliases (Premium)
+├── My Aliases
+│   └── Displays table:
+│       Alias            Port    Status
+│       ────────────────────────────────
+│       myapp            3000    active
+│       api              8080    inactive
+│       
+│       (active = tunnel running on that port)
+│
+├── Create Alias
+│   └── [Port Selection]
+│       ├── Port 3000 (tunnel running)   → Prompt alias name
+│       ├── Enter custom port            → Prompt port → Prompt alias
+│       └── ← Back
+│       
+│       → Creates permanent URL at {alias}.uplink.spot
+│       → Alias is port-based (persists across tunnel restarts)
+│
+├── Reassign Alias
+│   └── [Alias Selection]
+│       ├── myapp → Port 3000
+│       └── ← Back
+│       
+│       → Select new port for alias
+│
+└── Delete Alias
+    └── [Alias Selection]
+        ├── myapp
+        └── ← Back
+        
+        → Removes permanent URL
 
 Exit
 ```
 
-> **Note:** Database features are admin-only. Regular users do not see database options.
+> **Note:** 
+> - Database features are admin-only. Regular users do not see database options.
+> - Aliases are port-based: they persist even when tunnels restart. The same alias always points to the same port.
+> - "Active Tunnels" verifies connection status with the relay server (not just local processes).
 
 ---
 
@@ -167,15 +189,17 @@ Tunnel client running in background.
 Use "Stop Tunnel" to disconnect.
 ```
 
-### Permanent URL Created
+### Alias Created
 
 ```
-✓ Permanent URL created
+✓ Alias created
 
 → Alias     my-app
-→ URL       https://my-app.x.uplink.spot
+→ Port      3000
+→ URL       https://my-app.uplink.spot
 
 Your tunnel will now be accessible at this permanent URL.
+Alias is port-based - it will persist across tunnel restarts.
 ```
 
 ### Error: Premium Feature Required
