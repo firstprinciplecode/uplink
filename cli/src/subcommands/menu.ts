@@ -868,29 +868,48 @@ export const menuCommand = new Command("menu")
           {
             label: "Active Tunnels",
             action: async () => {
-              const runningClients = findTunnelClients();
-              
-              if (runningClients.length === 0) {
-                return "No active tunnels. Use 'Start' to create one.";
-              }
-              
-              // Get alias info for running tunnels from backend
-              let aliasMap: Record<number, string> = {};
+              // Get tunnels from API with connection status
+              let connectedTunnels: Array<{ token: string; targetPort: number; url: string; alias?: string; aliasUrl?: string }> = [];
               try {
-                const aliasResult = await apiRequest("GET", "/v1/aliases");
-                const aliases = aliasResult.aliases || [];
-                for (const a of aliases) {
-                  aliasMap[a.targetPort || a.target_port] = a.alias;
+                const tunnelsResult = await apiRequest("GET", "/v1/tunnels");
+                const tunnels = tunnelsResult.tunnels || [];
+                // Only show tunnels that are actually connected to the relay
+                connectedTunnels = tunnels.filter((t: any) => t.connected === true);
+              } catch (err: any) {
+                // If API fails, fall back to local process check
+                const runningClients = findTunnelClients();
+                if (runningClients.length === 0) {
+                  return "No active tunnels. Use 'Start' to create one.";
                 }
-              } catch {
-                // Aliases endpoint may not exist yet, continue without
+                // Show warning that we can't verify connection status
+                const lines = runningClients.map((c) => {
+                  const token = truncate(c.token, 12);
+                  const port = String(c.port).padEnd(5);
+                  return `${token.padEnd(14)}  ${port}  (status unknown)`;
+                });
+                return [
+                  "⚠ Could not verify connection status from relay",
+                  "",
+                  "Token          Port   Status",
+                  "-".repeat(40),
+                  ...lines,
+                ].join("\n");
               }
               
-              const lines = runningClients.map((c) => {
-                const token = truncate(c.token, 12);
-                const port = String(c.port).padEnd(5);
-                const alias = aliasMap[c.port] ? `${aliasMap[c.port]}.uplink.spot` : "-";
-                return `${token.padEnd(14)}  ${port}  running      ${alias}`;
+              if (connectedTunnels.length === 0) {
+                return "No active tunnels connected to relay. Use 'Start' to create one.";
+              }
+              
+              // Match with local processes to get port info
+              const runningClients = findTunnelClients();
+              const tokenToClient = new Map(runningClients.map(c => [c.token, c]));
+              
+              const lines = connectedTunnels.map((tunnel) => {
+                const token = truncate(tunnel.token, 12);
+                const client = tokenToClient.get(tunnel.token);
+                const port = client ? String(client.port).padEnd(5) : String(tunnel.targetPort).padEnd(5);
+                const alias = tunnel.aliasUrl || (tunnel.alias ? `https://${tunnel.alias}.uplink.spot` : "-");
+                return `${token.padEnd(14)}  ${port}  connected    ${alias}`;
               });
               
               return [

@@ -20,6 +20,7 @@ export interface TunnelResponse {
   aliasUrl?: string;
   targetPort: number;
   status: TunnelStatus;
+  connected?: boolean;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;

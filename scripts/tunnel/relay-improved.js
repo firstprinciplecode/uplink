@@ -110,6 +110,23 @@ function cleanupStaleCaches() {
   const now = Date.now();
   let cleaned = 0;
   
+  // Cleanup dead socket connections first
+  const deadTokens = [];
+  for (const [token, data] of clients.entries()) {
+    const socket = data.socket;
+    // Check if socket is still alive and writable
+    if (!socket || socket.destroyed || socket.closed || !socket.writable) {
+      deadTokens.push(token);
+    }
+  }
+  for (const token of deadTokens) {
+    clients.delete(token);
+    cleaned++;
+  }
+  if (deadTokens.length > 0) {
+    log(`Cleaned up ${deadTokens.length} dead socket connection(s)`);
+  }
+  
   // Cleanup rate limits - remove entries with no recent requests
   for (const [token, limit] of rateLimits.entries()) {
     const validRequests = limit.requests.filter((time) => now - time < RATE_LIMIT_WINDOW);
@@ -150,7 +167,7 @@ function cleanupStaleCaches() {
   
   if (cleaned > 0) {
     stats.cleanups++;
-    log(`Cache cleanup: removed ${cleaned} stale entries (rate: ${rateLimits.size}, tokens: ${tokenCache.size}, aliases: ${aliasCache.size})`);
+    log(`Cache cleanup: removed ${cleaned} stale entries (rate: ${rateLimits.size}, tokens: ${tokenCache.size}, aliases: ${aliasCache.size}, clients: ${clients.size})`);
   }
 }
 
@@ -480,7 +497,17 @@ const httpServer = http.createServer(async (req, res) => {
   // Internal endpoint: list connected tokens with IPs (for API to query) - check first, before token extraction
   if (pathname === "/internal/connected-tokens") {
     const tunnels = [];
+    const deadTokens = [];
+    
+    // Check socket health and filter out dead connections
     for (const [token, data] of clients.entries()) {
+      const socket = data.socket;
+      // Check if socket is still alive and writable
+      if (!socket || socket.destroyed || socket.closed || !socket.writable) {
+        deadTokens.push(token);
+        continue;
+      }
+      
       tunnels.push({
         token,
         clientIp: data.clientIp,
@@ -488,6 +515,13 @@ const httpServer = http.createServer(async (req, res) => {
         connectedAt: data.connectedAt,
       });
     }
+    
+    // Clean up dead connections
+    for (const token of deadTokens) {
+      clients.delete(token);
+      log("cleaned up dead connection", token.substring(0, 8) + "...");
+    }
+    
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ tokens: tunnels.map(t => t.token), tunnels }));
   }
