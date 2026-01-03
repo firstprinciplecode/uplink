@@ -609,7 +609,12 @@ export const menuCommand = new Command("menu")
                 try { process.stdin.setRawMode(false); } catch { /* ignore */ }
                 const activePorts = await scanCommonPorts();
                 
-                if (activePorts.length === 0) {
+                // Filter out ports that already have tunnels running
+                const runningTunnels = findTunnelClients();
+                const portsWithTunnels = new Set(runningTunnels.map(t => t.port));
+                const availablePorts = activePorts.filter(p => !portsWithTunnels.has(p));
+                
+                if (availablePorts.length === 0) {
                   // No ports found - show selector with just custom option and back
                   const options: SelectOption[] = [
                     { label: "Enter custom port", value: "custom" },
@@ -631,11 +636,17 @@ export const menuCommand = new Command("menu")
                   return await createAndStartTunnel(port);
                 }
                 
-                // Build options from found ports
-                const options: SelectOption[] = activePorts.map((port) => ({
+                // Build options from found ports (excluding those with running tunnels)
+                const options: SelectOption[] = availablePorts.map((port) => ({
                   label: `Port ${port}`,
                   value: port,
                 }));
+                // Show ports with running tunnels as info
+                if (portsWithTunnels.size > 0) {
+                  for (const port of portsWithTunnels) {
+                    options.push({ label: `Port ${port} (tunnel running)`, value: `skip-${port}` });
+                  }
+                }
                 options.push({ label: "Enter custom port", value: "custom" });
                 
                 const result = await inlineSelect("Select port to expose", options, true);
@@ -652,6 +663,10 @@ export const menuCommand = new Command("menu")
                   try { process.stdin.setRawMode(false); } catch { /* ignore */ }
                   const answer = await promptLine("Enter port number (default 3000): ");
                   port = Number(answer) || 3000;
+                } else if (typeof result.value === "string" && result.value.startsWith("skip-")) {
+                  // Port with running tunnel selected - show info message
+                  restoreRawMode();
+                  return `⚠ Port ${result.value.replace("skip-", "")} already has a tunnel running.\nUse "Stop Tunnel" first to disconnect it.`;
                 } else {
                   port = result.value as number;
                 }
