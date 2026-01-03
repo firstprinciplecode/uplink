@@ -87,6 +87,48 @@ async function isTokenConnected(token: string): Promise<boolean> {
   return false;
 }
 
+/**
+ * Query relay for connected tokens
+ * Returns empty set if relay is unreachable (fail gracefully)
+ */
+async function getConnectedTokens(): Promise<Set<string>> {
+  const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+  
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: RELAY_HOST,
+        port: RELAY_HTTP_PORT,
+        path: "/internal/connected-tokens",
+        timeout: 2000,
+        headers: RELAY_INTERNAL_SECRET ? { [INTERNAL_SECRET_HEADER]: RELAY_INTERNAL_SECRET } : undefined,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk.toString()));
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            const tokens = json?.tokens;
+            if (Array.isArray(tokens)) {
+              resolve(new Set(tokens));
+            } else {
+              resolve(new Set());
+            }
+          } catch {
+            resolve(new Set());
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(new Set()));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(new Set());
+    });
+  });
+}
+
 type RelayTrafficStats = {
   relayRunId?: string;
   byToken?: Array<{ token: string; requests: number; bytesIn: number; bytesOut: number; lastSeenAt: number | null; lastStatus: number | null; connected?: boolean }>;
@@ -746,9 +788,15 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
       [user.id]
     );
 
-    const tunnels = result.rows.map((row: TunnelRecord & { alias?: string | null }) =>
-      toTunnelResponse(row, TUNNEL_DOMAIN, USE_HOST_ROUTING, ALIAS_DOMAIN, row.alias || null)
-    );
+    // Get connected tokens from relay
+    const connectedTokens = await getConnectedTokens();
+
+    const tunnels = result.rows.map((row: TunnelRecord & { alias?: string | null }) => {
+      const response = toTunnelResponse(row, TUNNEL_DOMAIN, USE_HOST_ROUTING, ALIAS_DOMAIN, row.alias || null);
+      // Add connection status
+      response.connected = connectedTokens.has(row.token);
+      return response;
+    });
 
     return res.json({
       tunnels,
@@ -836,9 +884,7 @@ tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
        LIMIT 1`,
       [alias]
     );
-    const totalsRow = totalsRes.rows?.[0] || null;
-
-    return res.json({
+    const totalsRow = totalsRes.rows?.[0] || null;    return res.json({
       id,
       token,
       alias,

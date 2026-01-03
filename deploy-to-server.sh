@@ -4,7 +4,7 @@
 
 set -e
 
-SERVER_IP="64.227.30.146"
+SERVER_IP="178.156.149.124"
 SERVER_USER="root"
 APP_DIR="/opt/agentcloud"
 
