@@ -6,6 +6,7 @@ import { TunnelRecord, TunnelStatus, toTunnelResponse } from "../models/tunnel";
 import { validateBody } from "../middleware/validate";
 import { createTunnelSchema } from "../schemas/validation";
 import { tunnelCreationRateLimiter } from "../middleware/rate-limit";
+import { bodySizeLimits } from "../middleware/body-size";
 import { logger, auditLog } from "../utils/logger";
 import { config } from "../utils/config";
 import http from "http";
@@ -141,6 +142,7 @@ export async function tunnelTokenExists(token: string): Promise<boolean> {
  */
 tunnelRouter.post(
   "/",
+  bodySizeLimits.small, // Limit to 1MB (tunnel creation is small payload)
   tunnelCreationRateLimiter,
   validateBody(createTunnelSchema),
   async (req: Request, res: Response) => {

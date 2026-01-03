@@ -2,8 +2,58 @@ import pino from "pino";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
+/**
+ * Redact sensitive values from log data.
+ * Replaces secrets, tokens, and passwords with "[REDACTED]".
+ */
+function redactSecrets(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== "object") return obj;
+
+  const redacted = Array.isArray(obj) ? [...obj] : { ...obj };
+  const secretKeys = [
+    "secret",
+    "token",
+    "password",
+    "authorization",
+    "x-relay-internal-secret",
+    "relay_internal_secret",
+    "relayInternalSecret",
+  ];
+
+  for (const key in redacted) {
+    const lowerKey = key.toLowerCase();
+    if (secretKeys.some((sk) => lowerKey.includes(sk))) {
+      if (typeof redacted[key] === "string" && redacted[key].length > 0) {
+        redacted[key] = "[REDACTED]";
+      }
+    } else if (typeof redacted[key] === "object") {
+      redacted[key] = redactSecrets(redacted[key]);
+    }
+  }
+
+  return redacted;
+}
+
+// Custom serializer to redact secrets
+const serializers = {
+  ...pino.stdSerializers,
+  req: (req: any) => {
+    const serialized = pino.stdSerializers.req(req);
+    // Redact query params and headers that might contain secrets
+    if (serialized.query) {
+      serialized.query = redactSecrets(serialized.query);
+    }
+    if (serialized.headers) {
+      serialized.headers = redactSecrets(serialized.headers);
+    }
+    return serialized;
+  },
+};
+
 export const logger = pino({
   level: process.env.LOG_LEVEL || (isDevelopment ? "debug" : "info"),
+  serializers,
   transport: isDevelopment
     ? {
         target: "pino-pretty",

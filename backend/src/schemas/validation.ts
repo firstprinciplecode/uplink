@@ -1,16 +1,40 @@
 import { z } from "zod";
 
+// Security: Maximum token lifetime (90 days default, configurable via env)
+const MAX_TOKEN_LIFETIME_DAYS = Number(process.env.MAX_TOKEN_LIFETIME_DAYS || 90);
+const MAX_TOKEN_LIFETIME_DAYS_HARD_LIMIT = 365; // Hard limit: never exceed 1 year
+
 // Auth schemas
 export const createTokenSchema = z.object({
   role: z.enum(["user", "admin"]).default("user"),
   label: z.string().max(200).optional(),
-  expiresInDays: z.number().int().positive().max(365).optional(),
+  expiresInDays: z.number()
+    .int()
+    .positive()
+    .max(Math.min(MAX_TOKEN_LIFETIME_DAYS_HARD_LIMIT, MAX_TOKEN_LIFETIME_DAYS))
+    .optional()
+    .refine(
+      (val) => !val || val <= MAX_TOKEN_LIFETIME_DAYS,
+      {
+        message: `Token lifetime cannot exceed ${MAX_TOKEN_LIFETIME_DAYS} days (configurable via MAX_TOKEN_LIFETIME_DAYS)`,
+      }
+    ),
 });
 
 // Public signup schema (user role only, no admin option)
 export const signupSchema = z.object({
   label: z.string().max(200).optional(),
-  expiresInDays: z.number().int().positive().max(365).optional(),
+  expiresInDays: z.number()
+    .int()
+    .positive()
+    .max(Math.min(MAX_TOKEN_LIFETIME_DAYS_HARD_LIMIT, MAX_TOKEN_LIFETIME_DAYS))
+    .optional()
+    .refine(
+      (val) => !val || val <= MAX_TOKEN_LIFETIME_DAYS,
+      {
+        message: `Token lifetime cannot exceed ${MAX_TOKEN_LIFETIME_DAYS} days (configurable via MAX_TOKEN_LIFETIME_DAYS)`,
+      }
+    ),
 });
 
 export const revokeTokenSchema = z.object({
