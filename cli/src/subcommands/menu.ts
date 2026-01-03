@@ -958,14 +958,41 @@ export const menuCommand = new Command("menu")
             let aliasName = "";
             let port = 0;
             try {
-              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-              const portStr = await promptLine("Enter port to create alias for (e.g. 3000): ");
-              port = Number(portStr);
-              if (!port || port < 1 || port > 65535) {
-                restoreRawMode();
-                return "Invalid port number.";
+              // Step 1: Select port - show running tunnels + custom option
+              const runningClients = findTunnelClients();
+              const portOptions: SelectOption[] = [];
+              
+              // Add running tunnel ports
+              for (const client of runningClients) {
+                portOptions.push({
+                  label: `Port ${client.port} (tunnel running)`,
+                  value: client.port,
+                });
               }
               
+              // Add custom option
+              portOptions.push({ label: "Enter custom port", value: "custom" });
+              
+              const portChoice = await inlineSelect("Select port to create alias for", portOptions, true);
+              if (portChoice === null) {
+                restoreRawMode();
+                return "";
+              }
+              
+              if (portChoice.value === "custom") {
+                try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+                const portStr = await promptLine("Enter port number (e.g. 3000): ");
+                port = Number(portStr);
+                if (!port || port < 1 || port > 65535) {
+                  restoreRawMode();
+                  return "Invalid port number.";
+                }
+              } else {
+                port = portChoice.value as number;
+              }
+              
+              // Step 2: Enter alias name
+              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
               aliasName = await promptLine("Enter alias name (e.g. my-app): ");
               restoreRawMode();
               
@@ -978,6 +1005,11 @@ export const menuCommand = new Command("menu")
                 port,
               });
               
+              const tunnelRunning = runningClients.some(c => c.port === port);
+              const statusMsg = tunnelRunning 
+                ? "Alias is now active!"
+                : "Start a tunnel on this port to make it accessible.";
+              
               return [
                 "✓ Alias created",
                 "",
@@ -985,7 +1017,7 @@ export const menuCommand = new Command("menu")
                 `→ Port      ${result.targetPort}`,
                 `→ URL       ${result.url}`,
                 "",
-                "Start a tunnel on this port to make it accessible.",
+                statusMsg,
               ].join("\n");
             } catch (err: any) {
               restoreRawMode();
@@ -1026,27 +1058,72 @@ export const menuCommand = new Command("menu")
                 return "No aliases to reassign. Create one first.";
               }
               
-              const options: SelectOption[] = aliases.map((a: any) => ({
+              // Step 1: Select which alias to reassign
+              const aliasOptions: SelectOption[] = aliases.map((a: any) => ({
                 label: `${a.alias} → port ${a.targetPort || a.target_port}`,
                 value: a.alias,
               }));
               
-              const choice = await inlineSelect("Select alias to reassign", options, true);
-              if (choice === null) {
+              const aliasChoice = await inlineSelect("Select alias to reassign", aliasOptions, true);
+              if (aliasChoice === null) {
                 restoreRawMode();
                 return "";
               }
               
-              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-              const portStr = await promptLine("Enter new port number: ");
-              restoreRawMode();
+              const selectedAlias = aliases.find((a: any) => a.alias === aliasChoice.value);
+              const currentPort = selectedAlias?.targetPort || selectedAlias?.target_port;
               
-              const port = Number(portStr);
-              if (!port || port < 1 || port > 65535) {
-                return "Invalid port number.";
+              // Step 2: Show available ports (running tunnels + custom option)
+              const runningClients = findTunnelClients();
+              const portOptions: SelectOption[] = [];
+              
+              // Add running tunnel ports (excluding current port)
+              for (const client of runningClients) {
+                if (client.port !== currentPort) {
+                  portOptions.push({
+                    label: `Port ${client.port} (tunnel running)`,
+                    value: client.port,
+                  });
+                }
               }
               
-              const updateResult = await apiRequest("PUT", `/v1/tunnels/aliases/${choice.value}`, { port });
+              // Add current port indicator if tunnel is running
+              const currentRunning = runningClients.find(c => c.port === currentPort);
+              if (currentRunning) {
+                portOptions.unshift({
+                  label: `Port ${currentPort} (current, tunnel running)`,
+                  value: `current-${currentPort}`,
+                });
+              }
+              
+              // Add custom option
+              portOptions.push({ label: "Enter custom port", value: "custom" });
+              
+              const portChoice = await inlineSelect("Select new port for alias", portOptions, true);
+              if (portChoice === null) {
+                restoreRawMode();
+                return "";
+              }
+              
+              let port: number;
+              if (portChoice.value === "custom") {
+                try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+                const portStr = await promptLine("Enter new port number: ");
+                restoreRawMode();
+                port = Number(portStr);
+                if (!port || port < 1 || port > 65535) {
+                  return "Invalid port number.";
+                }
+              } else if (typeof portChoice.value === "string" && portChoice.value.startsWith("current-")) {
+                restoreRawMode();
+                return "Alias is already assigned to this port.";
+              } else {
+                port = portChoice.value as number;
+              }
+              
+              restoreRawMode();
+              
+              const updateResult = await apiRequest("PUT", `/v1/tunnels/aliases/${aliasChoice.value}`, { port });
               
               return [
                 "✓ Alias reassigned",
