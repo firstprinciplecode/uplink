@@ -34,6 +34,10 @@ const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
 
+// #region agent log
+fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run2',hypothesisId:'H6',location:'scripts/tunnel/relay-improved.js:startup',message:'Relay startup',data:{buildId:'aeba2a3',apiBase:String(API_BASE||''),tunnelDomain:String(TUNNEL_DOMAIN||''),aliasDomain:String(ALIAS_DOMAIN||''),validateTokens:!!VALIDATE_TOKENS,hasInternalSecret:!!INTERNAL_SECRET},timestamp:Date.now()})}).catch(()=>{});
+// #endregion
+
 // Unique identifier for this relay process run (used to avoid double-counting in backend persistence)
 const RELAY_RUN_ID = randomUUID();
 
