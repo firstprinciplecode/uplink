@@ -1022,13 +1022,16 @@ export const menuCommand = new Command("menu")
                     t.role ?? "-",
                     6
                   ).padEnd(8)}  ${truncate(t.label ?? "-", 20).padEnd(22)}  ${truncate(
+                    t.created_by_user_id ?? t.createdByUserId ?? "-",
+                    12
+                  ).padEnd(14)}  ${truncate(
                     t.created_at ?? t.createdAt ?? "",
                     19
                   )}`
               );
               return [
-                "ID           Prefix        Role     Label                   Created",
-                "-".repeat(90),
+                "ID           Prefix        Role     Label                   Created By      Created",
+                "-".repeat(105),
                 ...lines,
               ].join("\n");
             },
