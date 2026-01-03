@@ -877,4 +877,3 @@ tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get tunnel stats"));
   }
 });
-
