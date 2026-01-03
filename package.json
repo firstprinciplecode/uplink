@@ -39,7 +39,8 @@
     "cli/",
     "scripts/tunnel/client-improved.js",
     "README.md",
-    "assets/"
+    "assets/",
+    "docs/"
   ],
   "scripts": {
     "dev:relay": "node scripts/tunnel/relay.js",
