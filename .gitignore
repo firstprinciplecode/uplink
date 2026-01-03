@@ -45,8 +45,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
-# Documentation (keep private for now)
-docs/
+# Documentation - only internal/deployment docs are private
+docs/internal/
+docs/deployment/
 
 
 

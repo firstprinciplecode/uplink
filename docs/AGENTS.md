@@ -41,13 +41,13 @@ Save `token`—shown only once.
 echo "$TOKEN" | uplink --token-stdin --api-base https://api.uplink.spot \
   tunnel create --port 3000 --alias myapp --json
 
-# List tunnels
+# List tunnels (includes connection status)
 echo "$TOKEN" | uplink --token-stdin tunnel list --json
 
-# Set alias
+# Set alias on tunnel
 echo "$TOKEN" | uplink --token-stdin tunnel alias-set --id tun_xxx --alias myapp --json
 
-# Delete alias
+# Delete alias from tunnel
 echo "$TOKEN" | uplink --token-stdin tunnel alias-delete --id tun_xxx --json
 
 # Stats
@@ -58,23 +58,82 @@ echo "$TOKEN" | uplink --token-stdin tunnel stop --id tun_xxx --json
 ```
 
 ### JSON shapes (representative)
-- Create: `{ "tunnel": { id, url?, ingressHttpUrl?, token?, alias?, status, createdAt }, "alias": "myapp"|null, "aliasError": "..."|null }`
-- List: `{ "tunnels": [ { id, url?, ingressHttpUrl?, token?, alias?, status, createdAt } ], "count": n }`
+- Create: `{ "tunnel": { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected?, createdAt }, "alias": "myapp"|null, "aliasError": "..."|null }`
+- List: `{ "tunnels": [ { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected, createdAt } ], "count": n }`
 - Stats: alias tunnels include persisted totals + relay overlay; token-only tunnels show in-memory relay stats.
 
-## HTTP (minimal OpenAPI)
-- `POST /v1/tunnels` create
-- `GET /v1/tunnels` list (user-owned)
-- `POST /v1/tunnels/{id}/alias` set
-- `DELETE /v1/tunnels/{id}/alias` remove
-- `GET /v1/tunnels/{id}/stats` stats
-- `DELETE /v1/tunnels/{id}` delete
+**Note:** The `connected` field indicates whether the tunnel is actually connected to the relay server (verified via socket health check).
+
+## HTTP API Reference
 
 Auth: `Authorization: Bearer <AGENTCLOUD_TOKEN>`
 
+### Tunnels
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/tunnels` | Create tunnel (body: `{ port, alias? }`) |
+| `GET` | `/v1/tunnels` | List user's tunnels (includes `connected` status) |
+| `GET` | `/v1/tunnels/{id}` | Get tunnel details |
+| `GET` | `/v1/tunnels/{id}/stats` | Get tunnel statistics |
+| `DELETE` | `/v1/tunnels/{id}` | Delete tunnel |
+| `POST` | `/v1/tunnels/{id}/alias` | Set alias on tunnel (body: `{ alias }`) |
+| `DELETE` | `/v1/tunnels/{id}/alias` | Remove alias from tunnel |
+
+### Port-Based Aliases (Premium)
+Aliases are now **port-based**: they persist across tunnel restarts and always point to the same port.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/tunnels/aliases` | List all aliases for user |
+| `POST` | `/v1/tunnels/aliases` | Create alias for port (body: `{ alias, port }`) |
+| `PUT` | `/v1/tunnels/aliases/{alias}` | Reassign alias to different port (body: `{ port }`) |
+| `DELETE` | `/v1/tunnels/aliases/{alias}` | Delete alias |
+
+### Example: Create port-based alias
+```bash
+curl -X POST https://api.uplink.spot/v1/tunnels/aliases \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"alias": "myapp", "port": 3000}'
+```
+
+Response:
+```json
+{
+  "id": "alias_xxx",
+  "alias": "myapp",
+  "targetPort": 3000,
+  "url": "https://myapp.uplink.spot",
+  "createdAt": "2025-01-03T00:00:00.000Z"
+}
+```
+
 ## Domains
 - Public tunnels: `https://<token>.x.uplink.spot`
-- Permanent URLs: `https://<alias>.x.uplink.spot` (if enabled)
+- Permanent URLs (aliases): `https://<alias>.uplink.spot`
+
+## Server Deployment (for self-hosted)
+
+### Deploy code changes
+```bash
+# On server (via SSH)
+cd /opt/agentcloud
+git pull origin master
+systemctl restart tunnel-relay
+systemctl restart backend-api  # if backend changed
+```
+
+### Services
+| Service | Command | Description |
+|---------|---------|-------------|
+| `tunnel-relay` | `systemctl status tunnel-relay` | WebSocket relay for tunnels |
+| `backend-api` | `systemctl status backend-api` | REST API server |
+
+### Relay health check
+The relay exposes internal endpoints (protected by `RELAY_INTERNAL_SECRET`):
+- `/internal/connected-tokens` - List connected tunnel tokens (with socket health verification)
+- `/internal/traffic-stats` - Traffic statistics by token/alias
+- `/health` - Basic health check
 
 ## Optional JS helper
 Use `cli/src/agents/tunnels-client.ts` for the same retry/timeout behavior as the CLI.
