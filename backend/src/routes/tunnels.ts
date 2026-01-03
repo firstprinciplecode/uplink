@@ -88,45 +88,16 @@ async function isTokenConnected(token: string): Promise<boolean> {
 }
 
 /**
- * Query relay for connected tokens
+ * Query relay for all connected tokens
  * Returns empty set if relay is unreachable (fail gracefully)
  */
 async function getConnectedTokens(): Promise<Set<string>> {
-  const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
-  
-  return new Promise((resolve) => {
-    const req = http.get(
-      {
-        host: RELAY_HOST,
-        port: RELAY_HTTP_PORT,
-        path: "/internal/connected-tokens",
-        timeout: 2000,
-        headers: RELAY_INTERNAL_SECRET ? { [INTERNAL_SECRET_HEADER]: RELAY_INTERNAL_SECRET } : undefined,
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk.toString()));
-        res.on("end", () => {
-          try {
-            const json = JSON.parse(data);
-            const tokens = json?.tokens;
-            if (Array.isArray(tokens)) {
-              resolve(new Set(tokens));
-            } else {
-              resolve(new Set());
-            }
-          } catch {
-            resolve(new Set());
-          }
-        });
-      }
-    );
-    req.on("error", () => resolve(new Set()));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve(new Set());
-    });
-  });
+  const json = await fetchRelayJson("/internal/connected-tokens", 2000);
+  const tokens = json?.tokens;
+  if (Array.isArray(tokens)) {
+    return new Set(tokens);
+  }
+  return new Set();
 }
 
 type RelayTrafficStats = {
@@ -788,15 +759,18 @@ tunnelRouter.get("/", async (req: Request, res: Response) => {
       [user.id]
     );
 
-    // Get connected tokens from relay
+    // Get connected tokens from relay to add connection status
     const connectedTokens = await getConnectedTokens();
 
     const tunnels = result.rows.map((row: TunnelRecord & { alias?: string | null }) => {
       const response = toTunnelResponse(row, TUNNEL_DOMAIN, USE_HOST_ROUTING, ALIAS_DOMAIN, row.alias || null);
-      // Add connection status
       response.connected = connectedTokens.has(row.token);
       return response;
     });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'backend/src/routes/tunnels.ts:760',message:'Backend Tunnel List',data:{tunnelsCount:tunnels.length, sampleConnected:tunnels[0]?.connected, connectedTokensSize:connectedTokens.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
 
     return res.json({
       tunnels,
@@ -884,7 +858,9 @@ tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
        LIMIT 1`,
       [alias]
     );
-    const totalsRow = totalsRes.rows?.[0] || null;    return res.json({
+    const totalsRow = totalsRes.rows?.[0] || null;
+
+    return res.json({
       id,
       token,
       alias,
