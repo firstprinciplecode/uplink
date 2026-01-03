@@ -269,7 +269,12 @@ async function resolveAliasToToken(alias) {
             data += chunk.toString();
           });
           res.on("end", () => {
-            if (res.statusCode !== 200) return resolve(null);
+            if (res.statusCode !== 200) {
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H4',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:backendNon200',message:'Backend resolve-alias returned non-200',data:{alias:String(alias||''),status:Number(res.statusCode||0)},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              return resolve(null);
+            }
             try {
               const json = JSON.parse(data);
               resolve(json.token || null);
@@ -296,7 +301,7 @@ async function resolveAliasToToken(alias) {
   } catch (err) {
     logError(err, "Alias resolution error");
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H5',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:error',message:'Alias resolution error',data:{alias:String(alias||'')},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'H5',location:'scripts/tunnel/relay-improved.js:resolveAliasToToken:error',message:'Alias resolution error',data:{alias:String(alias||''),err:String((err&&err.message)?err.message:err).slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     return null;
   }
