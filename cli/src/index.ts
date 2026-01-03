@@ -6,6 +6,7 @@ import { adminCommand } from "./subcommands/admin";
 import { menuCommand } from "./subcommands/menu";
 import { tunnelCommand } from "./subcommands/tunnel";
 import { signupCommand } from "./subcommands/signup";
+import { systemCommand } from "./subcommands/system";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -27,6 +28,7 @@ program.addCommand(devCommand);
 program.addCommand(adminCommand);
 program.addCommand(tunnelCommand);
 program.addCommand(signupCommand);
+program.addCommand(systemCommand);
 program.addCommand(menuCommand);
 
 // Global pre-action hook to apply shared options

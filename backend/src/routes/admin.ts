@@ -8,6 +8,7 @@ import { validateBody, validateQuery } from "../middleware/validate";
 import { createTokenSchema, revokeTokenSchema, listQuerySchema } from "../schemas/validation";
 import { tokenCreationRateLimiter } from "../middleware/rate-limit";
 import { logger, auditLog } from "../utils/logger";
+import { config } from "../utils/config";
 
 export const adminRouter = Router();
 
@@ -327,6 +328,57 @@ async function getConnectedTunnels(): Promise<RelayConnectedTunnel[]> {
     });
   });
 }
+
+/**
+ * GET /v1/admin/system/status
+ * Admin-only diagnostic view for relay/backend/TLS wiring (no secrets returned)
+ */
+adminRouter.get("/system/status", async (req: AuthedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+    if (!requireAdmin(user)) {
+      return res.status(403).json(makeError("FORBIDDEN", "Admin only"));
+    }
+
+    const hasInternalSecret = !!process.env.RELAY_INTERNAL_SECRET;
+
+    let relayReachable = false;
+    let relayConnectedCount = 0;
+    try {
+      const connected = await getConnectedTokens();
+      relayReachable = true;
+      relayConnectedCount = connected.size;
+    } catch {
+      relayReachable = false;
+    }
+
+    const tlsMode = "dns01-cloudflare";
+    const wildcardDomains = [`*.${config.tunnelDomain}`, `*.${config.aliasDomain}`];
+    const askEndpoint = {
+      path: "/internal/allow-tls",
+      protected: hasInternalSecret,
+      note: "On-demand TLS ask endpoint (wildcard DNS-01 remains primary).",
+    };
+
+    return res.json({
+      hasInternalSecret,
+      relayReachable,
+      relayConnectedCount,
+      tlsMode,
+      wildcardDomains,
+      askEndpoint,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "admin.system.status.error", error: err.message, stack: err.stack });
+    return res
+      .status(500)
+      .json(makeError("INTERNAL_ERROR", "Failed to get system status", { error: err.message }));
+  }
+});
 
 /**
  * GET /v1/admin/tunnels

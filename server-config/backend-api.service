@@ -8,6 +8,7 @@ User=root
 WorkingDirectory=/opt/agentcloud
 Environment="NODE_ENV=production"
 EnvironmentFile=-/opt/agentcloud/.env
+# RELAY_INTERNAL_SECRET should be set in /opt/agentcloud/.env to secure internal endpoints
 ExecStart=/usr/bin/npx tsx backend/src/server.ts
 Restart=always
 RestartSec=10
