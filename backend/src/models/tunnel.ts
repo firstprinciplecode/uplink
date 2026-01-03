@@ -54,6 +54,11 @@ export function toTunnelResponse(
   if (aliasName && aliasDomain) {
     base.alias = aliasName;
     base.aliasUrl = `${scheme}://${aliasName}.${aliasDomain}`;
+    // #region agent log
+    const fs = require('fs');
+    const logData = {location:'tunnel.ts:56',message:'Constructing aliasUrl',data:{aliasName,aliasDomain,scheme,aliasUrl:base.aliasUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'};
+    try { fs.appendFileSync('/Users/thomaspetersen/Documents/uplink/.cursor/debug.log', JSON.stringify(logData) + '\n'); } catch {}
+    // #endregion
   }
 
   return base;

@@ -785,19 +785,31 @@ export const menuCommand = new Command("menu")
             label: "View Tunnel Stats",
             action: async () => {
               try {
-                const result = await apiRequest("GET", "/v1/tunnels");
-                const tunnels = result.tunnels || result?.items || [];
-                if (!tunnels || tunnels.length === 0) {
+                // Show stats for running tunnels only
+                const runningClients = findTunnelClients();
+                if (runningClients.length === 0) {
                   restoreRawMode();
-                  return "No tunnels found.";
+                  return "No active tunnels. Start a tunnel first.";
                 }
 
-                const options: SelectOption[] = tunnels.map((t: any) => {
-                  const token = truncate(t.token || t.id, 12);
-                  const alias = t.alias ? `${t.alias}.uplink.spot` : "(no permanent URL)";
+                // Get alias info
+                let aliasMap: Record<number, string> = {};
+                try {
+                  const aliasResult = await apiRequest("GET", "/v1/tunnels/aliases");
+                  const aliases = aliasResult.aliases || [];
+                  for (const a of aliases) {
+                    aliasMap[a.targetPort || a.target_port] = a.alias;
+                  }
+                } catch {
+                  // Continue without alias info
+                }
+
+                const options: SelectOption[] = runningClients.map((c) => {
+                  const token = truncate(c.token, 12);
+                  const alias = aliasMap[c.port] ? `${aliasMap[c.port]}.uplink.spot` : `port ${c.port}`;
                   return {
                     label: `${token}    ${alias}`,
-                    value: t.id,
+                    value: c.token,
                   };
                 });
 
@@ -807,7 +819,16 @@ export const menuCommand = new Command("menu")
                   return "";
                 }
 
-                const stats = await apiRequest("GET", `/v1/tunnels/${choice.value}/stats`) as any;
+                // Find the tunnel by token to get its ID
+                const result = await apiRequest("GET", "/v1/tunnels");
+                const tunnels = result.tunnels || [];
+                const tunnel = tunnels.find((t: any) => t.token === choice.value);
+                
+                if (!tunnel) {
+                  return "Tunnel not found in backend. It may have been cleaned up.";
+                }
+
+                const stats = await apiRequest("GET", `/v1/tunnels/${tunnel.id}/stats`) as any;
                 const connected = stats.connected ? "yes" : "no";
                 const alias = stats.alias || null;
 
@@ -845,96 +866,31 @@ export const menuCommand = new Command("menu")
             },
           },
           {
-            label: "Create Permanent URL",
-            action: async () => {
-              try {
-                const result = await apiRequest("GET", "/v1/tunnels");
-                const tunnels = result.tunnels || result?.items || [];
-                if (!tunnels || tunnels.length === 0) {
-                  restoreRawMode();
-                  return "No tunnels found. Create a tunnel first.";
-                }
-
-                const options: SelectOption[] = tunnels.map((t: any) => {
-                  const token = truncate(t.token || t.id, 12);
-                  const alias = t.alias ? `${t.alias}.uplink.spot` : "(no permanent URL)";
-                  return {
-                    label: `${token}    ${alias}`,
-                    value: t.id,
-                  };
-                });
-
-                const choice = await inlineSelect("Select tunnel to set permanent URL", options, true);
-                if (choice === null) {
-                  restoreRawMode();
-                  return "";
-                }
-
-                try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-                const aliasName = await promptLine("Enter alias name (e.g. my-app): ");
-                restoreRawMode();
-
-                if (!aliasName.trim()) {
-                  return "No alias provided.";
-                }
-
-                try {
-                  const aliasResult = await apiRequest("POST", `/v1/tunnels/${choice.value}/alias`, {
-                    alias: aliasName.trim(),
-                  });
-                  const permanentUrl = `https://${aliasResult.alias}.uplink.spot`;
-                  return [
-                    "✓ Permanent URL created",
-                    "",
-                    `→ Alias     ${aliasResult.alias}`,
-                    `→ URL       ${permanentUrl}`,
-                    "",
-                    "Your tunnel will now be accessible at this permanent URL.",
-                  ].join("\n");
-                } catch (err: any) {
-                  const msg = err?.message || String(err);
-                  if (msg.includes("ALIAS_NOT_ENABLED")) {
-                    return [
-                      "❌ Permanent URLs are a premium feature",
-                      "",
-                      "Contact us on Discord at uplink.spot to upgrade your account.",
-                    ].join("\n");
-                  }
-                  if (msg.includes("ALIAS_LIMIT_REACHED")) {
-                    return [
-                      "❌ URL limit reached",
-                      "",
-                      "You've reached your URL limit. Contact us to increase it.",
-                    ].join("\n");
-                  }
-                  if (msg.includes("ALIAS_TAKEN") || msg.includes("already in use")) {
-                    return `❌ Alias "${aliasName.trim()}" is already in use. Try a different name.`;
-                  }
-                  throw err;
-                }
-              } catch (err: any) {
-                restoreRawMode();
-                throw err;
-              }
-            },
-          },
-          {
-            label: "My Tunnels",
+            label: "Active Tunnels",
             action: async () => {
               const runningClients = findTunnelClients();
-              const result = await apiRequest("GET", "/v1/tunnels");
-              const tunnels = result.tunnels || result?.items || [];
-              if (!tunnels || tunnels.length === 0) {
-                return "No tunnels found.";
+              
+              if (runningClients.length === 0) {
+                return "No active tunnels. Use 'Start' to create one.";
               }
               
-              const lines = tunnels.map((t: any) => {
-                const token = truncate(t.token || "", 12);
-                const port = String(t.target_port ?? t.targetPort ?? "-").padEnd(5);
-                const connectedLocal = runningClients.some((c) => c.token === (t.token || ""));
-                const status = connectedLocal ? "connected" : "unknown";
-                const alias = t.alias ? `${t.alias}.uplink.spot` : "-";
-                return `${token.padEnd(14)}  ${port}  ${status.padEnd(11)}  ${alias}`;
+              // Get alias info for running tunnels from backend
+              let aliasMap: Record<number, string> = {};
+              try {
+                const aliasResult = await apiRequest("GET", "/v1/aliases");
+                const aliases = aliasResult.aliases || [];
+                for (const a of aliases) {
+                  aliasMap[a.targetPort || a.target_port] = a.alias;
+                }
+              } catch {
+                // Aliases endpoint may not exist yet, continue without
+              }
+              
+              const lines = runningClients.map((c) => {
+                const token = truncate(c.token, 12);
+                const port = String(c.port).padEnd(5);
+                const alias = aliasMap[c.port] ? `${aliasMap[c.port]}.uplink.spot` : "-";
+                return `${token.padEnd(14)}  ${port}  running      ${alias}`;
               });
               
               return [
@@ -946,6 +902,203 @@ export const menuCommand = new Command("menu")
           },
         ],
       });
+
+    // Manage Aliases (Premium feature)
+    mainMenu.push({
+      label: "Manage Aliases",
+      subMenu: [
+        {
+          label: "My Aliases",
+          action: async () => {
+            try {
+              const result = await apiRequest("GET", "/v1/tunnels/aliases");
+              const aliases = result.aliases || [];
+              
+              if (aliases.length === 0) {
+                return [
+                  "No aliases configured.",
+                  "",
+                  "Use 'Create Alias' to set up a permanent URL for a port.",
+                ].join("\n");
+              }
+              
+              const runningClients = findTunnelClients();
+              const runningPorts = new Set(runningClients.map(c => c.port));
+              
+              const lines = aliases.map((a: any) => {
+                const alias = a.alias.padEnd(15);
+                const port = String(a.targetPort || a.target_port).padEnd(6);
+                const status = runningPorts.has(a.targetPort || a.target_port) ? "active" : "inactive";
+                return `${alias}  ${port}  ${status}`;
+              });
+              
+              return [
+                "Alias            Port    Status",
+                "-".repeat(40),
+                ...lines,
+                "",
+                "Active = tunnel running on that port",
+              ].join("\n");
+            } catch (err: any) {
+              const msg = err?.message || String(err);
+              if (msg.includes("ALIAS_NOT_ENABLED") || msg.includes("403")) {
+                return [
+                  "❌ Aliases are a premium feature",
+                  "",
+                  "Contact us on Discord at uplink.spot to upgrade.",
+                ].join("\n");
+              }
+              throw err;
+            }
+          },
+        },
+        {
+          label: "Create Alias",
+          action: async () => {
+            let aliasName = "";
+            let port = 0;
+            try {
+              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+              const portStr = await promptLine("Enter port to create alias for (e.g. 3000): ");
+              port = Number(portStr);
+              if (!port || port < 1 || port > 65535) {
+                restoreRawMode();
+                return "Invalid port number.";
+              }
+              
+              aliasName = await promptLine("Enter alias name (e.g. my-app): ");
+              restoreRawMode();
+              
+              if (!aliasName.trim()) {
+                return "No alias provided.";
+              }
+              
+              const result = await apiRequest("POST", "/v1/tunnels/aliases", {
+                alias: aliasName.trim(),
+                port,
+              });
+              
+              return [
+                "✓ Alias created",
+                "",
+                `→ Alias     ${result.alias}`,
+                `→ Port      ${result.targetPort}`,
+                `→ URL       ${result.url}`,
+                "",
+                "Start a tunnel on this port to make it accessible.",
+              ].join("\n");
+            } catch (err: any) {
+              restoreRawMode();
+              const msg = err?.message || String(err);
+              if (msg.includes("ALIAS_NOT_ENABLED")) {
+                return [
+                  "❌ Aliases are a premium feature",
+                  "",
+                  "Contact us on Discord at uplink.spot to upgrade.",
+                ].join("\n");
+              }
+              if (msg.includes("ALIAS_LIMIT_REACHED")) {
+                return [
+                  "❌ Alias limit reached",
+                  "",
+                  "You've reached your alias limit. Contact us to increase it.",
+                ].join("\n");
+              }
+              if (msg.includes("ALIAS_TAKEN")) {
+                return `❌ Alias "${aliasName.trim()}" is already taken. Try a different name.`;
+              }
+              if (msg.includes("PORT_HAS_ALIAS")) {
+                return `❌ Port ${port} already has an alias. Use 'Reassign Alias' to change it.`;
+              }
+              throw err;
+            }
+          },
+        },
+        {
+          label: "Reassign Alias",
+          action: async () => {
+            try {
+              const result = await apiRequest("GET", "/v1/tunnels/aliases");
+              const aliases = result.aliases || [];
+              
+              if (aliases.length === 0) {
+                restoreRawMode();
+                return "No aliases to reassign. Create one first.";
+              }
+              
+              const options: SelectOption[] = aliases.map((a: any) => ({
+                label: `${a.alias} → port ${a.targetPort || a.target_port}`,
+                value: a.alias,
+              }));
+              
+              const choice = await inlineSelect("Select alias to reassign", options, true);
+              if (choice === null) {
+                restoreRawMode();
+                return "";
+              }
+              
+              try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+              const portStr = await promptLine("Enter new port number: ");
+              restoreRawMode();
+              
+              const port = Number(portStr);
+              if (!port || port < 1 || port > 65535) {
+                return "Invalid port number.";
+              }
+              
+              const updateResult = await apiRequest("PUT", `/v1/tunnels/aliases/${choice.value}`, { port });
+              
+              return [
+                "✓ Alias reassigned",
+                "",
+                `→ Alias     ${updateResult.alias}`,
+                `→ Port      ${updateResult.targetPort}`,
+                `→ URL       ${updateResult.url}`,
+              ].join("\n");
+            } catch (err: any) {
+              restoreRawMode();
+              const msg = err?.message || String(err);
+              if (msg.includes("PORT_HAS_ALIAS")) {
+                return "❌ That port already has an alias assigned.";
+              }
+              throw err;
+            }
+          },
+        },
+        {
+          label: "Delete Alias",
+          action: async () => {
+            try {
+              const result = await apiRequest("GET", "/v1/tunnels/aliases");
+              const aliases = result.aliases || [];
+              
+              if (aliases.length === 0) {
+                restoreRawMode();
+                return "No aliases to delete.";
+              }
+              
+              const options: SelectOption[] = aliases.map((a: any) => ({
+                label: `${a.alias} → port ${a.targetPort || a.target_port}`,
+                value: a.alias,
+              }));
+              
+              const choice = await inlineSelect("Select alias to delete", options, true);
+              if (choice === null) {
+                restoreRawMode();
+                return "";
+              }
+              
+              await apiRequest("DELETE", `/v1/tunnels/aliases/${choice.value}`);
+              
+              return `✓ Alias "${choice.value}" deleted.`;
+            } catch (err: any) {
+              restoreRawMode();
+              throw err;
+            }
+          },
+        },
+      ],
+    });
 
     // Admin-only: Usage section
     if (isAdmin) {

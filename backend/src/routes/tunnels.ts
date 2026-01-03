@@ -486,11 +486,8 @@ tunnelRouter.delete("/:id", async (req: Request, res: Response) => {
       );
     }
 
-    // Soft delete (set status to deleted)
-    await pool.query(
-      "UPDATE tunnels SET status = 'deleted', updated_at = $1 WHERE id = $2",
-      [new Date().toISOString(), id]
-    );
+    // Hard delete - tunnels are ephemeral
+    await pool.query("DELETE FROM tunnels WHERE id = $1", [id]);
 
     auditLog.tunnelDeleted(user.id, id);
 
@@ -657,6 +654,219 @@ tunnelRouter.get("/:id/stats", async (req: Request, res: Response) => {
     const err = error instanceof Error ? error : new Error(String(error));
     logger.error({ event: "tunnel.stats.error", error: err.message, stack: err.stack });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get tunnel stats"));
+  }
+});
+
+/**
+ * GET /v1/aliases
+ * List all aliases for the authenticated user
+ */
+tunnelRouter.get("/aliases", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+
+    const result = await pool.query(
+      `SELECT id, alias, target_port, created_at, updated_at
+       FROM tunnel_aliases
+       WHERE owner_user_id = $1
+       ORDER BY created_at DESC`,
+      [user.id]
+    );
+
+    const aliases = result.rows.map((row: any) => ({
+      id: row.id,
+      alias: row.alias,
+      targetPort: row.target_port,
+      url: `https://${row.alias}.${ALIAS_DOMAIN}`,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
+    return res.json({
+      aliases,
+      count: aliases.length,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "aliases.list.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to list aliases"));
+  }
+});
+
+/**
+ * POST /v1/aliases
+ * Create a new alias for a port (port-based, not tunnel-based)
+ */
+tunnelRouter.post("/aliases", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+
+    const { alias, port } = req.body;
+    if (!alias || !port) {
+      return res.status(400).json(makeError("BAD_REQUEST", "alias and port are required"));
+    }
+
+    // Check if user has alias permission
+    const permResult = await pool.query(
+      "SELECT alias_limit FROM tokens WHERE user_id = $1 LIMIT 1",
+      [user.id]
+    );
+    const aliasLimit = permResult.rows[0]?.alias_limit ?? 0;
+
+    if (aliasLimit === 0) {
+      return res.status(403).json(
+        makeError(
+          "ALIAS_NOT_ENABLED",
+          "Permanent aliases are a premium feature. Contact us on Discord at uplink.spot to upgrade.",
+          { upgrade_url: "https://uplink.spot", user_id: user.id }
+        )
+      );
+    }
+
+    // Check alias limit
+    const countResult = await pool.query(
+      "SELECT COUNT(*) as count FROM tunnel_aliases WHERE owner_user_id = $1",
+      [user.id]
+    );
+    const currentCount = parseInt(countResult.rows[0]?.count || "0", 10);
+    if (aliasLimit > 0 && currentCount >= aliasLimit) {
+      return res.status(403).json(
+        makeError("ALIAS_LIMIT_REACHED", `You have reached your limit of ${aliasLimit} aliases`)
+      );
+    }
+
+    // Check if alias is already taken
+    const existingAlias = await pool.query(
+      "SELECT id FROM tunnel_aliases WHERE alias = $1",
+      [alias]
+    );
+    if (existingAlias.rowCount > 0) {
+      return res.status(409).json(makeError("ALIAS_TAKEN", "Alias is already in use"));
+    }
+
+    // Check if user already has an alias for this port
+    const existingPort = await pool.query(
+      "SELECT id, alias FROM tunnel_aliases WHERE owner_user_id = $1 AND target_port = $2",
+      [user.id, port]
+    );
+    if (existingPort.rowCount > 0) {
+      return res.status(409).json(
+        makeError("PORT_HAS_ALIAS", `Port ${port} already has alias: ${existingPort.rows[0].alias}`)
+      );
+    }
+
+    const aliasId = `alias_${randomUUID()}`;
+    const now = new Date().toISOString();
+
+    await pool.query(
+      `INSERT INTO tunnel_aliases (id, owner_user_id, tunnel_id, alias, target_port, created_at, updated_at)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6)`,
+      [aliasId, user.id, alias, port, now, now]
+    );
+
+    return res.status(201).json({
+      id: aliasId,
+      alias,
+      targetPort: port,
+      url: `https://${alias}.${ALIAS_DOMAIN}`,
+      createdAt: now,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "alias.create.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to create alias"));
+  }
+});
+
+/**
+ * PUT /v1/aliases/:alias
+ * Reassign an alias to a different port
+ */
+tunnelRouter.put("/aliases/:alias", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+
+    const { alias } = req.params;
+    const { port } = req.body;
+    if (!port) {
+      return res.status(400).json(makeError("BAD_REQUEST", "port is required"));
+    }
+
+    // Check ownership
+    const result = await pool.query(
+      "SELECT id FROM tunnel_aliases WHERE alias = $1 AND owner_user_id = $2",
+      [alias, user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "Alias not found or not owned by you"));
+    }
+
+    // Check if another alias already exists for the target port
+    const existingPort = await pool.query(
+      "SELECT id, alias FROM tunnel_aliases WHERE owner_user_id = $1 AND target_port = $2 AND alias != $3",
+      [user.id, port, alias]
+    );
+    if (existingPort.rowCount > 0) {
+      return res.status(409).json(
+        makeError("PORT_HAS_ALIAS", `Port ${port} already has alias: ${existingPort.rows[0].alias}`)
+      );
+    }
+
+    const now = new Date().toISOString();
+    await pool.query(
+      "UPDATE tunnel_aliases SET target_port = $1, tunnel_id = NULL, updated_at = $2 WHERE alias = $3 AND owner_user_id = $4",
+      [port, now, alias, user.id]
+    );
+
+    return res.json({
+      alias,
+      targetPort: port,
+      url: `https://${alias}.${ALIAS_DOMAIN}`,
+      updatedAt: now,
+    });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "alias.update.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to update alias"));
+  }
+});
+
+/**
+ * DELETE /v1/aliases/:alias
+ * Delete an alias
+ */
+tunnelRouter.delete("/aliases/:alias", async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json(makeError("UNAUTHORIZED", "Missing auth"));
+    }
+
+    const { alias } = req.params;
+
+    const result = await pool.query(
+      "DELETE FROM tunnel_aliases WHERE alias = $1 AND owner_user_id = $2 RETURNING id",
+      [alias, user.id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "Alias not found or not owned by you"));
+    }
+
+    return res.json({ deleted: true, alias });
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ event: "alias.delete.error", error: err.message, stack: err.stack });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to delete alias"));
   }
 });
 
