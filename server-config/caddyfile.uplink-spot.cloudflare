@@ -14,8 +14,6 @@
 	on_demand_tls {
 		# Backend ask endpoint enforces secret + hostname validation (tokens/aliases)
 		ask https://api.uplink.spot/internal/allow-tls?secret={env.RELAY_INTERNAL_SECRET}
-		interval 2m
-		burst 5
 	}
 }
 
