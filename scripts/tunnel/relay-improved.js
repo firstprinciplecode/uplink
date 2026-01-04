@@ -19,7 +19,7 @@ const { randomUUID } = require("crypto");
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
 const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
 const LISTEN_CTRL = Number(process.env.TUNNEL_RELAY_CTRL || 7071);
-const TUNNEL_DOMAIN = (process.env.TUNNEL_DOMAIN || "t.uplink.spot").toLowerCase();
+const TUNNEL_DOMAIN = (process.env.TUNNEL_DOMAIN || "x.uplink.spot").toLowerCase();
 const ALIAS_DOMAIN = (process.env.ALIAS_DOMAIN || "uplink.spot").toLowerCase();
 const VALIDATE_TOKENS = process.env.TUNNEL_VALIDATE_TOKENS === "true";
 const API_BASE = process.env.AGENTCLOUD_API_BASE || process.env.API_BASE || "http://localhost:4000";
@@ -312,7 +312,7 @@ async function resolveAliasToToken(alias) {
   }
 }
 
-// Extract token from Host header: abc123.t.uplink.spot -> abc123
+// Extract token from Host header: abc123.x.uplink.spot -> abc123
 function extractTokenFromHost(host) {
   if (!host) return null;
   const lower = host.toLowerCase();

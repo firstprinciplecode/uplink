@@ -8,7 +8,7 @@ set -euo pipefail
 PORT="${1:-3000}"
 API_BASE="${AGENTCLOUD_API_BASE:-${2:-https://api.uplink.spot}}"
 CTRL="${TUNNEL_CTRL:-${3:-178.156.149.124:7071}}"
-DOMAIN="${TUNNEL_DOMAIN:-t.uplink.spot}"
+DOMAIN="${TUNNEL_DOMAIN:-x.uplink.spot}"
 TOKEN="${AGENTCLOUD_TOKEN:-dev-token}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

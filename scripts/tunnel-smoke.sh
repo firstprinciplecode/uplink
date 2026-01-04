@@ -4,8 +4,8 @@
 #   AGENTCLOUD_API_BASE=https://api.uplink.spot  (or API_BASE=...)
 #   AGENTCLOUD_TOKEN=dev-token                (or AUTH_TOKEN=...)
 #   TUNNEL_CTRL=tunnel.uplink.spot:7071
-#   TUNNEL_RELAY_HTTP=https://t.uplink.spot   # HTTPS ingress via Caddy
-#   TUNNEL_DOMAIN=t.uplink.spot
+#   TUNNEL_RELAY_HTTP=https://x.uplink.spot   # HTTPS ingress via Caddy
+#   TUNNEL_DOMAIN=x.uplink.spot
 #   PORT=39333
 set -euo pipefail
 
@@ -13,8 +13,8 @@ API_BASE="${AGENTCLOUD_API_BASE:-${API_BASE:-https://api.uplink.spot}}"
 AUTH_TOKEN="${AGENTCLOUD_TOKEN:-${AUTH_TOKEN:-dev-token}}"
 # Default to Hetzner control/relay
 CTRL="${TUNNEL_CTRL:-178.156.149.124:7071}"
-RELAY="${TUNNEL_RELAY_HTTP:-https://t.uplink.spot}"
-DOMAIN="${TUNNEL_DOMAIN:-t.uplink.spot}"
+RELAY="${TUNNEL_RELAY_HTTP:-https://x.uplink.spot}"
+DOMAIN="${TUNNEL_DOMAIN:-x.uplink.spot}"
 PORT="${PORT:-39333}"
 
 # Curl defaults to avoid hangs

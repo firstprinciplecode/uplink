@@ -6,8 +6,8 @@
 # Env overrides:
 #   AGENTCLOUD_API_BASE (default: https://api.uplink.spot)
 #   AGENTCLOUD_TOKEN    (default: dev-token)
-#   TUNNEL_RELAY_HOST   (default: t.uplink.spot)  # hostname for HTTPS ingress
-#   TUNNEL_DOMAIN       (default: t.uplink.spot)  # base domain for tunnels
+#   TUNNEL_RELAY_HOST   (default: x.uplink.spot)  # hostname for HTTPS ingress
+#   TUNNEL_DOMAIN       (default: x.uplink.spot)  # base domain for tunnels
 #   TUNNEL_CTRL         (default: 178.156.149.124:7071)  # host:port control channel
 #   CONNECT_TIMEOUT     (default: 4)
 #   MAX_TIME            (default: 8)
@@ -37,8 +37,8 @@ Smoke mode (--smoke):
 Env:
   AGENTCLOUD_API_BASE (default: https://api.uplink.spot)
   AGENTCLOUD_TOKEN    (default: dev-token)
-  TUNNEL_RELAY_HOST   (default: t.uplink.spot)
-  TUNNEL_DOMAIN       (default: t.uplink.spot)
+  TUNNEL_RELAY_HOST   (default: x.uplink.spot)
+  TUNNEL_DOMAIN       (default: x.uplink.spot)
   TUNNEL_CTRL         (default: 178.156.149.124:7071)
   CONNECT_TIMEOUT     (default: 4)
   MAX_TIME            (default: 8)
@@ -51,8 +51,8 @@ done
 
 API_BASE="${AGENTCLOUD_API_BASE:-https://api.uplink.spot}"
 TOKEN="${AGENTCLOUD_TOKEN:-dev-token}"
-RELAY_HOST="${TUNNEL_RELAY_HOST:-t.uplink.spot}"
-DOMAIN="${TUNNEL_DOMAIN:-t.uplink.spot}"
+RELAY_HOST="${TUNNEL_RELAY_HOST:-x.uplink.spot}"
+DOMAIN="${TUNNEL_DOMAIN:-x.uplink.spot}"
 CTRL="${TUNNEL_CTRL:-178.156.149.124:7071}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-4}"
 MAX_TIME="${MAX_TIME:-8}"
@@ -119,7 +119,7 @@ step_relay_health() {
     return
   fi
   # Check relay health directly on port 7070 (HTTP) - this tests the relay's JSON endpoint
-  # Caddy on 443 returns plain text for t.uplink.spot, so we bypass it for the health check
+  # Caddy on 443 returns plain text for x.uplink.spot, so we bypass it for the health check
   if curl -sS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" \
     "http://${RELAY_IP}:7070/health" | grep -q '"status":"ok"'; then
     pass "Relay /health (via relay port 7070)"

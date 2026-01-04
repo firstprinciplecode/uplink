@@ -12,7 +12,7 @@ set -euo pipefail
 API_BASE="${AGENTCLOUD_API_BASE:-https://api.uplink.spot}"
 TOKEN="${AGENTCLOUD_TOKEN:-dev-token}"
 CTRL="${TUNNEL_CTRL:-178.156.149.124:7071}"
-DOMAIN="${TUNNEL_DOMAIN:-t.uplink.spot}"
+DOMAIN="${TUNNEL_DOMAIN:-x.uplink.spot}"
 
 # Find an available port
 find_free_port() {
