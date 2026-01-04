@@ -362,6 +362,7 @@ export const menuCommand = new Command("menu")
       renderMenu({
         banner: ASCII_UPLINK,
         cachedRelayStatus,
+        cachedActiveTunnels,
         menuPath: nav.menuPath,
         currentMenu: getCurrentMenu(nav),
         selected: nav.selected,

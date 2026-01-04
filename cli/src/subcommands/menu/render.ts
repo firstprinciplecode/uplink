@@ -5,6 +5,7 @@ import { DEFAULT_MENU_MESSAGE, type MenuChoice } from "./types";
 export type RenderArgs = {
   banner: string;
   cachedRelayStatus: string;
+  cachedActiveTunnels?: string;
   menuPath: string[];
   currentMenu: MenuChoice[];
   selected: number;
@@ -17,6 +18,7 @@ export function renderMenu(args: RenderArgs) {
   const {
     banner,
     cachedRelayStatus,
+    cachedActiveTunnels,
     menuPath,
     currentMenu,
     selected,
@@ -85,6 +87,12 @@ export function renderMenu(args: RenderArgs) {
 
     console.log(line);
   });
+
+  // Active tunnels list (only on main menu)
+  if (showStatusIndicator && cachedActiveTunnels) {
+    console.log();
+    console.log(cachedActiveTunnels);
+  }
 
   // Message area
   if (busy) {
