@@ -48,6 +48,12 @@ coverage/
 # Internal documentation (business, deployment, admin-only)
 internal/
 
+# Docs - only README.md, AGENTS.md, MENU_STRUCTURE.md are public
+docs/*
+!docs/README.md
+!docs/AGENTS.md
+!docs/MENU_STRUCTURE.md
+
 
 
 
