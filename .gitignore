@@ -41,6 +41,11 @@ Thumbs.db
 # Deployment
 /tmp/agentcloud-deploy.tar.gz
 
+# Local-only ops/deploy notes & scripts (do not publish)
+/DEPLOY_*.md
+/deploy-*.sh
+/setup-*.sh
+
 # Test coverage
 coverage/
 .nyc_output/
