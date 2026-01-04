@@ -1,9 +1,6 @@
 import { Command } from "commander";
 import fetch from "node-fetch";
 import { apiRequest } from "../http";
-import { homedir } from "os";
-import { join } from "path";
-import { existsSync, readFileSync, writeFileSync } from "fs";
 import { clearScreen, promptLine, restoreRawMode, truncate } from "./menu/io";
 import { unauthenticatedRequest } from "./menu/requests";
 import { inlineSelect, type SelectOption } from "./menu/inline-tree-select";
@@ -26,7 +23,7 @@ import {
   buildSystemStatusMenu,
   buildUsageMenu,
 } from "./menu/menus";
-import { ports, smoke, tunnelClients } from "./menu/effects";
+import { health, ports, smoke, tokenConfig, tunnelClients, tty } from "./menu/effects";
 
 // ASCII banner with color styling
 const ASCII_UPLINK = colorCyan([
@@ -139,36 +136,12 @@ export const menuCommand = new Command("menu")
             process.stdout.write(colorYellow("!") + " Save this token securely - shown only once\n");
 
             // Try to automatically add token to shell config
-            const shell = process.env.SHELL || "";
-            const homeDir = homedir();
-            let configFile: string | null = null;
-            let shellName = "";
-
-            if (shell.includes("zsh")) {
-              configFile = join(homeDir, ".zshrc");
-              shellName = "zsh";
-            } else if (shell.includes("bash")) {
-              configFile = join(homeDir, ".bashrc");
-              shellName = "bash";
-            } else {
-              if (existsSync(join(homeDir, ".zshrc"))) {
-                configFile = join(homeDir, ".zshrc");
-                shellName = "zsh";
-              } else if (existsSync(join(homeDir, ".bashrc"))) {
-                configFile = join(homeDir, ".bashrc");
-                shellName = "bash";
-              }
-            }
+            const detected = tokenConfig.detectShellConfigFile();
+            let configFile: string | null = detected.configFile;
+            let shellName = detected.shellName;
 
             let tokenAdded = false;
-            let tokenExists = false;
-
-            if (configFile) {
-              if (existsSync(configFile)) {
-                const configContent = readFileSync(configFile, "utf-8");
-                tokenExists = configContent.includes("AGENTCLOUD_TOKEN");
-              }
-            }
+            const tokenExists = configFile ? tokenConfig.shellConfigHasToken(configFile) : false;
 
             if (configFile) {
               const promptText = tokenExists
@@ -178,35 +151,17 @@ export const menuCommand = new Command("menu")
               const addToken = (await promptLine(promptText)).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
                 try {
+                  const res = tokenConfig.upsertShellToken(configFile, token);
+                  tokenAdded = res.wrote;
                   if (tokenExists) {
-                    const configContent = readFileSync(configFile, "utf-8");
-                    const lines = configContent.split("\n");
-                    const updatedLines = lines.map((line) => {
-                      if (line.match(/^\s*export\s+AGENTCLOUD_TOKEN=/)) {
-                        return `export AGENTCLOUD_TOKEN=${token}`;
-                      }
-                      return line;
-                    });
-                    const wasReplaced = updatedLines.some((line, idx) => line !== lines[idx]);
-                    if (!wasReplaced) {
-                      updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
-                    }
-                    writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
-                    tokenAdded = true;
                     console.log(colorGreen(`\n✓ Token updated in ~/.${shellName}rc`));
-                    const verifyContent = readFileSync(configFile, "utf-8");
-                    if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
-                      console.log(colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`));
-                    }
                   } else {
-                    const exportLine = `\n# Uplink API Token (added automatically)\nexport AGENTCLOUD_TOKEN=${token}\n`;
-                    writeFileSync(configFile, exportLine, { flag: "a", mode: 0o644 });
-                    tokenAdded = true;
                     console.log(colorGreen(`\n✓ Token added to ~/.${shellName}rc`));
-                    const verifyContent = readFileSync(configFile, "utf-8");
-                    if (!verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`)) {
-                      console.log(colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`));
-                    }
+                  }
+                  if (!res.verifyOk) {
+                    console.log(
+                      colorYellow(`\n! Warning: Token may not have been written correctly. Please check ~/.${shellName}rc`)
+                    );
                   }
                 } catch (err: any) {
                   console.log(colorYellow(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
@@ -391,26 +346,10 @@ export const menuCommand = new Command("menu")
     };
 
     const updateRelayStatusCache = async () => {
-      const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-      const healthUrl = process.env.RELAY_HEALTH_URL || `${apiBase}/health`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2000);
-      try {
-        const headers: Record<string, string> = {};
-        if (process.env.RELAY_INTERNAL_SECRET) {
-          headers["x-relay-internal-secret"] = process.env.RELAY_INTERNAL_SECRET;
-        }
-        const res = await fetch(healthUrl, { signal: controller.signal, headers });
-        if (res.ok) {
-          cachedRelayStatus = "API: ok";
-        } else {
-          cachedRelayStatus = `API: unreachable (HTTP ${res.status})`;
-        }
-      } catch {
-        cachedRelayStatus = "API: unreachable";
-      } finally {
-        clearTimeout(timer);
-      }
+      const res = await health.checkApiHealth({});
+      if (res.ok) cachedRelayStatus = "API: ok";
+      else if (typeof res.status === "number") cachedRelayStatus = `API: unreachable (HTTP ${res.status})`;
+      else cachedRelayStatus = "API: unreachable";
     };
 
     const refreshMainMenuCaches = async () => {
