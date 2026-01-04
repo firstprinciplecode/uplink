@@ -385,9 +385,6 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
         const msg = JSON.parse(line);
         
         if (msg.type === "register" && msg.token) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'scripts/tunnel/relay-improved.js:387',message:'Client registration attempt',data:{tokenPreview:msg.token ? msg.token.substring(0,8) + '...' : 'none'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           // Validate token
           const isValid = await validateToken(msg.token);
           if (!isValid) {
