@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "description": "Expose localhost to the internet in seconds. Interactive terminal UI, permanent custom domains, zero config. A modern ngrok alternative.",
   "keywords": [
     "tunnel",
@@ -40,7 +40,9 @@
     "scripts/tunnel/client-improved.js",
     "README.md",
     "assets/",
-    "docs/"
+    "docs/README.md",
+    "docs/AGENTS.md",
+    "docs/MENU_STRUCTURE.md"
   ],
   "scripts": {
     "dev:relay": "node scripts/tunnel/relay.js",
