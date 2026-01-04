@@ -15,7 +15,8 @@ type Deps = {
   scanCommonPorts: () => Promise<number[]>;
   findTunnelClients: () => Array<{ pid: number; port: number; token: string }>;
   createAndStartTunnel: (port: number) => Promise<string>;
-  execSync: (command: string, opts: { stdio: "ignore" }) => any;
+  killTunnelClient: (pid: number) => boolean;
+  killAllTunnelClients: (clients: Array<{ pid: number; port: number; token: string }>) => number;
   colorDim: (text: string) => string;
   colorRed: (text: string) => string;
 };
@@ -31,7 +32,8 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
     scanCommonPorts,
     findTunnelClients,
     createAndStartTunnel,
-    execSync,
+    killTunnelClient,
+    killAllTunnelClients,
     colorDim,
     colorRed,
   } = deps;
@@ -201,24 +203,16 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
             let killed = 0;
             if (result.value === "all") {
               // Kill all
-              for (const p of processes) {
-                try {
-                  execSync(`kill -TERM ${p.pid}`, { stdio: "ignore" });
-                  killed++;
-                } catch {
-                  // Process might have already exited
-                }
-              }
+              killed = killAllTunnelClients(processes);
             } else {
               // Kill specific client
               const pid = result.value as number;
-              try {
-                execSync(`kill -TERM ${pid}`, { stdio: "ignore" });
-                killed = 1;
-              } catch (err: any) {
+              const ok = killTunnelClient(pid);
+              if (!ok) {
                 restoreRawMode();
-                throw new Error(`Failed to kill process ${pid}: ${err.message}`);
+                throw new Error(`Failed to kill process ${pid}`);
               }
+              killed = 1;
             }
 
             restoreRawMode();

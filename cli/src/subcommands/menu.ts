@@ -1,8 +1,6 @@
 import { Command } from "commander";
 import fetch from "node-fetch";
-import { spawn, execSync } from "child_process";
 import { apiRequest } from "../http";
-import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
@@ -28,6 +26,7 @@ import {
   buildSystemStatusMenu,
   buildUsageMenu,
 } from "./menu/menus";
+import { ports, smoke, tunnelClients } from "./menu/effects";
 
 // ASCII banner with color styling
 const ASCII_UPLINK = colorCyan([
@@ -281,7 +280,7 @@ export const menuCommand = new Command("menu")
           fetch: (url: string) => fetch(url) as any,
           truncate,
           formatBytes,
-          runSmoke,
+          runSmoke: smoke.runSmoke,
         })
       );
     }
@@ -294,10 +293,11 @@ export const menuCommand = new Command("menu")
         truncate,
         formatBytes,
         inlineSelect,
-        scanCommonPorts,
-        findTunnelClients,
-        createAndStartTunnel,
-        execSync: (cmd, opts) => execSync(cmd, opts),
+          scanCommonPorts: ports.scanCommonPorts,
+          findTunnelClients: tunnelClients.findTunnelClients,
+          createAndStartTunnel: (port: number) => tunnelClients.createAndStartTunnel(apiRequest, port),
+          killTunnelClient: tunnelClients.killTunnelClient,
+          killAllTunnelClients: tunnelClients.killAllTunnelClients,
         colorDim,
         colorRed,
       })
@@ -310,7 +310,7 @@ export const menuCommand = new Command("menu")
         promptLine,
         restoreRawMode,
         inlineSelect,
-        findTunnelClients,
+        findTunnelClients: tunnelClients.findTunnelClients,
         truncate,
       })
     );
@@ -340,19 +340,11 @@ export const menuCommand = new Command("menu")
       mainMenu.push({
         label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
         action: async () => {
-          const clients = findTunnelClients();
+          const clients = tunnelClients.findTunnelClients();
           if (clients.length === 0) {
             return "No running tunnel clients found.";
           }
-          let killed = 0;
-          for (const client of clients) {
-            try {
-              execSync(`kill -TERM ${client.pid}`, { stdio: "ignore" });
-              killed++;
-            } catch {
-              // Process might have already exited
-            }
-          }
+          const killed = tunnelClients.killAllTunnelClients(clients);
           return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
         },
       });
@@ -375,7 +367,7 @@ export const menuCommand = new Command("menu")
     let cachedRelayStatus = "";
 
     const updateActiveTunnelsCache = () => {
-      const clients = findTunnelClients();
+      const clients = tunnelClients.findTunnelClients();
       if (clients.length === 0) {
         cachedActiveTunnels = "";
       } else {
@@ -529,124 +521,3 @@ export const menuCommand = new Command("menu")
     process.stdin.resume();
     process.stdin.on("data", onKey);
   });
-
-async function createAndStartTunnel(port: number): Promise<string> {
-  // Check if tunnel already running on this port
-  const existing = findTunnelClients().filter(c => c.port === port);
-  if (existing.length > 0) {
-    return [
-      `⚠ Tunnel already running on port ${port}`,
-      ``,
-      `→ PID: ${existing[0].pid}`,
-      `→ Token: ${existing[0].token.substring(0, 8)}...`,
-      ``,
-      `Use "Stop Tunnel" first to disconnect the existing tunnel.`,
-    ].join("\n");
-  }
-
-  // Create tunnel
-  const result = await apiRequest("POST", "/v1/tunnels", { port });
-  const url = result.url || "(no url)";
-  const token = result.token || "(no token)";
-  const alias = result.alias || null;
-  const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
-  
-  // Start tunnel client in background
-  const path = require("path");
-  const projectRoot = path.join(__dirname, "../../..");
-  const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
-  const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
-    stdio: "ignore",
-    detached: true,
-    cwd: projectRoot,
-  });
-  clientProcess.unref();
-  
-  // Wait a moment for client to connect
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-  
-  const lines = [
-    `✓ Tunnel created and client started`,
-    ``,
-    `→ Public URL    ${url}`,
-  ];
-  
-  if (alias) {
-    // Use aliasUrl from backend if available, otherwise construct it
-    const aliasUrl = result.aliasUrl || `https://${alias}.uplink.spot`;
-    lines.push(`→ Alias         ${alias}`);
-    lines.push(`→ Alias URL     ${aliasUrl}`);
-  }
-  
-  lines.push(
-    `→ Token         ${token}`,
-    `→ Local port    ${port}`,
-    ``,
-    `Tunnel client running in background.`,
-    `Use "Stop Tunnel" to disconnect.`,
-  );
-  
-  return lines.join("\n");
-}
-
-function findTunnelClients(): Array<{ pid: number; port: number; token: string }> {
-  try {
-    // Find processes running client-improved.js (current user, match script path to avoid false positives)
-    const user = process.env.USER || "";
-    const psCmd = user
-      ? `ps -u ${user} -o pid=,command=`
-      : "ps -eo pid=,command=";
-    const output = execSync(psCmd, { encoding: "utf-8" });
-    const lines = output
-      .trim()
-      .split("\n")
-      .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
-    
-    const clients: Array<{ pid: number; port: number; token: string }> = [];
-    
-    for (const line of lines) {
-      // Parse process line: PID COMMAND (from ps -o pid=,command=)
-      const pidMatch = line.match(/^\s*(\d+)/);
-      const tokenMatch = line.match(/--token\s+(\S+)/);
-      const portMatch = line.match(/--port\s+(\d+)/);
-      
-      if (pidMatch && tokenMatch && portMatch) {
-        clients.push({
-          pid: parseInt(pidMatch[1], 10),
-          port: parseInt(portMatch[1], 10),
-          token: tokenMatch[1],
-        });
-      }
-    }
-    
-    return clients;
-  } catch {
-    return [];
-  }
-}
-
-function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {
-  return new Promise<void>((resolve, reject) => {
-    const env = {
-      ...process.env,
-      AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot",
-      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN ?? "dev-token",
-    };
-    const child = spawn("npm", ["run", script], { stdio: "inherit", env });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`${script} failed with exit code ${code}`));
-      }
-    });
-    child.on("error", (err) => reject(err));
-  });
-}
