@@ -1,7 +1,7 @@
 # Uplink CLI Menu Structure
 
 > Reference document for the interactive menu hierarchy.  
-> Last updated: January 2025
+> Last updated: January 2026
 
 ---
 
@@ -30,8 +30,8 @@ UPLINK
 ● offline
 
 Get Started
-  → Opens browser to uplink.spot
-  → Displays instructions to create account and get API token
+  → Creates a user token via the API (`POST /v1/signup`)
+  → Optionally saves `AGENTCLOUD_TOKEN` into your shell rc file
 
 Exit
 ```
@@ -245,6 +245,7 @@ You've reached your URL limit. Contact us to increase it.
 | `AGENTCLOUD_API_BASE` | API base URL | `https://api.uplink.spot` |
 | `TUNNEL_CTRL` | Tunnel relay control endpoint | `tunnel.uplink.spot:7071` |
 | `TUNNEL_DOMAIN` | Tunnel URL domain | `x.uplink.spot` |
+| `RELAY_HEALTH_URL` | Optional: show API/relay banner in menu | (unset) |
 
 ---
 
@@ -285,8 +286,52 @@ This would reduce top-level clutter for admin users while maintaining all functi
 
 ---
 
+## Implementation Reference (Maintainers)
+
+This section is a **single source of truth** for how the interactive menu is implemented and how it should evolve. It intentionally stays high-level and avoids security-sensitive details.
+
+### Goals
+- **Deterministic**: UI output is a function of state (no hidden UI state).
+- **Maintainable**: Separate **rendering**, **input/events**, and **side-effects** (API calls, spawning clients).
+- **Safe defaults**: Avoid leaking secrets; avoid printing raw tokens except in the explicit signup/token-creation flows.
+
+### Proposed refactor shape (Textual-inspired, Node/TS)
+
+Current `cli/src/subcommands/menu.ts` mixes rendering + input handling + actions in one file. The refactor splits into a tiny internal “menu framework”:
+
+- `cli/src/subcommands/menu/state.ts`
+  - Exports `MenuState`, `MenuRole`, `MenuAuthStatus`
+  - Single state object drives all rendering
+- `cli/src/subcommands/menu/events.ts`
+  - Exports `MenuEvent` (key presses, navigation, action results)
+- `cli/src/subcommands/menu/reducer.ts`
+  - Pure reducer: `(state, event) => { state, effect? }`
+- `cli/src/subcommands/menu/effects.ts`
+  - Side-effects runner (API calls, spawn/kill tunnel clients)
+  - Dispatches `MenuEvent` results back into the reducer
+- `cli/src/subcommands/menu/render.ts`
+  - `render(state): string[]` (or a single string) composing widget renderers
+- `cli/src/subcommands/menu/widgets.ts`
+  - Small, testable “views”: header, breadcrumbs, menu list, message area, footer, active tunnel panel
+- `cli/src/subcommands/menu/menu-tree.ts`
+  - Build `MenuChoice[]` based on auth status + role (unauth/user/admin)
+
+Existing primitives continue to be reused:
+- `cli/src/subcommands/menu/colors.ts` (palette)
+- `cli/src/subcommands/menu/io.ts` (prompt/clear/raw-mode helpers)
+- `cli/src/subcommands/menu/inline-select.ts` (arrow-key selector)
+- `cli/src/subcommands/menu/requests.ts` (unauthenticated API requests)
+
+### Migration order (keep behavior stable)
+1. Remove duplicate palette + selector from `menu.ts` and use `menu/colors.ts`, `menu/io.ts`, `menu/inline-select.ts`.
+2. Extract a pure `render(state)` and keep current behavior.
+3. Introduce `MenuState` and move mutable globals into state.
+4. Introduce `MenuEvent` + reducer loop (keypress → event → state update → render).
+5. Move actions (API/spawn) into `effects.ts` and keep render side-effect free.
+
+---
+
 ## Related Documentation
 
 - [AGENTS.md](./AGENTS.md) - Programmatic CLI usage for AI agents
-- [QUICKSTART.md](./guides/QUICKSTART.md) - Getting started guide
-- [TUNNEL_SETUP.md](./guides/TUNNEL_SETUP.md) - Tunnel configuration
+- [README.md](./README.md) - Public docs index
