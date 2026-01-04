@@ -1,87 +1,26 @@
 import { Command } from "commander";
 import fetch from "node-fetch";
 import { spawn, execSync } from "child_process";
-import readline from "readline";
 import { apiRequest } from "../http";
 import { scanCommonPorts, testHttpPort } from "../utils/port-scanner";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-
-type MenuChoice = {
-  label: string;
-  action?: () => Promise<string>;
-  subMenu?: MenuChoice[];
-};
-
-function promptLine(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    try {
-      process.stdin.setRawMode(false);
-    } catch {
-      /* ignore */
-    }
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-function clearScreen() {
-  process.stdout.write("\x1b[2J\x1b[0f");
-}
-
-// ─────────────────────────────────────────────────────────────
-// Color palette (Oxide-inspired)
-// ─────────────────────────────────────────────────────────────
-const c = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  // Colors
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  red: "\x1b[31m",
-  magenta: "\x1b[35m",
-  white: "\x1b[97m",
-  gray: "\x1b[90m",
-  // Bright variants
-  brightCyan: "\x1b[96m",
-  brightGreen: "\x1b[92m",
-  brightYellow: "\x1b[93m",
-  brightWhite: "\x1b[97m",
-};
-
-function colorCyan(text: string) {
-  return `${c.brightCyan}${text}${c.reset}`;
-}
-
-function colorYellow(text: string) {
-  return `${c.yellow}${text}${c.reset}`;
-}
-
-function colorGreen(text: string) {
-  return `${c.brightGreen}${text}${c.reset}`;
-}
-
-function colorDim(text: string) {
-  return `${c.dim}${text}${c.reset}`;
-}
-
-function colorBold(text: string) {
-  return `${c.bold}${c.brightWhite}${text}${c.reset}`;
-}
-
-function colorRed(text: string) {
-  return `${c.red}${text}${c.reset}`;
-}
-
-function colorMagenta(text: string) {
-  return `${c.magenta}${text}${c.reset}`;
-}
+import { clearScreen, promptLine, restoreRawMode, truncate } from "./menu/io";
+import { unauthenticatedRequest } from "./menu/requests";
+import { inlineSelect, type SelectOption } from "./menu/inline-tree-select";
+import {
+  colorBold,
+  colorCyan,
+  colorDim,
+  colorGreen,
+  colorMagenta,
+  colorRed,
+  colorYellow,
+} from "./menu/colors";
+import { DEFAULT_MENU_MESSAGE, type MenuChoice } from "./menu/types";
+import { getCurrentMenu, initNav, moveSelection, popMenu, pushSubMenu, type MenuNavState } from "./menu/nav";
+import { renderMenu } from "./menu/render";
 
 // ASCII banner with color styling
 const ASCII_UPLINK = colorCyan([
@@ -93,155 +32,12 @@ const ASCII_UPLINK = colorCyan([
   " ╚═════╝ ╚═╝     ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝",
 ].join("\n"));
 
-
-function truncate(text: string, max: number) {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 1) + "…";
-}
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-function restoreRawMode() {
-  try {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-  } catch {
-    /* ignore */
-  }
-}
-
-// Inline arrow-key selector (returns selected index, or -1 for "Back")
-type SelectOption = { label: string; value: string | number | null };
-
-async function inlineSelect(
-  title: string,
-  options: SelectOption[],
-  includeBack: boolean = true
-): Promise<{ index: number; value: string | number | null } | null> {
-  return new Promise((resolve) => {
-    // Add "Back" option if requested
-    const allOptions = includeBack 
-      ? [...options, { label: "Back", value: null }]
-      : options;
-    
-    let selected = 0;
-    
-    const renderSelector = () => {
-      // Clear previous render (move cursor up and clear lines)
-      const linesToClear = allOptions.length + 3;
-      process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
-      
-      console.log();
-      console.log(colorDim(title));
-      console.log();
-      
-      allOptions.forEach((opt, idx) => {
-        const isLast = idx === allOptions.length - 1;
-        const isSelected = idx === selected;
-        const branch = isLast ? "└─" : "├─";
-        
-        let label: string;
-        let branchColor: string;
-        
-        if (isSelected) {
-          branchColor = colorCyan(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = colorCyan(opt.label);
-          }
-        } else {
-          branchColor = colorDim(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = opt.label;
-          }
-        }
-        
-        console.log(`${branchColor} ${label}`);
-      });
-    };
-    
-    // Initial render - print blank lines first so we can clear them
-    console.log();
-    console.log(colorDim(title));
-    console.log();
-    allOptions.forEach((opt, idx) => {
-      const isLast = idx === allOptions.length - 1;
-      const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorCyan(branch) : colorDim(branch);
-      const label = idx === 0 ? colorCyan(opt.label) : (opt.label === "Back" ? colorDim(opt.label) : opt.label);
-      console.log(`${branchColor} ${label}`);
-    });
-    
-    // Set up key handler
-    try {
-      process.stdin.setRawMode(true);
-      process.stdin.resume();
-    } catch {
-      /* ignore */
-    }
-    
-    const keyHandler = (key: Buffer) => {
-      const str = key.toString();
-      
-      if (str === "\u0003") {
-        // Ctrl+C
-        process.stdin.removeListener("data", keyHandler);
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.exit(0);
-      } else if (str === "\u001b[A") {
-        // Up arrow
-        selected = (selected - 1 + allOptions.length) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[B") {
-        // Down arrow
-        selected = (selected + 1) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[D") {
-        // Left arrow - same as selecting "Back"
-        process.stdin.removeListener("data", keyHandler);
-        resolve(null);
-      } else if (str === "\r") {
-        // Enter
-        process.stdin.removeListener("data", keyHandler);
-        const selectedOption = allOptions[selected];
-        if (selectedOption.label === "Back" || selectedOption.value === null) {
-          resolve(null);
-        } else {
-          resolve({ index: selected, value: selectedOption.value });
-        }
-      }
-    };
-    
-    process.stdin.on("data", keyHandler);
-  });
-}
-
-// Helper function to make unauthenticated requests (for signup)
-async function unauthenticatedRequest(method: string, path: string, body?: unknown): Promise<any> {
-  const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-  const response = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(JSON.stringify(json, null, 2));
-  }
-  return json;
 }
 
 export const menuCommand = new Command("menu")
@@ -265,6 +61,7 @@ export const menuCommand = new Command("menu")
         errorMsg.includes("Missing AGENTCLOUD_TOKEN");
       isAdmin = false;
     }
+
     // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
     
@@ -1359,18 +1156,14 @@ export const menuCommand = new Command("menu")
     }
 
     // Menu navigation state
-    const menuStack: MenuChoice[][] = [mainMenu];
-    const menuPath: string[] = [];
-    let selected = 0;
-    let message = "Use ↑/↓ and Enter. ← to go back. Ctrl+C to quit.";
+    let nav: MenuNavState = initNav(mainMenu);
+    let message = DEFAULT_MENU_MESSAGE;
     let exiting = false;
     let busy = false;
     
     // Cache active tunnels info - only update at start or when returning to main menu
     let cachedActiveTunnels = "";
     let cachedRelayStatus = "";
-
-    const getCurrentMenu = () => menuStack[menuStack.length - 1];
 
     const updateActiveTunnelsCache = () => {
       const clients = findTunnelClients();
@@ -1426,90 +1219,16 @@ export const menuCommand = new Command("menu")
     };
 
     const render = () => {
-      clearScreen();
-      console.log();
-      console.log(ASCII_UPLINK);
-      
-      // Status indicator below logo
-      if (menuStack.length === 1 && cachedRelayStatus) {
-        const statusIndicator = cachedRelayStatus.includes("ok") ? colorGreen("›") : colorRed("›");
-        const statusText = cachedRelayStatus.includes("ok") ? "connected" : "offline";
-        console.log(statusIndicator + colorDim(" " + statusText));
-      }
-      console.log();
-      
-      console.log();
-      
-      const currentMenu = getCurrentMenu();
-      
-      // Breadcrumb navigation
-      if (menuPath.length > 0) {
-        const breadcrumb = menuPath.map((p, i) => 
-          i === menuPath.length - 1 ? colorBold(p) : colorDim(p)
-        ).join(colorDim(" › "));
-        console.log(breadcrumb);
-        console.log();
-      }
-      
-      // Menu items - simple list style
-      currentMenu.forEach((choice, idx) => {
-        const isSelected = idx === selected;
-        
-        // Clean up labels - remove emojis for cleaner look
-        let cleanLabel = choice.label
-          .replace(/^🚀\s*/, "")
-          .replace(/^⚠️\s*/, "⚠ ")
-          .replace(/^✅\s*/, "")
-          .replace(/^❌\s*/, "");
-        
-        // Has submenu indicator
-        const hasSubmenu = !!choice.subMenu;
-        const suffix = hasSubmenu ? " ›" : "";
-        
-        // Style based on selection
-        let line: string;
-        if (isSelected) {
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            line = colorDim("› " + cleanLabel + suffix);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("⚠")) {
-            line = colorRed("› " + cleanLabel + suffix);
-          } else {
-            line = colorBold("› " + cleanLabel + suffix);
-          }
-        } else {
-          if (cleanLabel.toLowerCase().includes("exit")) {
-            line = colorDim("  " + cleanLabel + suffix);
-          } else if (cleanLabel.toLowerCase().includes("stop all") || cleanLabel.toLowerCase().includes("⚠")) {
-            line = colorDim("  ") + colorRed(cleanLabel + suffix);
-          } else {
-            line = colorDim("  " + cleanLabel + suffix);
-          }
-        }
-        
-        console.log(line);
+      renderMenu({
+        banner: ASCII_UPLINK,
+        cachedRelayStatus,
+        menuPath: nav.menuPath,
+        currentMenu: getCurrentMenu(nav),
+        selected: nav.selected,
+        message,
+        busy,
+        showStatusIndicator: nav.menuStack.length === 1,
       });
-      
-      // Message area
-      if (busy) {
-        console.log();
-        console.log(colorDim("Working..."));
-      } else if (message && message !== "Use ↑/↓ and Enter. ← to go back. Ctrl+C to quit.") {
-        console.log();
-        // Format multi-line messages nicely
-        const lines = message.split("\n");
-        lines.forEach((line) => {
-          // Color success/error indicators
-          let styledLine = line
-            .replace(/^✓/, colorGreen("✓"))
-            .replace(/^✗/, colorRed("✗"))
-            .replace(/^→/, colorCyan("→"));
-          console.log(styledLine);
-        });
-      }
-      
-      // Footer hints
-      console.log();
-      console.log(colorDim("↑↓ navigate  ↵ select  ^C exit"));
     };
 
     const cleanup = () => {
@@ -1522,14 +1241,12 @@ export const menuCommand = new Command("menu")
     };
 
     const handleAction = async () => {
-      const currentMenu = getCurrentMenu();
-      const choice = currentMenu[selected];
+      const currentMenu = getCurrentMenu(nav);
+      const choice = currentMenu[nav.selected];
       
       if (choice.subMenu) {
         // Navigate into sub-menu
-        menuStack.push(choice.subMenu);
-        menuPath.push(choice.label);
-        selected = 0;
+        nav = pushSubMenu(nav, choice);
         // Invalidate caches when leaving main menu
         cachedActiveTunnels = "";
         cachedRelayStatus = "";
@@ -1568,19 +1285,17 @@ export const menuCommand = new Command("menu")
     const onKey = async (key: Buffer) => {
       if (busy) return;
       const str = key.toString();
-      const currentMenu = getCurrentMenu();
+      const currentMenu = getCurrentMenu(nav);
       
       if (str === "\u0003") {
         cleanup();
         process.exit(0);
       } else if (str === "\u001b[D") {
         // Left arrow - go back
-        if (menuStack.length > 1) {
-          menuStack.pop();
-          menuPath.pop();
-          selected = 0;
+        if (nav.menuStack.length > 1) {
+          nav = popMenu(nav);
           // Refresh caches when returning to main menu
-          if (menuStack.length === 1) {
+          if (nav.menuStack.length === 1) {
             await refreshMainMenuCaches();
             return;
           }
@@ -1588,11 +1303,11 @@ export const menuCommand = new Command("menu")
         }
       } else if (str === "\u001b[A") {
         // Up
-        selected = (selected - 1 + currentMenu.length) % currentMenu.length;
+        nav = moveSelection(nav, -1);
         render();
       } else if (str === "\u001b[B") {
         // Down
-        selected = (selected + 1) % currentMenu.length;
+        nav = moveSelection(nav, 1);
         render();
       } else if (str === "\r") {
         await handleAction();

@@ -50,6 +50,10 @@ export function colorRed(text: string) {
   return `${c.red}${text}${c.reset}`;
 }
 
+export function colorMagenta(text: string) {
+  return `${c.magenta}${text}${c.reset}`;
+}
+
 export function colorWhite(text: string) {
   return `${c.brightWhite}${text}${c.reset}`;
 }
