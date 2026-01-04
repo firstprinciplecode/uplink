@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 Please report security issues privately.
 
-- Email: `security@uplink.spot`
+- Email: `thomas@firstprinciple.co`
 - If email is unavailable: open a GitHub issue with **no sensitive details** and request a private contact method.
 
 ## Secrets & credentials
