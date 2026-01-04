@@ -2,7 +2,7 @@
 # Intended layout:
 # - Control plane API (HTTPS):      api.uplink.spot -> 127.0.0.1:4000
 # - Tunnel ctrl (raw TCP):          tunnel.uplink.spot:7071 (handled by tunnel relay, not Caddy)
-# - Tunnel ingress (HTTPS):         *.t.uplink.spot -> 127.0.0.1:7070
+# - Tunnel ingress (HTTPS):         *.x.uplink.spot -> 127.0.0.1:7070
 #
 # Requirements:
 # - Build/run Caddy with the Cloudflare DNS module.
