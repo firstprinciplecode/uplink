@@ -25,9 +25,9 @@ SKIPPED=0
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-log_pass() { echo -e "${GREEN}✅ PASS${NC}: $1"; ((PASSED++)); }
-log_fail() { echo -e "${RED}❌ FAIL${NC}: $1"; ((FAILED++)); }
-log_skip() { echo -e "${YELLOW}⏭️  SKIP${NC}: $1"; ((SKIPPED++)); }
+log_pass() { echo -e "${GREEN}✅ PASS${NC}: $1"; PASSED=$((PASSED + 1)); }
+log_fail() { echo -e "${RED}❌ FAIL${NC}: $1"; FAILED=$((FAILED + 1)); }
+log_skip() { echo -e "${YELLOW}⏭️  SKIP${NC}: $1"; SKIPPED=$((SKIPPED + 1)); }
 log_info() { echo -e "${BLUE}ℹ️  INFO${NC}: $1"; }
 log_section() { echo -e "\n${BLUE}═══════════════════════════════════════════════════════════${NC}"; echo -e "${BLUE}  $1${NC}"; echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"; }
 
@@ -242,9 +242,9 @@ test_token_management() {
     
     # Revoke the test token
     if [[ -n "$CREATED_TOKEN_ID" ]]; then
-      api DELETE "/v1/admin/tokens/$CREATED_TOKEN_ID" "" "$ADMIN_TOKEN"
+      api POST "/v1/admin/tokens/revoke" "{\"id\":\"$CREATED_TOKEN_ID\"}" "$ADMIN_TOKEN"
       if [[ "$HTTP_STATUS" == "200" ]]; then
-        log_pass "DELETE /v1/admin/tokens/:id revokes token"
+        log_pass "POST /v1/admin/tokens/revoke revokes token"
       else
         log_fail "Token revocation - expected 200, got $HTTP_STATUS"
       fi
@@ -358,7 +358,7 @@ cleanup_test_data() {
   
   # Clean up user token created during signup test
   if [[ -n "${USER_TOKEN_ID:-}" ]]; then
-    api DELETE "/v1/admin/tokens/$USER_TOKEN_ID" "" "$ADMIN_TOKEN"
+    api POST "/v1/admin/tokens/revoke" "{\"id\":\"$USER_TOKEN_ID\"}" "$ADMIN_TOKEN"
     if [[ "$HTTP_STATUS" == "200" ]]; then
       log_pass "Cleaned up test user token"
     else

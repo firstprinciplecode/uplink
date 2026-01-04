@@ -276,11 +276,11 @@ async function testTokenManagement() {
 
     // Revoke the test token
     if (createdTokenId) {
-      const delRes = await api("DELETE", `/v1/admin/tokens/${createdTokenId}`, undefined, ADMIN_TOKEN);
-      if (delRes.status === 200) {
-        logPass("DELETE /v1/admin/tokens/:id revokes token");
+      const revokeRes = await api("POST", "/v1/admin/tokens/revoke", { id: createdTokenId }, ADMIN_TOKEN);
+      if (revokeRes.status === 200) {
+        logPass("POST /v1/admin/tokens/revoke revokes token");
       } else {
-        logFail(`Token revocation - expected 200, got ${delRes.status}`);
+        logFail(`Token revocation - expected 200, got ${revokeRes.status}`);
       }
     }
   } else {
@@ -390,7 +390,7 @@ async function cleanupTestData() {
   logSection("9. CLEANUP");
 
   if (USER_TOKEN_ID) {
-    const res = await api("DELETE", `/v1/admin/tokens/${USER_TOKEN_ID}`, undefined, ADMIN_TOKEN);
+    const res = await api("POST", "/v1/admin/tokens/revoke", { id: USER_TOKEN_ID }, ADMIN_TOKEN);
     if (res.status === 200) {
       logPass("Cleaned up test user token");
     } else {
