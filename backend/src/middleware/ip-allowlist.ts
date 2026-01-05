@@ -2,6 +2,23 @@ import { Request, Response, NextFunction } from "express";
 import { makeError } from "../schemas/error";
 import { logger } from "../utils/logger";
 
+function normalizeIp(ipRaw: string): string {
+  const ip = (ipRaw || "").trim();
+  if (!ip) return "";
+
+  // Express / Node often represent IPv4 addresses as IPv6-mapped addresses.
+  // Example: ::ffff:127.0.0.1
+  const v4MappedPrefix = "::ffff:";
+  if (ip.toLowerCase().startsWith(v4MappedPrefix)) {
+    return ip.slice(v4MappedPrefix.length);
+  }
+
+  // Treat IPv6 loopback as IPv4 loopback for allowlist comparisons.
+  if (ip === "::1") return "127.0.0.1";
+
+  return ip;
+}
+
 /**
  * IP allowlist middleware for internal endpoints.
  * Only allows requests from configured IP addresses or CIDR ranges.
@@ -50,9 +67,10 @@ function matchesCIDR(ip: string, cidr: string): boolean {
 export function ipAllowlist(allowedIPs: string[] = []) {
   // Read from env var if set (comma-separated)
   const envAllowlist = process.env.INTERNAL_IP_ALLOWLIST;
-  const finalAllowlist = envAllowlist
+  const finalAllowlistRaw = envAllowlist
     ? envAllowlist.split(",").map((s) => s.trim()).filter(Boolean)
     : allowedIPs;
+  const finalAllowlist = finalAllowlistRaw.map(normalizeIp).filter(Boolean);
 
   // If no allowlist configured, allow all (fail-open for compatibility)
   if (finalAllowlist.length === 0) {
@@ -62,7 +80,8 @@ export function ipAllowlist(allowedIPs: string[] = []) {
   }
 
   return (req: Request, res: Response, next: NextFunction) => {
-    const clientIp = req.ip || req.socket.remoteAddress || "";
+    const clientIpRaw = (req.ip || req.socket.remoteAddress || "") as string;
+    const clientIp = normalizeIp(clientIpRaw);
     
     // Check if IP matches any allowed IP or CIDR
     const isAllowed = finalAllowlist.some((allowed) => {
@@ -75,6 +94,7 @@ export function ipAllowlist(allowedIPs: string[] = []) {
       logger.warn({
         event: "ip_allowlist.blocked",
         ip: clientIp,
+        ipRaw: clientIpRaw,
         path: req.path,
         allowedIPs: finalAllowlist,
       });

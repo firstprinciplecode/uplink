@@ -42,7 +42,9 @@ function requireUserId(req: any): string {
 appRouter.post("/", bodySizeLimits.small, validateBody(createAppSchema), async (req: any, res) => {
   const ownerUserId = requireUserId(req);
   const { name } = req.body as { name: string };
-  const id = `app_${randomUUID()}`;
+  // Must be DNS-safe since we use `${id}.${hostDomain}` for routing.
+  // Underscores are not valid in DNS labels, so we use hyphen.
+  const id = `app-${randomUUID()}`;
 
   try {
     const existing = await pool.query(
