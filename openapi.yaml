@@ -147,6 +147,190 @@ paths:
                 type: object
                 additionalProperties: true
 
+  /v1/apps:
+    post:
+      summary: Create hosted app
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: App name (owner-scoped unique)
+              required: [name]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+    get:
+      summary: List hosted apps (owner)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apps:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/App"
+                  count:
+                    type: integer
+
+  /v1/apps/{id}:
+    get:
+      summary: Get hosted app
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+
+  /v1/apps/{id}/releases:
+    post:
+      summary: Create release (returns upload URL)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sha256:
+                  type: string
+                  description: sha256 of the uploaded tarball
+                sizeBytes:
+                  type: integer
+                  description: tarball size in bytes
+              required: [sha256, sizeBytes]
+      responses:
+        "201":
+          description: Release created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppReleaseCreateResponse"
+
+  /v1/apps/{id}/releases/{releaseId}/artifact:
+    put:
+      summary: Upload release artifact (v1 MVP)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: releaseId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+
+  /v1/apps/{id}/deployments:
+    post:
+      summary: Deploy a release
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                releaseId:
+                  type: string
+              required: [releaseId]
+      responses:
+        "201":
+          description: Deployment queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppDeployment"
+
+  /v1/apps/{id}/status:
+    get:
+      summary: App status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStatus"
+
+  /v1/apps/{id}/logs:
+    get:
+      summary: App logs (may support follow)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: follow
+          in: query
+          required: false
+          schema: { type: integer, enum: [0, 1] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppLogs"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -177,3 +361,61 @@ components:
         status: { type: string }
         createdAt: { type: string }
         updatedAt: { type: string }
+
+    App:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        url: { type: string, description: Default hosted URL (host.uplink.spot wildcard) }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AppReleaseCreateResponse:
+      type: object
+      properties:
+        release:
+          $ref: "#/components/schemas/AppRelease"
+        uploadUrl:
+          type: string
+          description: Signed URL for uploading the tarball artifact
+
+    AppRelease:
+      type: object
+      properties:
+        id: { type: string }
+        appId: { type: string }
+        sha256: { type: string }
+        sizeBytes: { type: integer }
+        uploadStatus: { type: string, enum: [pending, uploaded, failed] }
+        buildStatus: { type: string, enum: [queued, building, ready, failed] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AppDeployment:
+      type: object
+      properties:
+        id: { type: string }
+        appId: { type: string }
+        releaseId: { type: string }
+        status: { type: string, enum: [queued, deploying, running, failed] }
+        runnerTarget: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AppStatus:
+      type: object
+      properties:
+        app:
+          $ref: "#/components/schemas/App"
+        activeDeployment:
+          $ref: "#/components/schemas/AppDeployment"
+        activeRelease:
+          $ref: "#/components/schemas/AppRelease"
+
+    AppLogs:
+      type: object
+      properties:
+        lines:
+          type: array
+          items: { type: string }

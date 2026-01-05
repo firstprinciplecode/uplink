@@ -7,6 +7,7 @@ import { menuCommand } from "./subcommands/menu";
 import { tunnelCommand } from "./subcommands/tunnel";
 import { signupCommand } from "./subcommands/signup";
 import { systemCommand } from "./subcommands/system";
+import { hostCommand } from "./subcommands/host";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -30,6 +31,7 @@ program.addCommand(tunnelCommand);
 program.addCommand(signupCommand);
 program.addCommand(systemCommand);
 program.addCommand(menuCommand);
+program.addCommand(hostCommand);
 
 // Global pre-action hook to apply shared options
 let cachedTokenStdin: string | null = null;

@@ -9,6 +9,7 @@ import { adminRouter } from "./routes/admin";
 import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
 import { publicRouter } from "./routes/public";
+import { appRouter } from "./routes/apps";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-limit";
 import { defaultTimeout } from "./middleware/timeout";
@@ -185,6 +186,7 @@ app.use("/v1/signup", signupRouter);
 app.use("/v1", authMiddleware);
 app.use("/v1/dbs", dbRouter);
 app.use("/v1/tunnels", tunnelRouter);
+app.use("/v1/apps", appRouter);
 app.use("/v1/admin", adminRouter);
 app.use("/v1/me", meRouter);
 

@@ -7,6 +7,7 @@ interface Config {
   neonProjectId?: string;
   tunnelDomain: string;
   aliasDomain: string;
+  hostDomain: string;
   adminTokens: string[];
   dbLimitPerUser: number;
   logLevel: string;
@@ -46,6 +47,7 @@ export function validateConfig(): Config {
     neonProjectId: process.env.NEON_PROJECT_ID,
     tunnelDomain: getOptionalEnv("TUNNEL_DOMAIN", "x.uplink.spot"),
     aliasDomain: getOptionalEnv("ALIAS_DOMAIN", "uplink.spot"),
+    hostDomain: getOptionalEnv("HOST_DOMAIN", "host.uplink.spot"),
     adminTokens: (process.env.ADMIN_TOKENS || "")
       .split(",")
       .map((t) => t.trim())
@@ -97,6 +99,7 @@ export function validateConfig(): Config {
     port: config.port,
     databaseType: isSqlite ? "sqlite" : "postgres",
     tunnelDomain: config.tunnelDomain,
+    hostDomain: config.hostDomain,
     hasNeonConfig: !!(config.neonApiKey && config.neonProjectId),
     hasPepper: !!process.env.CONTROL_PLANE_TOKEN_PEPPER,
     hasInternalSecret: !!process.env.RELAY_INTERNAL_SECRET,
