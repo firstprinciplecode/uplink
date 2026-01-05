@@ -26,6 +26,7 @@ async function migrate() {
     "006_alias_traffic_stats.sql",
     "007_port_based_aliases.sql",
     "008_create_apps.sql",
+    "009_hosting_runtime_fields.sql",
   ];
 
   if (isSqlite) {
