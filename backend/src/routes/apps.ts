@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { createHash, randomUUID } from "crypto";
 import bodyParser from "body-parser";
+import { mkdirSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
 import { bodySizeLimits } from "../middleware/body-size";
@@ -40,7 +42,9 @@ function requireUserId(req: any): string {
 appRouter.post("/", bodySizeLimits.small, validateBody(createAppSchema), async (req: any, res) => {
   const ownerUserId = requireUserId(req);
   const { name } = req.body as { name: string };
-  const id = `app_${randomUUID()}`;
+  // Must be DNS-safe since we use `${id}.${hostDomain}` for routing.
+  // Underscores are not valid in DNS labels, so we use hyphen.
+  const id = `app-${randomUUID()}`;
 
   try {
     const existing = await pool.query(
@@ -222,8 +226,14 @@ appRouter.put(
         return res.status(400).json(makeError("INVALID_SHA256", "Uploaded artifact sha256 did not match"));
       }
 
-      // NOTE: v1 stub implementation: verify hash, then mark uploaded.
-      // The private builder/runner system will define the durable artifact store contract (object storage/registry).
+      // v1 MVP: persist artifact to local filesystem so the private builder can download it via internal endpoints.
+      // Later: replace with object storage + signed URLs.
+      const artifactsDir = process.env.HOSTING_ARTIFACTS_DIR || "./data/hosting-artifacts";
+      const artifactKey = String(check.rows[0].artifact_key || "");
+      const outPath = join(artifactsDir, artifactKey);
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, buf);
+
       const now = new Date().toISOString();
       await pool.query(
         "UPDATE app_releases SET upload_status = 'uploaded', updated_at = $2 WHERE id = $1",

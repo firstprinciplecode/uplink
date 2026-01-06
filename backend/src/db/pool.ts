@@ -22,14 +22,36 @@ if (isSqlite) {
   const db = new Database(fullPath);
   db.pragma("journal_mode = WAL");
   
+  function adaptPgQueryToSqlite(text: string, params: any[] = []) {
+    // Convert pg-style $1, $2... placeholders into SQLite positional ? placeholders,
+    // preserving the placeholder *usage order*.
+    //
+    // Example:
+    //   "a=$2 OR b=$1" with params [p1, p2]
+    // becomes:
+    //   "a=? OR b=?" with bound params [p2, p1]
+    const outParams: any[] = [];
+    const outSql = String(text).replace(/\$([1-9]\d*)/g, (_m: string, nStr: string) => {
+      const idx = Number(nStr) - 1;
+      outParams.push(params[idx]);
+      return "?";
+    });
+    return { sql: outSql, params: outParams };
+  }
+
   pool = {
     query: async (text: string, params?: any[]) => {
-      const stmt = db.prepare(text);
-      const result = stmt.all(...(params || []));
-      return {
-        rows: result,
-        rowCount: Array.isArray(result) ? result.length : 0,
-      };
+      const adapted = adaptPgQueryToSqlite(text, params || []);
+      const stmt = db.prepare(adapted.sql);
+
+      // better-sqlite3: statements that don't return rows must use .run()
+      if (stmt.reader) {
+        const rows = stmt.all(...adapted.params);
+        return { rows, rowCount: Array.isArray(rows) ? rows.length : 0 };
+      }
+
+      const info = stmt.run(...adapted.params);
+      return { rows: [], rowCount: info?.changes ?? 0 };
     },
     end: async () => {
       db.close();
