@@ -34,18 +34,6 @@ internalHostingRouter.get("/pending-builds", async (req, res) => {
     );
 
     // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "run1",
-        hypothesisId: "A",
-        location: "backend/src/routes/internal-hosting.ts:pending-builds",
-        message: "pending builds polled",
-        data: { count: result.rowCount || 0 },
-        timestamp: Date.now(),
-      }),
     }).catch(() => {});
     // #endregion
 
@@ -128,18 +116,6 @@ internalHostingRouter.get("/pending-deployments", async (req, res) => {
     );
 
     // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/ab5d6743-9469-4ee1-a93a-181a6c692c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "debug-session",
-        runId: "run1",
-        hypothesisId: "B",
-        location: "backend/src/routes/internal-hosting.ts:pending-deployments",
-        message: "pending deployments polled",
-        data: { count: result.rowCount || 0 },
-        timestamp: Date.now(),
-      }),
     }).catch(() => {});
     // #endregion
 
