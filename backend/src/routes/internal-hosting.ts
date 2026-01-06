@@ -33,10 +33,6 @@ internalHostingRouter.get("/pending-builds", async (req, res) => {
        LIMIT 10`
     );
 
-    // #region agent log
-    }).catch(() => {});
-    // #endregion
-
     const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
     const host = req.get("host") || "127.0.0.1";
     const baseUrl = `${proto}://${host}`;
@@ -114,10 +110,6 @@ internalHostingRouter.get("/pending-deployments", async (req, res) => {
        ORDER BY d.created_at ASC
        LIMIT 10`
     );
-
-    // #region agent log
-    }).catch(() => {});
-    // #endregion
 
     const deployments = result.rows.map((r) => ({
       id: r.id,
