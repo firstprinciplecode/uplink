@@ -10,6 +10,7 @@ import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
 import { publicRouter } from "./routes/public";
 import { appRouter } from "./routes/apps";
+import { internalHostingRouter } from "./routes/internal-hosting";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-limit";
 import { defaultTimeout } from "./middleware/timeout";
@@ -172,6 +173,9 @@ app.get("/internal/allow-tls", internalAllowTlsRateLimiter, async (req, res) => 
 
 // Internal alias resolution for relay - no auth, uses relay secret
 app.get("/internal/resolve-alias", resolveAliasHandler);
+
+// Internal hosting runtime endpoints (builder/runner/router) - localhost only + runtime secret
+app.use("/internal/hosting", internalHostingRouter);
 
 // Public endpoints (no auth required) - for website globe visualization
 app.use("/public", publicRouter);

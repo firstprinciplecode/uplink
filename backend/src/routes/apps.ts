@@ -1,12 +1,16 @@
 import { Router } from "express";
 import { createHash, randomUUID } from "crypto";
 import bodyParser from "body-parser";
+import { mkdirSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
 import { bodySizeLimits } from "../middleware/body-size";
 import { validateBody } from "../middleware/validate";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
+import fetch from "node-fetch";
+import { headArtifactObject, isR2Enabled, signPutArtifactUrl } from "../utils/r2";
 import {
   type AppRecord,
   type AppDeploymentRecord,
@@ -40,7 +44,9 @@ function requireUserId(req: any): string {
 appRouter.post("/", bodySizeLimits.small, validateBody(createAppSchema), async (req: any, res) => {
   const ownerUserId = requireUserId(req);
   const { name } = req.body as { name: string };
-  const id = `app_${randomUUID()}`;
+  // Must be DNS-safe since we use `${id}.${hostDomain}` for routing.
+  // Underscores are not valid in DNS labels, so we use hyphen.
+  const id = `app-${randomUUID()}`;
 
   try {
     const existing = await pool.query(
@@ -169,16 +175,36 @@ appRouter.post("/:id/releases", bodySizeLimits.small, validateBody(createRelease
       updatedAt: now,
     };
 
-    // v1: upload goes to the control plane (Bearer-auth), not a third-party presigned URL.
-    // Prefer the request host so self-hosted setups work without AGENTCLOUD_API_BASE on the server.
-    const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
-    const host = req.get("host") || "api.uplink.spot";
-    const baseUrl = `${proto}://${host}`;
-    const uploadUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
-      releaseId
-    )}/artifact`;
+    const r2Enabled = isR2Enabled();
+    let uploadUrl = "";
+    let uploadHeaders: Record<string, string> | undefined;
+    let completeUrl: string | undefined;
 
-    return res.status(201).json({ release, uploadUrl });
+    if (r2Enabled) {
+      const signed = await signPutArtifactUrl(artifactKey);
+      uploadUrl = signed.url;
+      uploadHeaders = signed.headers;
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = req.get("host") || "api.uplink.spot";
+      const baseUrl = `${proto}://${host}`;
+      completeUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/complete`;
+    } else {
+      // v1: upload goes to the control plane (Bearer-auth), not a third-party presigned URL.
+      // Prefer the request host so self-hosted setups work without AGENTCLOUD_API_BASE on the server.
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = req.get("host") || "api.uplink.spot";
+      const baseUrl = `${proto}://${host}`;
+      uploadUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/artifact`;
+      completeUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/complete`;
+    }
+
+    return res.status(201).json({ release, uploadUrl, uploadHeaders, completeUrl });
   } catch (error) {
     logger.error({ event: "apps.release.create.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to create release"));
@@ -207,6 +233,10 @@ appRouter.put(
         return res.status(404).json(makeError("NOT_FOUND", "Release not found"));
       }
 
+      if (isR2Enabled()) {
+        return res.status(400).json(makeError("USE_SIGNED_URL", "Use the signed upload URL for artifacts"));
+      }
+
       const expectedSha = String(check.rows[0].sha256 || "").toLowerCase();
       const buf: Buffer | undefined = Buffer.isBuffer(req.body) ? req.body : undefined;
       if (!buf || buf.length === 0) {
@@ -222,8 +252,14 @@ appRouter.put(
         return res.status(400).json(makeError("INVALID_SHA256", "Uploaded artifact sha256 did not match"));
       }
 
-      // NOTE: v1 stub implementation: verify hash, then mark uploaded.
-      // The private builder/runner system will define the durable artifact store contract (object storage/registry).
+      // v1 MVP: persist artifact to local filesystem so the private builder can download it via internal endpoints.
+      // Later: replace with object storage + signed URLs.
+      const artifactsDir = process.env.HOSTING_ARTIFACTS_DIR || "./data/hosting-artifacts";
+      const artifactKey = String(check.rows[0].artifact_key || "");
+      const outPath = join(artifactsDir, artifactKey);
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, buf);
+
       const now = new Date().toISOString();
       await pool.query(
         "UPDATE app_releases SET upload_status = 'uploaded', updated_at = $2 WHERE id = $1",
@@ -236,6 +272,53 @@ appRouter.put(
     }
   }
 );
+
+// Confirm upload complete (for presigned uploads)
+appRouter.post("/:id/releases/:releaseId/complete", bodySizeLimits.small, async (req: any, res) => {
+  const ownerUserId = requireUserId(req);
+  const appId = String(req.params.id || "");
+  const releaseId = String(req.params.releaseId || "");
+  try {
+    const check = await pool.query(
+      `SELECT r.id, r.sha256, r.size_bytes, r.artifact_key, r.upload_status
+       FROM app_releases r
+       JOIN apps a ON a.id = r.app_id
+       WHERE r.id = $1 AND r.app_id = $2 AND a.owner_user_id = $3
+       LIMIT 1`,
+      [releaseId, appId, ownerUserId]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "Release not found"));
+    }
+
+    const { artifact_key: artifactKey, size_bytes: sizeBytes, upload_status: uploadStatus } =
+      check.rows[0];
+    if (uploadStatus === "uploaded") {
+      return res.status(200).json({ id: releaseId, status: "uploaded" });
+    }
+
+    if (isR2Enabled()) {
+      const head = await headArtifactObject(String(artifactKey));
+      const expected = Number(sizeBytes || 0);
+      const got = Number(head.ContentLength || 0);
+      if (expected > 0 && got > 0 && expected !== got) {
+        return res
+          .status(400)
+          .json(makeError("INVALID_SIZE", "Uploaded artifact size did not match expected size"));
+      }
+    }
+
+    const now = new Date().toISOString();
+    await pool.query("UPDATE app_releases SET upload_status = 'uploaded', updated_at = $2 WHERE id = $1", [
+      releaseId,
+      now,
+    ]);
+    return res.status(200).json({ id: releaseId, status: "uploaded" });
+  } catch (error) {
+    logger.error({ event: "apps.release.complete.failed", error });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to confirm artifact upload"));
+  }
+});
 
 // Create deployment
 appRouter.post(
@@ -367,7 +450,41 @@ appRouter.get("/:id/logs", async (req: any, res) => {
     if (appRes.rowCount === 0) {
       return res.status(404).json(makeError("NOT_FOUND", "App not found"));
     }
-    return res.json({ lines: ["(logs not yet implemented)"] });
+
+    const depRes = await pool.query(
+      `SELECT id, runner_target, container_id
+       FROM app_deployments
+       WHERE app_id = $1 AND status = 'running'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [appId]
+    );
+    if (depRes.rowCount === 0) {
+      return res.json({ lines: ["(no running deployment)"] });
+    }
+
+    const runnerTarget = String(depRes.rows[0].runner_target || "");
+    const containerId = String(depRes.rows[0].container_id || "");
+    if (!runnerTarget || !containerId) {
+      return res.json({ lines: ["(missing runner target or container id)"] });
+    }
+
+    const secret = process.env.HOSTING_RUNTIME_SECRET || "";
+    if (!secret) {
+      return res.status(500).json(makeError("INTERNAL_ERROR", "Missing HOSTING_RUNTIME_SECRET"));
+    }
+
+    const tail = Math.min(Number(req.query.tail || 200), 500);
+    const url = `http://${runnerTarget}:9001/logs?containerId=${encodeURIComponent(containerId)}&tail=${tail}`;
+    const logsRes = await fetch(url, {
+      headers: { "x-hosting-runtime-secret": secret },
+    });
+    const json = await logsRes.json().catch(() => ({}));
+    if (!logsRes.ok) {
+      return res.json({ lines: ["(log fetch failed)"] });
+    }
+    const lines = Array.isArray(json?.lines) ? json.lines : [];
+    return res.json({ lines });
   } catch (error) {
     logger.error({ event: "apps.logs.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get logs"));
