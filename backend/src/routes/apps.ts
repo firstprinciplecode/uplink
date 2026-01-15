@@ -9,6 +9,7 @@ import { bodySizeLimits } from "../middleware/body-size";
 import { validateBody } from "../middleware/validate";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
+import fetch from "node-fetch";
 import {
   type AppRecord,
   type AppDeploymentRecord,
@@ -377,7 +378,41 @@ appRouter.get("/:id/logs", async (req: any, res) => {
     if (appRes.rowCount === 0) {
       return res.status(404).json(makeError("NOT_FOUND", "App not found"));
     }
-    return res.json({ lines: ["(logs not yet implemented)"] });
+
+    const depRes = await pool.query(
+      `SELECT id, runner_target, container_id
+       FROM app_deployments
+       WHERE app_id = $1 AND status = 'running'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [appId]
+    );
+    if (depRes.rowCount === 0) {
+      return res.json({ lines: ["(no running deployment)"] });
+    }
+
+    const runnerTarget = String(depRes.rows[0].runner_target || "");
+    const containerId = String(depRes.rows[0].container_id || "");
+    if (!runnerTarget || !containerId) {
+      return res.json({ lines: ["(missing runner target or container id)"] });
+    }
+
+    const secret = process.env.HOSTING_RUNTIME_SECRET || "";
+    if (!secret) {
+      return res.status(500).json(makeError("INTERNAL_ERROR", "Missing HOSTING_RUNTIME_SECRET"));
+    }
+
+    const tail = Math.min(Number(req.query.tail || 200), 500);
+    const url = `http://${runnerTarget}:9001/logs?containerId=${encodeURIComponent(containerId)}&tail=${tail}`;
+    const logsRes = await fetch(url, {
+      headers: { "x-hosting-runtime-secret": secret },
+    });
+    const json = await logsRes.json().catch(() => ({}));
+    if (!logsRes.ok) {
+      return res.json({ lines: ["(log fetch failed)"] });
+    }
+    const lines = Array.isArray(json?.lines) ? json.lines : [];
+    return res.json({ lines });
   } catch (error) {
     logger.error({ event: "apps.logs.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get logs"));
