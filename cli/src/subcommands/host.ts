@@ -13,6 +13,8 @@ type AppList = { apps: App[]; count: number };
 type ReleaseCreateResponse = {
   release: { id: string; appId: string; sha256: string; sizeBytes: number };
   uploadUrl: string;
+  uploadHeaders?: Record<string, string>;
+  completeUrl?: string;
 };
 type Deployment = { id: string; appId: string; releaseId: string; status: string };
 
@@ -55,22 +57,47 @@ function makeTarball(sourceDir: string): { tarPath: string; sizeBytes: number; s
   return { tarPath: tmp, sizeBytes: st.size, sha256 };
 }
 
-async function uploadArtifact(uploadUrl: string, tarPath: string): Promise<any> {
+async function uploadArtifact(
+  uploadUrl: string,
+  tarPath: string,
+  uploadHeaders?: Record<string, string>
+): Promise<any> {
+  const hasSignedHeaders = uploadHeaders && Object.keys(uploadHeaders).length > 0;
   const token = getApiToken();
-  if (!token) throw new Error("Missing AGENTCLOUD_TOKEN");
+  if (!hasSignedHeaders && !token) throw new Error("Missing AGENTCLOUD_TOKEN");
+
+  const headers: Record<string, string> = { ...(uploadHeaders || {}) };
+  if (!headers["Content-Type"]) headers["Content-Type"] = "application/octet-stream";
+  if (!hasSignedHeaders && token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(uploadUrl, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/octet-stream",
-    },
+    headers,
     body: createReadStream(tarPath) as any,
   });
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(JSON.stringify(json, null, 2));
   return json;
+}
+
+async function completeArtifactUpload(completeUrl?: string): Promise<void> {
+  if (!completeUrl) return;
+  const token = getApiToken();
+  if (!token) throw new Error("Missing AGENTCLOUD_TOKEN");
+
+  const res = await fetch(completeUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(JSON.stringify(json, null, 2));
+  }
 }
 
 export const hostCommand = new Command("host").description("Host persistent web services (Dockerfile required)");
@@ -141,7 +168,8 @@ hostCommand
         sizeBytes,
       })) as ReleaseCreateResponse;
 
-      await uploadArtifact(rel.uploadUrl, tarPath);
+      await uploadArtifact(rel.uploadUrl, tarPath, rel.uploadHeaders);
+      await completeArtifactUpload(rel.completeUrl);
 
       const dep = (await apiRequest("POST", `/v1/apps/${app.id}/deployments`, {
         releaseId: rel.release.id,

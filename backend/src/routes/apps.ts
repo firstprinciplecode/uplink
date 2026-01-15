@@ -10,6 +10,7 @@ import { validateBody } from "../middleware/validate";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
 import fetch from "node-fetch";
+import { headArtifactObject, isR2Enabled, signPutArtifactUrl } from "../utils/r2";
 import {
   type AppRecord,
   type AppDeploymentRecord,
@@ -174,16 +175,36 @@ appRouter.post("/:id/releases", bodySizeLimits.small, validateBody(createRelease
       updatedAt: now,
     };
 
-    // v1: upload goes to the control plane (Bearer-auth), not a third-party presigned URL.
-    // Prefer the request host so self-hosted setups work without AGENTCLOUD_API_BASE on the server.
-    const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
-    const host = req.get("host") || "api.uplink.spot";
-    const baseUrl = `${proto}://${host}`;
-    const uploadUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
-      releaseId
-    )}/artifact`;
+    const r2Enabled = isR2Enabled();
+    let uploadUrl = "";
+    let uploadHeaders: Record<string, string> | undefined;
+    let completeUrl: string | undefined;
 
-    return res.status(201).json({ release, uploadUrl });
+    if (r2Enabled) {
+      const signed = await signPutArtifactUrl(artifactKey);
+      uploadUrl = signed.url;
+      uploadHeaders = signed.headers;
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = req.get("host") || "api.uplink.spot";
+      const baseUrl = `${proto}://${host}`;
+      completeUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/complete`;
+    } else {
+      // v1: upload goes to the control plane (Bearer-auth), not a third-party presigned URL.
+      // Prefer the request host so self-hosted setups work without AGENTCLOUD_API_BASE on the server.
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+      const host = req.get("host") || "api.uplink.spot";
+      const baseUrl = `${proto}://${host}`;
+      uploadUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/artifact`;
+      completeUrl = `${baseUrl}/v1/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(
+        releaseId
+      )}/complete`;
+    }
+
+    return res.status(201).json({ release, uploadUrl, uploadHeaders, completeUrl });
   } catch (error) {
     logger.error({ event: "apps.release.create.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to create release"));
@@ -210,6 +231,10 @@ appRouter.put(
       );
       if (check.rowCount === 0) {
         return res.status(404).json(makeError("NOT_FOUND", "Release not found"));
+      }
+
+      if (isR2Enabled()) {
+        return res.status(400).json(makeError("USE_SIGNED_URL", "Use the signed upload URL for artifacts"));
       }
 
       const expectedSha = String(check.rows[0].sha256 || "").toLowerCase();
@@ -247,6 +272,53 @@ appRouter.put(
     }
   }
 );
+
+// Confirm upload complete (for presigned uploads)
+appRouter.post("/:id/releases/:releaseId/complete", bodySizeLimits.small, async (req: any, res) => {
+  const ownerUserId = requireUserId(req);
+  const appId = String(req.params.id || "");
+  const releaseId = String(req.params.releaseId || "");
+  try {
+    const check = await pool.query(
+      `SELECT r.id, r.sha256, r.size_bytes, r.artifact_key, r.upload_status
+       FROM app_releases r
+       JOIN apps a ON a.id = r.app_id
+       WHERE r.id = $1 AND r.app_id = $2 AND a.owner_user_id = $3
+       LIMIT 1`,
+      [releaseId, appId, ownerUserId]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "Release not found"));
+    }
+
+    const { artifact_key: artifactKey, size_bytes: sizeBytes, upload_status: uploadStatus } =
+      check.rows[0];
+    if (uploadStatus === "uploaded") {
+      return res.status(200).json({ id: releaseId, status: "uploaded" });
+    }
+
+    if (isR2Enabled()) {
+      const head = await headArtifactObject(String(artifactKey));
+      const expected = Number(sizeBytes || 0);
+      const got = Number(head.ContentLength || 0);
+      if (expected > 0 && got > 0 && expected !== got) {
+        return res
+          .status(400)
+          .json(makeError("INVALID_SIZE", "Uploaded artifact size did not match expected size"));
+      }
+    }
+
+    const now = new Date().toISOString();
+    await pool.query("UPDATE app_releases SET upload_status = 'uploaded', updated_at = $2 WHERE id = $1", [
+      releaseId,
+      now,
+    ]);
+    return res.status(200).json({ id: releaseId, status: "uploaded" });
+  } catch (error) {
+    logger.error({ event: "apps.release.complete.failed", error });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to confirm artifact upload"));
+  }
+});
 
 // Create deployment
 appRouter.post(

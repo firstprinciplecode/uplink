@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { createHash } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { isR2Enabled, signGetArtifactUrl } from "../utils/r2";
 
 export const internalHostingRouter = Router();
 
@@ -33,17 +34,27 @@ internalHostingRouter.get("/pending-builds", async (req, res) => {
        LIMIT 10`
     );
 
-    const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
-    const host = req.get("host") || "127.0.0.1";
-    const baseUrl = `${proto}://${host}`;
-
     const releases = result.rows.map((r) => ({
       id: r.id,
       appId: r.app_id,
       sha256: r.sha256,
       sizeBytes: Number(r.size_bytes || 0),
-      artifactUrl: `${baseUrl}/internal/hosting/releases/${encodeURIComponent(r.id)}/artifact`,
+      artifactKey: r.artifact_key,
     }));
+    if (isR2Enabled()) {
+      for (const release of releases) {
+        release.artifactUrl = await signGetArtifactUrl(String(release.artifactKey || ""));
+      }
+    } else {
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
+      const host = req.get("host") || "127.0.0.1";
+      const baseUrl = `${proto}://${host}`;
+      for (const release of releases) {
+        release.artifactUrl = `${baseUrl}/internal/hosting/releases/${encodeURIComponent(
+          release.id
+        )}/artifact`;
+      }
+    }
     return res.json({ releases });
   } catch (error) {
     logger.error({ event: "internal.hosting.pending_builds.failed", error });
@@ -60,6 +71,14 @@ internalHostingRouter.get("/releases/:id/artifact", async (req, res) => {
       [id]
     );
     if (result.rowCount === 0) return res.status(404).json(makeError("NOT_FOUND", "Release not found"));
+
+    if (isR2Enabled()) {
+      const artifactKey = String(result.rows[0].artifact_key || "");
+      const url = await signGetArtifactUrl(artifactKey);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Location", url);
+      return res.status(302).end();
+    }
 
     const artifactsDir = process.env.HOSTING_ARTIFACTS_DIR || "./data/hosting-artifacts";
     const artifactKey = String(result.rows[0].artifact_key || "");
