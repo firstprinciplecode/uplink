@@ -1,10 +1,10 @@
 import fetch from "node-fetch";
 import { spawn } from "child_process";
-import { join } from "path";
+import { resolveProjectRoot } from "../../utils/project-root";
 
 export function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {
   return new Promise<void>((resolve, reject) => {
-    const projectRoot = join(__dirname, "../../..");
+    const projectRoot = resolveProjectRoot(__dirname);
     const env = {
       ...process.env,
       AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot",

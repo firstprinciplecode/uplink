@@ -1,6 +1,7 @@
 import { spawn, execSync } from "child_process";
 import { join } from "path";
 import { apiRequest } from "../../http";
+import { resolveProjectRoot } from "../../utils/project-root";
 
 export async function createAndStartTunnel(port: number): Promise<string> {
   // Check if tunnel already running on this port
@@ -23,7 +24,7 @@ export async function createAndStartTunnel(port: number): Promise<string> {
   const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
 
   const path = require("path");
-  const projectRoot = path.join(__dirname, "../../..");
+  const projectRoot = resolveProjectRoot(__dirname);
   const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
   const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
     stdio: "ignore",

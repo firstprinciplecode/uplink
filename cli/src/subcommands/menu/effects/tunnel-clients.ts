@@ -1,4 +1,5 @@
 import { execSync, spawn } from "child_process";
+import { resolveProjectRoot } from "../../utils/project-root";
 
 export type TunnelClient = { pid: number; port: number; token: string };
 
@@ -83,7 +84,7 @@ export async function createAndStartTunnel(apiRequest: ApiRequest, port: number)
   // Start tunnel client in background
   // (CommonJS build: __dirname available)
   const path = require("path");
-  const projectRoot = path.join(__dirname, "../../../..");
+  const projectRoot = resolveProjectRoot(__dirname);
   const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
   const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
     stdio: "ignore",
