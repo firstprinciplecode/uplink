@@ -1,5 +1,5 @@
 import { execSync, spawn } from "child_process";
-import { resolveProjectRoot } from "../../utils/project-root";
+import { resolveProjectRoot } from "../../../utils/project-root";
 
 export type TunnelClient = { pid: number; port: number; token: string };
 

@@ -1,7 +1,7 @@
 import { spawn, execSync } from "child_process";
 import { join } from "path";
 import { apiRequest } from "../../http";
-import { resolveProjectRoot } from "../../utils/project-root";
+import { resolveProjectRoot } from "../../../utils/project-root";
 
 export async function createAndStartTunnel(port: number): Promise<string> {
   // Check if tunnel already running on this port
