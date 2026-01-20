@@ -1,12 +1,15 @@
 import { Router } from "express";
 import { createHash, randomUUID } from "crypto";
 import bodyParser from "body-parser";
+import { mkdirSync, writeFileSync } from "fs";
+import { dirname, resolve, sep } from "path";
 import { pool } from "../db/pool";
 import { makeError } from "../schemas/error";
 import { bodySizeLimits } from "../middleware/body-size";
 import { validateBody } from "../middleware/validate";
 import { config } from "../utils/config";
 import { logger } from "../utils/logger";
+import { isR2Enabled } from "../utils/r2";
 import {
   type AppRecord,
   type AppDeploymentRecord,
@@ -245,9 +248,21 @@ appRouter.put(
       }
 
       const expectedSha = String(check.rows[0].sha256 || "").toLowerCase();
+      const expectedSize = Number(check.rows[0].size_bytes || 0);
+      const artifactKey = String(check.rows[0].artifact_key || "");
       const buf: Buffer | undefined = Buffer.isBuffer(req.body) ? req.body : undefined;
       if (!buf || buf.length === 0) {
         return res.status(400).json(makeError("INVALID_BODY", "Expected application/octet-stream body"));
+      }
+      if (!artifactKey) {
+        return res.status(500).json(makeError("INTERNAL_ERROR", "Missing artifact key"));
+      }
+      if (expectedSize > 0 && buf.length !== expectedSize) {
+        await pool.query("UPDATE app_releases SET upload_status = 'failed', updated_at = $2 WHERE id = $1", [
+          releaseId,
+          new Date().toISOString(),
+        ]);
+        return res.status(400).json(makeError("INVALID_SIZE", "Uploaded artifact size did not match"));
       }
 
       const gotSha = createHash("sha256").update(buf).digest("hex");
@@ -259,8 +274,21 @@ appRouter.put(
         return res.status(400).json(makeError("INVALID_SHA256", "Uploaded artifact sha256 did not match"));
       }
 
-      // NOTE: v1 stub implementation: verify hash, then mark uploaded.
-      // The private builder/runner system will define the durable artifact store contract (object storage/registry).
+      if (isR2Enabled()) {
+        return res.status(501).json(makeError("NOT_IMPLEMENTED", "R2 artifact uploads are not enabled"));
+      }
+
+      const artifactsDir = process.env.HOSTING_ARTIFACTS_DIR || "./data/hosting-artifacts";
+      const basePath = resolve(artifactsDir);
+      const targetPath = resolve(basePath, artifactKey);
+      if (!targetPath.startsWith(basePath + sep)) {
+        return res.status(400).json(makeError("INVALID_ARTIFACT_KEY", "Invalid artifact key"));
+      }
+
+      mkdirSync(dirname(targetPath), { recursive: true });
+      writeFileSync(targetPath, buf);
+
+      // v1: verify hash, then mark uploaded.
       const now = new Date().toISOString();
       await pool.query(
         "UPDATE app_releases SET upload_status = 'uploaded', updated_at = $2 WHERE id = $1",
