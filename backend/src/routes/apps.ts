@@ -30,6 +30,11 @@ const createDeploymentSchema = z.object({
   releaseId: z.string().trim().min(1).max(128),
 });
 
+const updateAppConfigSchema = z.object({
+  volumes: z.record(z.string().min(1), z.literal("persistent")).optional(),
+  env: z.record(z.string().min(1).max(64), z.string().max(4096)).optional(),
+});
+
 function requireUserId(req: any): string {
   const userId = req.user?.id;
   if (!userId) throw new Error("missing user");
@@ -70,6 +75,38 @@ appRouter.post("/", bodySizeLimits.small, validateBody(createAppSchema), async (
   } catch (error) {
     logger.error({ event: "apps.create.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to create app"));
+  }
+});
+
+// Update app config (volumes/env)
+appRouter.put("/:id/config", bodySizeLimits.small, validateBody(updateAppConfigSchema), async (req: any, res) => {
+  const ownerUserId = requireUserId(req);
+  const appId = String(req.params.id || "");
+  const { volumes, env } = req.body as { volumes?: Record<string, string>; env?: Record<string, string> };
+
+  if (!volumes && !env) {
+    return res.status(400).json(makeError("INVALID_BODY", "Provide volumes and/or env config"));
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT id FROM apps WHERE id = $1 AND owner_user_id = $2 LIMIT 1",
+      [appId, ownerUserId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "App not found"));
+    }
+
+    const now = new Date().toISOString();
+    await pool.query(
+      "UPDATE apps SET volume_config = COALESCE($2, volume_config), env_config = COALESCE($3, env_config), updated_at = $4 WHERE id = $1",
+      [appId, volumes ? JSON.stringify(volumes) : null, env ? JSON.stringify(env) : null, now]
+    );
+
+    return res.json({ id: appId, volumes: volumes || null, env: env || null });
+  } catch (error) {
+    logger.error({ event: "apps.config.update.failed", error });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to update app config"));
   }
 });
 
@@ -367,7 +404,42 @@ appRouter.get("/:id/logs", async (req: any, res) => {
     if (appRes.rowCount === 0) {
       return res.status(404).json(makeError("NOT_FOUND", "App not found"));
     }
-    return res.json({ lines: ["(logs not yet implemented)"] });
+    const depRes = await pool.query(
+      `SELECT runner_target, container_id
+       FROM app_deployments
+       WHERE app_id = $1 AND status = 'running'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [appId]
+    );
+    if (depRes.rowCount === 0) {
+      return res.status(409).json(makeError("NOT_READY", "No running deployment"));
+    }
+    const runnerTarget = String(depRes.rows[0].runner_target || "");
+    const containerId = String(depRes.rows[0].container_id || "");
+    if (!runnerTarget || !containerId) {
+      return res.status(409).json(makeError("NOT_READY", "Deployment missing runtime metadata"));
+    }
+    if (!config.hostingRuntimeSecret) {
+      return res.status(500).json(makeError("INTERNAL_ERROR", "HOSTING_RUNTIME_SECRET not configured"));
+    }
+
+    const tailRaw = req.query?.tail ? Number(req.query.tail) : 200;
+    const tail = Math.min(Math.max(1, Number.isFinite(tailRaw) ? tailRaw : 200), 500);
+    const url = `http://${runnerTarget}:${config.runnerHealthPort}/logs?containerId=${encodeURIComponent(
+      containerId
+    )}&tail=${tail}`;
+    const logsRes = await fetch(url, {
+      headers: { "x-hosting-runtime-secret": config.hostingRuntimeSecret },
+    });
+    const json = await logsRes.json().catch(() => ({}));
+    if (!logsRes.ok) {
+      return res
+        .status(502)
+        .json(makeError("UPSTREAM_ERROR", `Runner logs failed (${logsRes.status})`));
+    }
+    const lines = Array.isArray(json?.lines) ? json.lines : [];
+    return res.json({ lines });
   } catch (error) {
     logger.error({ event: "apps.logs.failed", error });
     return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to get logs"));

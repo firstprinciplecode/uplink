@@ -8,6 +8,8 @@ interface Config {
   tunnelDomain: string;
   aliasDomain: string;
   hostDomain: string;
+  hostingRuntimeSecret: string;
+  runnerHealthPort: number;
   adminTokens: string[];
   dbLimitPerUser: number;
   logLevel: string;
@@ -48,6 +50,8 @@ export function validateConfig(): Config {
     tunnelDomain: getOptionalEnv("TUNNEL_DOMAIN", "x.uplink.spot"),
     aliasDomain: getOptionalEnv("ALIAS_DOMAIN", "uplink.spot"),
     hostDomain: getOptionalEnv("HOST_DOMAIN", "host.uplink.spot"),
+    hostingRuntimeSecret: getOptionalEnv("HOSTING_RUNTIME_SECRET", ""),
+    runnerHealthPort: getOptionalNumberEnv("RUNNER_HEALTH_PORT", 9001),
     adminTokens: (process.env.ADMIN_TOKENS || "")
       .split(",")
       .map((t) => t.trim())

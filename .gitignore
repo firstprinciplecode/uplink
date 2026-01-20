@@ -50,6 +50,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Demos (local only)
+demos/
+
 # Internal documentation (business, deployment, admin-only)
 internal/
 
