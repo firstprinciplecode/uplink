@@ -10,6 +10,7 @@ import { meRouter } from "./routes/me";
 import { signupRouter } from "./routes/signup";
 import { publicRouter } from "./routes/public";
 import { appRouter } from "./routes/apps";
+import { internalHostingRouter } from "./routes/internal-hosting";
 import { authMiddleware } from "./middleware/auth";
 import { apiRateLimiter, internalAllowTlsRateLimiter } from "./middleware/rate-limit";
 import { defaultTimeout } from "./middleware/timeout";
@@ -118,6 +119,9 @@ app.get("/health/ready", async (req, res) => {
 app.use("/internal", ipAllowlist(["127.0.0.1", "::1"])); // Default: localhost only
 // Note: Request signing is optional (enabled if RELAY_INTERNAL_SECRET is set)
 // Caddy may not support custom headers, so we keep query param support for compatibility
+
+// Hosting runtime internal endpoints (builder/runner/router)
+app.use("/internal/hosting", internalHostingRouter);
 
 // Allow on-demand TLS (Caddy ask endpoint)
 // SECURITY: protected by RELAY_INTERNAL_SECRET header + rate-limited + IP allowlist.
