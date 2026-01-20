@@ -10,6 +10,45 @@ import os from "os";
 import fetch from "node-fetch";
 import { spawnSync } from "child_process";
 
+async function resolveSqliteConfig(
+  analysis: AnalysisResult,
+  opts: { yes: boolean }
+): Promise<void> {
+  if (analysis.database?.type !== "sqlite") return;
+
+  const hasPath = !!analysis.database.path;
+  const hasEnvVar = !!analysis.database.envVar;
+  const defaultPath = "/data/app.db";
+  const defaultEnvVar = "DATABASE_PATH";
+
+  if (opts.yes) {
+    if (!hasPath) {
+      analysis.database.path = defaultPath;
+      analysis.database.pathSource = "default";
+    }
+    if (!hasEnvVar && !hasPath) {
+      analysis.database.envVar = defaultEnvVar;
+    } else if (!hasEnvVar && analysis.database.path == defaultPath) {
+      analysis.database.envVar = defaultEnvVar;
+    }
+    analysis.requirements = buildRequirements(analysis);
+    return;
+  }
+
+  if (!hasPath) {
+    const answer = (await promptLine(`SQLite file path inside container (default ${defaultPath}): `)).trim();
+    analysis.database.path = answer || defaultPath;
+    analysis.database.pathSource = "prompt";
+  }
+
+  if (!analysis.database.envVar) {
+    const envAnswer = (await promptLine("SQLite env var name (blank if hard-coded path): ")).trim();
+    if (envAnswer) analysis.database.envVar = envAnswer;
+  }
+
+  analysis.requirements = buildRequirements(analysis);
+}
+
 type App = { id: string; name: string; url: string; createdAt?: string; updatedAt?: string };
 type AppList = { apps: App[]; count: number };
 type ReleaseCreateResponse = {
@@ -61,33 +100,6 @@ function getApiToken(): string | undefined {
 function sha256File(path: string): string {
   const buf = readFileSync(path);
   return createHash("sha256").update(buf).digest("hex");
-}
-
-function readHostConfig(dir: string): { volumes?: Record<string, string>; env?: Record<string, string> } | null {
-  const hostConfigPath = join(dir, "uplink.host.json");
-  if (!existsSync(hostConfigPath)) return null;
-  try {
-    const content = readFileSync(hostConfigPath, "utf8");
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed !== "object") return null;
-    return {
-      volumes: parsed.volumes,
-      env: parsed.env,
-    };
-  } catch (error: any) {
-    throw new Error(`Invalid uplink.host.json: ${error?.message || "parse error"}`);
-  }
-}
-
-async function updateAppConfig(
-  appId: string,
-  config: { volumes?: Record<string, string>; env?: Record<string, string> } | null
-): Promise<void> {
-  if (!config) return;
-  const volumes = config.volumes && Object.keys(config.volumes).length > 0 ? config.volumes : undefined;
-  const env = config.env && Object.keys(config.env).length > 0 ? config.env : undefined;
-  if (!volumes && !env) return;
-  await apiRequest("PUT", `/v1/apps/${appId}/config`, { volumes, env });
 }
 
 async function waitForDeployment(
@@ -202,12 +214,18 @@ hostCommand
   .command("analyze")
   .description("Analyze a project and detect framework, database, and deployment requirements")
   .option("--path <path>", "Project folder (default: .)", ".")
+  .option("--yes", "Skip prompts and apply defaults", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
       const dir = resolve(process.cwd(), String(opts.path));
-      const hostConfig = readHostConfig(dir);
       const analysis = analyzeProject(dir);
+
+      if (!opts.json) {
+        await resolveSqliteConfig(analysis, { yes: Boolean(opts.yes) });
+      } else if (opts.yes) {
+        await resolveSqliteConfig(analysis, { yes: true });
+      }
 
       if (opts.json) {
         printJson(analysis);
@@ -421,11 +439,9 @@ hostCommand
   .action(async (opts) => {
     try {
       const dir = resolve(process.cwd(), String(opts.path));
-      const hostConfig = readHostConfig(dir);
       const { tarPath, sha256, sizeBytes } = makeTarball(dir);
 
       const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
-      await updateAppConfig(app.id, hostConfig);
       const rel = (await apiRequest("POST", `/v1/apps/${app.id}/releases`, {
         sha256,
         sizeBytes,
@@ -581,8 +597,6 @@ hostCommand
         if (!opts.json) console.log("\n[3/5] uplink.host.json exists, skipping...");
       }
 
-      const hostConfig = readHostConfig(dir);
-
       // Next.js: check for standalone output
       if (analysis.framework?.name === "nextjs") {
         const nextConfigPath = join(dir, "next.config.ts");
@@ -607,7 +621,6 @@ hostCommand
       // Step 4: Create app
       if (!opts.json) console.log("\n[4/5] Creating app on Uplink...");
       const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
-      await updateAppConfig(app.id, hostConfig);
       if (!opts.json) console.log(`    App: ${app.id}`);
 
       // Step 5: Deploy
