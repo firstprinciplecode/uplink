@@ -12,6 +12,8 @@ const fs = require("fs");
 const binDir = __dirname;
 const projectRoot = path.join(binDir, "../..");
 const cliPath = path.join(projectRoot, "cli/src/index.ts");
+const invokeCwd = process.cwd();
+const invokeBin = __filename;
 
 // Get arguments
 const args = process.argv.slice(2);
@@ -39,7 +41,7 @@ try {
 const child = spawn(tsxPath, [cliPath, ...args], {
   stdio: "inherit",
   cwd: projectRoot,
-  env: process.env,
+  env: { ...process.env, UPLINK_CWD: invokeCwd, UPLINK_BIN: invokeBin },
   shell: false,
 });
 

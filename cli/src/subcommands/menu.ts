@@ -20,6 +20,7 @@ import {
   buildManageAliasesMenu,
   buildManageTokensMenu,
   buildManageTunnelsMenu,
+  buildHostingMenu,
   buildSystemStatusMenu,
   buildUsageMenu,
 } from "./menu/menus";
@@ -239,6 +240,13 @@ export const menuCommand = new Command("menu")
         })
       );
     }
+
+    mainMenu.push(
+      buildHostingMenu({
+        promptLine,
+        restoreRawMode,
+      })
+    );
 
     mainMenu.push(
       buildManageTunnelsMenu({

@@ -5,7 +5,7 @@ import { analyzeProject, AnalysisResult, buildRequirements } from "../utils/anal
 import { generateDockerfile, generateHostConfig } from "../templates";
 import { createHash } from "crypto";
 import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { basename, join, resolve } from "path";
 import { promptLine } from "./menu/io";
 import os from "os";
 import fetch from "node-fetch";
@@ -68,6 +68,52 @@ function getApiToken(): string | undefined {
 function sha256File(path: string): string {
   const buf = readFileSync(path);
   return createHash("sha256").update(buf).digest("hex");
+}
+
+function isInteractive(opts: { json?: boolean }): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY && !opts.json);
+}
+
+async function resolveProjectPath(
+  optsPath: string | undefined,
+  opts: { interactive: boolean }
+): Promise<string> {
+  const cwd = process.cwd();
+  if (optsPath && String(optsPath).trim() !== "") {
+    return resolve(cwd, String(optsPath));
+  }
+  if (!opts.interactive) return resolve(cwd, ".");
+
+  while (true) {
+    const answer = (await promptLine(`Project path (default ${cwd}): `)).trim();
+    const projectPath = resolve(cwd, answer || cwd);
+    const confirm = (await promptLine(`Use "${projectPath}"? (Y/n): `)).trim().toLowerCase();
+    if (confirm === "" || confirm === "y" || confirm === "yes") return projectPath;
+  }
+}
+
+async function resolveAppName(
+  rawName: string | undefined,
+  projectPath: string,
+  opts: { interactive: boolean }
+): Promise<string> {
+  if (rawName && rawName.trim() !== "") return rawName.trim();
+  if (!opts.interactive) throw new Error("Missing required option: --name <name>");
+
+  const defaultName = basename(projectPath);
+  const answer = (await promptLine(`App name (default ${defaultName}): `)).trim();
+  return answer || defaultName;
+}
+
+async function resolveUseDefaults(
+  rawYes: boolean | undefined,
+  opts: { interactive: boolean }
+): Promise<boolean> {
+  if (rawYes === true) return true;
+  if (!opts.interactive) return false;
+
+  const answer = (await promptLine("Use defaults (Y/n): ")).trim().toLowerCase();
+  return answer === "" || answer === "y" || answer === "yes";
 }
 
 async function waitForDeployment(
@@ -268,11 +314,12 @@ function getSqliteMeta(db: AnalysisResult["database"] | null): SqliteMeta {
 hostCommand
   .command("analyze")
   .description("Analyze a project and detect framework, database, and deployment requirements")
-  .option("--path <path>", "Project folder (default: .)", ".")
+  .option("--path <path>", "Project folder (default: .)")
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const dir = resolve(process.cwd(), String(opts.path));
+      const interactive = isInteractive(opts);
+      const dir = await resolveProjectPath(opts.path, { interactive });
       const analysis = analyzeProject(dir);
 
       if (opts.json) {
@@ -338,13 +385,14 @@ hostCommand
 hostCommand
   .command("init")
   .description("Analyze project and generate Dockerfile + uplink.host.json")
-  .option("--path <path>", "Project folder (default: .)", ".")
+  .option("--path <path>", "Project folder (default: .)")
   .option("--port <port>", "Override detected port")
   .option("--yes", "Skip prompts and apply defaults", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const dir = resolve(process.cwd(), String(opts.path));
+      const interactive = isInteractive(opts);
+      const dir = await resolveProjectPath(opts.path, { interactive });
       const analysis = analyzeProject(dir);
 
       // Override port if provided
@@ -484,6 +532,31 @@ hostCommand
   });
 
 hostCommand
+  .command("list")
+  .description("List hosted apps")
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      const result = (await apiRequest("GET", "/v1/apps")) as AppList;
+      if (opts.json) {
+        printJson(result);
+        return;
+      }
+      if (!result.apps || result.apps.length === 0) {
+        console.log("No apps found.");
+        return;
+      }
+      console.log("Hosted apps:");
+      for (const app of result.apps) {
+        console.log(`- ${app.name} (${app.id})`);
+        console.log(`  ${app.url}`);
+      }
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+hostCommand
   .command("deploy")
   .description("Deploy a Dockerfile-based app from a local folder")
   .requiredOption("--name <name>", "App name")
@@ -582,15 +655,18 @@ hostCommand
 hostCommand
   .command("setup")
   .description("Full setup wizard: analyze, init, create, and deploy in one command")
-  .requiredOption("--name <name>", "App name")
-  .option("--path <path>", "Project folder (default: .)", ".")
+  .option("--name <name>", "App name")
+  .option("--path <path>", "Project folder (default: .)")
   .option("--yes", "Skip prompts and apply defaults", false)
   .option("--wait", "Wait for deployment to be running", true)
   .option("--dry-run", "Show plan without executing", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const dir = resolve(process.cwd(), String(opts.path));
+      const interactive = isInteractive(opts);
+      const dir = await resolveProjectPath(opts.path, { interactive });
+      const appName = await resolveAppName(opts.name, dir, { interactive });
+      const useDefaults = await resolveUseDefaults(opts.yes, { interactive });
 
       // Step 1: Analyze
       if (!opts.json) console.log("\n[1/5] Analyzing project...");
@@ -603,7 +679,7 @@ hostCommand
           analysis,
           dockerfile: dockerfile ? { name: dockerfile.name, content: dockerfile.content } : null,
           hostConfig,
-          appName: opts.name,
+          appName,
           dryRun: true,
         });
         return;
@@ -622,7 +698,7 @@ hostCommand
         console.log("\n[Dry run] Would create:");
         if (!analysis.dockerfile.exists) console.log("  - Dockerfile");
         if (!analysis.hostConfig.exists) console.log("  - uplink.host.json");
-        console.log(`  - App: ${opts.name}`);
+        console.log(`  - App: ${appName}`);
         console.log("  - Deploy and wait for running status");
         return;
       }
@@ -646,7 +722,7 @@ hostCommand
         if (!opts.json) console.log("\n[2/5] Dockerfile exists, skipping...");
       }
 
-      await resolveSqliteConfig(analysis, { yes: Boolean(opts.yes) });
+      await resolveSqliteConfig(analysis, { yes: useDefaults });
 
       // Step 3: Generate host config
       if (!analysis.hostConfig.exists) {
@@ -682,7 +758,7 @@ hostCommand
 
       // Step 4: Create app
       if (!opts.json) console.log("\n[4/5] Creating app on Uplink...");
-      const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
+      const app = (await apiRequest("POST", "/v1/apps", { name: appName })) as App;
       if (!opts.json) console.log(`    App: ${app.id}`);
       await updateAppConfig(app.id, dir, { json: Boolean(opts.json) });
 
