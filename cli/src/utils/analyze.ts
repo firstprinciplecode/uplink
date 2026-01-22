@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, isAbsolute, dirname } from "path";
 
 export interface FrameworkInfo {
   name: string;
@@ -9,6 +9,9 @@ export interface FrameworkInfo {
 export interface DatabaseInfo {
   type: "sqlite" | "postgres" | "mysql" | "mongodb" | "prisma" | "unknown";
   file?: string;
+  path?: string;
+  envVar?: string;
+  pathSource?: "literal" | "env" | "cwd" | "unknown" | "prompt" | "default";
   reason: string;
 }
 
@@ -73,6 +76,52 @@ function findFiles(dir: string, predicate: (name: string) => boolean, maxDepth =
   }
   walk(dir, 0);
   return results;
+}
+
+function detectSqlitePath(
+  dir: string
+): { path?: string; envVar?: string; pathSource?: DatabaseInfo["pathSource"] } {
+  const sourceFiles = findFiles(dir, (name) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name), 3);
+
+  for (const filePath of sourceFiles) {
+    let content = "";
+    try {
+      content = readFileSync(filePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const envFallbackMatch = content.match(
+      /const\s+\w+\s*=\s*process\.env\.([A-Z0-9_]+)\s*\|\|\s*path\.join\(\s*process\.cwd\(\)\s*,\s*["'`]([^"'`]+)["'`]\s*\)/m
+    );
+    if (envFallbackMatch) {
+      return { envVar: envFallbackMatch[1], path: envFallbackMatch[2], pathSource: "env" };
+    }
+
+    const envDirectMatch = content.match(/new\s+Database\(\s*process\.env\.([A-Z0-9_]+)\s*\)/m);
+    if (envDirectMatch) {
+      return { envVar: envDirectMatch[1], pathSource: "env" };
+    }
+
+    const cwdAssignMatch = content.match(
+      /const\s+(\w+)\s*=\s*path\.join\(\s*process\.cwd\(\)\s*,\s*["'`]([^"'`]+)["'`]\s*\)/m
+    );
+    if (cwdAssignMatch) {
+      const varName = cwdAssignMatch[1];
+      const fileName = cwdAssignMatch[2];
+      const dbVarUse = new RegExp(`new\\s+Database\\(\\s*${varName}\\s*\\)`).test(content);
+      if (dbVarUse) {
+        return { path: fileName, pathSource: "cwd" };
+      }
+    }
+
+    const literalMatch = content.match(/new\s+Database\(\s*["'`]([^"'`]+)["'`]\s*\)/m);
+    if (literalMatch) {
+      return { path: literalMatch[1], pathSource: "literal" };
+    }
+  }
+
+  return { pathSource: "unknown" };
 }
 
 export function detectFramework(dir: string): FrameworkInfo | null {
@@ -151,12 +200,16 @@ export function detectDatabase(dir: string): DatabaseInfo | null {
 
     // SQLite
     if (deps["better-sqlite3"] || deps["sqlite3"] || deps["sql.js"]) {
+      const sqlitePath = detectSqlitePath(dir);
       // Look for .db files
       const dbFiles = findFiles(dir, (name) => name.endsWith(".db") || name.endsWith(".sqlite"));
       const dbFile = dbFiles.length > 0 ? basename(dbFiles[0]) : undefined;
       return {
         type: "sqlite",
         file: dbFile,
+        path: sqlitePath.path,
+        envVar: sqlitePath.envVar,
+        pathSource: sqlitePath.pathSource,
         reason: `SQLite dependency detected${dbFile ? ` (${dbFile})` : ""}`,
       };
     }
@@ -295,46 +348,7 @@ export function analyzeProject(dir: string): AnalysisResult {
     config: hostConfigData,
   };
 
-  // Build requirements
-  const requirements: Requirement[] = [];
-
-  if (!dockerfile.exists) {
-    requirements.push({
-      type: "dockerfile",
-      reason: "No Dockerfile found — required for deployment",
-    });
-  }
-
-  if (!hostConfig.exists) {
-    requirements.push({
-      type: "host_config",
-      reason: "No uplink.host.json found — will be generated",
-    });
-  }
-
-  if (database?.type === "sqlite") {
-    requirements.push({
-      type: "persistent_volume",
-      reason: `SQLite database detected${database.file ? ` (${database.file})` : ""}`,
-      path: "/data",
-    });
-    requirements.push({
-      type: "env_var",
-      name: "DATABASE_PATH",
-      suggested: "/data/app.db",
-      reason: "Database path for persistent storage",
-    });
-  }
-
-  for (const s of storage) {
-    requirements.push({
-      type: "persistent_volume",
-      reason: s.reason,
-      path: `/data/${s.path}`,
-    });
-  }
-
-  return {
+  const analysis: AnalysisResult = {
     framework,
     packageManager,
     database,
@@ -342,6 +356,72 @@ export function analyzeProject(dir: string): AnalysisResult {
     port,
     dockerfile,
     hostConfig,
-    requirements,
+    requirements: [],
   };
+
+  analysis.requirements = buildRequirements(analysis);
+  return analysis;
+}
+
+export function buildRequirements(analysis: AnalysisResult): Requirement[] {
+  const requirements: Requirement[] = [];
+
+  if (!analysis.dockerfile.exists) {
+    requirements.push({
+      type: "dockerfile",
+      reason: "No Dockerfile found — required for deployment",
+    });
+  }
+
+  if (!analysis.hostConfig.exists) {
+    requirements.push({
+      type: "host_config",
+      reason: "No uplink.host.json found — will be generated",
+    });
+  }
+
+  if (analysis.database?.type === "sqlite") {
+    const dbPath = analysis.database.path;
+    const envVar = analysis.database.envVar;
+    if (dbPath) {
+      const volumePath = isAbsolute(dbPath) ? dirname(dbPath) : "/app";
+      requirements.push({
+        type: "persistent_volume",
+        reason: `SQLite database path detected (${dbPath})`,
+        path: volumePath,
+      });
+    } else {
+      requirements.push({
+        type: "persistent_volume",
+        reason: `SQLite database detected${analysis.database.file ? ` (${analysis.database.file})` : ""}`,
+        path: "/data",
+      });
+    }
+
+    if (envVar) {
+      requirements.push({
+        type: "env_var",
+        name: envVar,
+        suggested: dbPath || "/data/app.db",
+        reason: "Database path env var detected",
+      });
+    } else if (!dbPath) {
+      requirements.push({
+        type: "env_var",
+        name: "DATABASE_PATH",
+        suggested: "/data/app.db",
+        reason: "Database path for persistent storage",
+      });
+    }
+  }
+
+  for (const s of analysis.storage) {
+    requirements.push({
+      type: "persistent_volume",
+      reason: s.reason,
+      path: `/data/${s.path}`,
+    });
+  }
+
+  return requirements;
 }
