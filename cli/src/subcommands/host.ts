@@ -157,6 +157,35 @@ function makeTarball(sourceDir: string): { tarPath: string; sizeBytes: number; s
   return { tarPath: tmp, sizeBytes: st.size, sha256 };
 }
 
+function readHostConfig(
+  dir: string
+): { volumes?: Record<string, string>; env?: Record<string, string> } | null {
+  const hostConfigPath = join(dir, "uplink.host.json");
+  if (!existsSync(hostConfigPath)) return null;
+  try {
+    const content = readFileSync(hostConfigPath, "utf8");
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      volumes: parsed.volumes,
+      env: parsed.env,
+    };
+  } catch (error: any) {
+    throw new Error(`Invalid uplink.host.json: ${error?.message || "parse error"}`);
+  }
+}
+
+async function updateAppConfig(
+  appId: string,
+  config: { volumes?: Record<string, string>; env?: Record<string, string> } | null
+): Promise<void> {
+  if (!config) return;
+  const volumes = config.volumes && Object.keys(config.volumes).length > 0 ? config.volumes : undefined;
+  const env = config.env && Object.keys(config.env).length > 0 ? config.env : undefined;
+  if (!volumes && !env) return;
+  await apiRequest("PUT", `/v1/apps/${appId}/config`, { volumes, env });
+}
+
 async function uploadArtifact(
   uploadUrl: string,
   tarPath: string,
@@ -439,9 +468,11 @@ hostCommand
   .action(async (opts) => {
     try {
       const dir = resolve(process.cwd(), String(opts.path));
+      const hostConfig = readHostConfig(dir);
       const { tarPath, sha256, sizeBytes } = makeTarball(dir);
 
       const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
+      await updateAppConfig(app.id, hostConfig);
       const rel = (await apiRequest("POST", `/v1/apps/${app.id}/releases`, {
         sha256,
         sizeBytes,
@@ -622,6 +653,9 @@ hostCommand
       if (!opts.json) console.log("\n[4/5] Creating app on Uplink...");
       const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
       if (!opts.json) console.log(`    App: ${app.id}`);
+
+      const hostConfig = readHostConfig(dir);
+      await updateAppConfig(app.id, hostConfig);
 
       // Step 5: Deploy
       if (!opts.json) console.log("\n[5/5] Deploying...");
