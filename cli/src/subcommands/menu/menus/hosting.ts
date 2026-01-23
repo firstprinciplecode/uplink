@@ -89,6 +89,45 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         },
       },
       {
+        label: "Delete Hosted App",
+        action: async () => {
+          const output = runCliCapture(["host", "list"]);
+          if (!output || output.includes("No apps found")) {
+            restoreRawMode();
+            return "No apps found.";
+          }
+          const lines = output.split("\n");
+          const apps = lines
+            .map((line) => {
+              const match = line.match(/^- (.+) \((app_[^)]+)\)$/);
+              if (!match) return null;
+              return { name: match[1], id: match[2] };
+            })
+            .filter((entry): entry is { name: string; id: string } => Boolean(entry));
+          if (apps.length === 0) {
+            restoreRawMode();
+            return "No apps found.";
+          }
+          const menuLines = apps.map((app, idx) => `${idx + 1}) ${app.name} (${app.id})`);
+          const choice = (await promptLine(`Select app to delete:\n${menuLines.join("\n")}\n> `))
+            .trim()
+            .toLowerCase();
+          if (!choice) {
+            restoreRawMode();
+            return "No selection made.";
+          }
+          const index = Number(choice);
+          const selected = Number.isFinite(index) ? apps[index - 1] : apps.find((app) => app.id === choice);
+          if (!selected) {
+            restoreRawMode();
+            return "Invalid selection.";
+          }
+          runCli(["host", "delete", "--id", selected.id]);
+          restoreRawMode();
+          return `Deleted ${selected.name} (${selected.id})`;
+        },
+      },
+      {
         label: "Help",
         action: async () => {
           return [

@@ -57,6 +57,49 @@ echo "$TOKEN" | uplink --token-stdin tunnel stats --id tun_xxx --json
 echo "$TOKEN" | uplink --token-stdin tunnel stop --id tun_xxx --json
 ```
 
+## Hosting flows (non-interactive)
+Use `--json` for machine-mode output. For interactive prompts, pass `--yes`.
+
+```bash
+# Full setup (analyze + init + create + deploy)
+echo "$TOKEN" | uplink --token-stdin host setup \
+  --path /path/to/app \
+  --name myapp \
+  --env-file /path/to/.env \
+  --wait-timeout 900 \
+  --wait-interval 5 \
+  --yes \
+  --json
+
+# Deploy only (Dockerfile-based app)
+echo "$TOKEN" | uplink --token-stdin host deploy \
+  --path /path/to/app \
+  --name myapp \
+  --env-file /path/to/.env \
+  --wait \
+  --wait-timeout 900 \
+  --wait-interval 5 \
+  --json
+
+# Analyze project
+echo "$TOKEN" | uplink --token-stdin host analyze --path /path/to/app --json
+
+# List hosted apps
+echo "$TOKEN" | uplink --token-stdin host list --json
+
+# Status + logs
+echo "$TOKEN" | uplink --token-stdin host status --id app_xxx --json
+echo "$TOKEN" | uplink --token-stdin host logs --id app_xxx --json
+
+# Delete app
+echo "$TOKEN" | uplink --token-stdin host delete --id app_xxx --yes --json
+```
+
+Notes:
+- `host logs` returns `NOT_READY` until a deployment is running.
+- If builds stay `queued`, check builder/runner services and build logs on the server.
+- For Prisma apps, ensure the Dockerfile copies `prisma/schema.prisma` before `npm ci` and runs `npx prisma generate` before `npm run build`.
+
 ### JSON shapes (representative)
 - Create: `{ "tunnel": { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected?, createdAt }, "alias": "myapp"|null, "aliasError": "..."|null }`
 - List: `{ "tunnels": [ { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected, createdAt } ], "count": n }`

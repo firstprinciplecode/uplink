@@ -3,7 +3,9 @@ import fetch, { AbortError } from "node-fetch";
 // Configuration
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 const MAX_RETRIES = 3;
+const MAX_RETRIES_RATE_LIMIT = 5; // More retries for rate limits
 const INITIAL_RETRY_DELAY = 1000; // 1 second
+const INITIAL_RATE_LIMIT_DELAY = 5000; // 5 seconds for rate limit errors
 
 function getApiBase(): string {
   return process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot";
@@ -91,6 +93,25 @@ export async function apiRequest(
       const json = await response.json().catch(() => ({}));
       
       if (!response.ok) {
+        // Special handling for rate limit errors (429)
+        if (response.status === 429) {
+          const maxRetries = MAX_RETRIES_RATE_LIMIT;
+          if (attempt < maxRetries - 1) {
+            // Check for Retry-After header
+            const retryAfter = response.headers.get('Retry-After');
+            let delay: number;
+            if (retryAfter) {
+              const retryAfterSeconds = parseInt(retryAfter, 10);
+              delay = isNaN(retryAfterSeconds) ? INITIAL_RATE_LIMIT_DELAY * Math.pow(2, attempt) : retryAfterSeconds * 1000;
+            } else {
+              // Exponential backoff starting at 5 seconds for rate limits
+              delay = INITIAL_RATE_LIMIT_DELAY * Math.pow(2, attempt);
+            }
+            await sleep(delay);
+            continue;
+          }
+        }
+        
         // Check if this error is retryable
         if (isRetryable(null, response.status) && attempt < MAX_RETRIES - 1) {
           const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt);
@@ -104,7 +125,6 @@ export async function apiRequest(
     } catch (error) {
       clearTimeout(timeoutId);
       lastError = error instanceof Error ? error : new Error(String(error));
-      
       // Check if we should retry
       if (isRetryable(error) && attempt < MAX_RETRIES - 1) {
         const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt);

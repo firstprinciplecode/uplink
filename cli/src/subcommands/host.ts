@@ -124,11 +124,46 @@ async function waitForDeployment(
 ): Promise<AppStatus> {
   const start = Date.now();
   let lastSummary = "";
+  let pollCount = 0;
+  let intervalMs = opts.intervalMs;
+  let sameSummaryCount = 0;
   while (Date.now() - start < opts.timeoutMs) {
-    const status = (await apiRequest("GET", `/v1/apps/${appId}/status`)) as AppStatus;
+    pollCount += 1;
+    let status: AppStatus;
+    try {
+      status = (await apiRequest("GET", `/v1/apps/${appId}/status`)) as AppStatus;
+    } catch (error) {
+      const errorCode = (() => {
+        if (!(error instanceof Error)) return null;
+        try {
+          const parsed = JSON.parse(error.message) as { error?: { code?: string }; code?: string };
+          return parsed?.error?.code || parsed?.code || null;
+        } catch {
+          return null;
+        }
+      })();
+      if (errorCode === "RATE_LIMIT_EXCEEDED") {
+        const nextIntervalMs = Math.min(Math.max(intervalMs * 2, 5000), 30000);
+        intervalMs = nextIntervalMs;
+        await new Promise((r) => setTimeout(r, intervalMs));
+        continue;
+      }
+      throw error;
+    }
     const buildStatus = status.activeRelease?.buildStatus || "unknown";
     const deployStatus = status.activeDeployment?.status || "unknown";
     const summary = `build=${buildStatus} deploy=${deployStatus}`;
+    if (summary === lastSummary) {
+      sameSummaryCount += 1;
+    } else {
+      sameSummaryCount = 0;
+    }
+    if (summary === lastSummary && summary.includes("queued") && sameSummaryCount >= 5) {
+      const nextIntervalMs = Math.min(Math.max(intervalMs, 5000), 15000);
+      if (nextIntervalMs !== intervalMs) {
+        intervalMs = nextIntervalMs;
+      }
+    }
 
     if (!opts.json && summary !== lastSummary) {
       console.log(`Status: ${summary}`);
@@ -142,7 +177,7 @@ async function waitForDeployment(
       return status;
     }
 
-    await new Promise((r) => setTimeout(r, opts.intervalMs));
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error("Timed out waiting for deployment");
 }
@@ -752,6 +787,8 @@ hostCommand
   .option("--env-file <path>", "Load environment variables from a .env file")
   .option("--yes", "Skip prompts and apply defaults", false)
   .option("--wait", "Wait for deployment to be running", true)
+  .option("--wait-timeout <seconds>", "Wait timeout in seconds (default: 300)", "300")
+  .option("--wait-interval <seconds>", "Wait poll interval in seconds (default: 2)", "2")
   .option("--dry-run", "Show plan without executing", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
@@ -886,15 +923,16 @@ hostCommand
       };
 
       if (opts.wait) {
-        const timeoutMs = 300 * 1000;
-        const intervalMs = 2 * 1000;
+        const timeoutMs = Math.max(5, Number(opts.waitTimeout || 300)) * 1000;
+        const intervalMs = Math.max(1, Number(opts.waitInterval || 2)) * 1000;
         const status = await waitForDeployment(app.id, rel.release.id, dep.id, {
           timeoutMs,
           intervalMs,
           json: Boolean(opts.json),
         });
         out.status = status;
-      }      if (opts.json) {
+      }
+      if (opts.json) {
         printJson(out);
       } else {
         console.log(`\nLive at ${app.url}`);
