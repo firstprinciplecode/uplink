@@ -557,6 +557,32 @@ hostCommand
   });
 
 hostCommand
+  .command("delete")
+  .description("Delete a hosted app")
+  .requiredOption("--id <id>", "App id (app_...)")
+  .option("--yes", "Skip confirmation", false)
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      const interactive = isInteractive(opts);
+      if (!opts.yes && interactive) {
+        const answer = (await promptLine(`Delete app ${opts.id}? This cannot be undone. (y/N): `))
+          .trim()
+          .toLowerCase();
+        if (answer !== "y" && answer !== "yes") {
+          if (!opts.json) console.log("Cancelled.");
+          return;
+        }
+      }
+      const result = await apiRequest("DELETE", `/v1/apps/${opts.id}`);
+      if (opts.json) printJson(result);
+      else console.log(`Deleted app ${opts.id}`);
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+hostCommand
   .command("deploy")
   .description("Deploy a Dockerfile-based app from a local folder")
   .requiredOption("--name <name>", "App name")

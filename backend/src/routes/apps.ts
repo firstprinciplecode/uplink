@@ -171,6 +171,40 @@ appRouter.get("/:id", async (req: any, res) => {
   }
 });
 
+// Delete app (and related releases/deployments)
+appRouter.delete("/:id", async (req: any, res) => {
+  const ownerUserId = requireUserId(req);
+  const id = String(req.params.id || "");
+  const client = await pool.connect();
+  try {
+    const existing = await client.query(
+      "SELECT id FROM apps WHERE id = $1 AND owner_user_id = $2 LIMIT 1",
+      [id, ownerUserId]
+    );
+    if (existing.rowCount === 0) {
+      return res.status(404).json(makeError("NOT_FOUND", "App not found"));
+    }
+
+    await client.query("BEGIN");
+    await client.query("DELETE FROM app_deployments WHERE app_id = $1", [id]);
+    await client.query("DELETE FROM app_releases WHERE app_id = $1", [id]);
+    await client.query("DELETE FROM apps WHERE id = $1 AND owner_user_id = $2", [id, ownerUserId]);
+    await client.query("COMMIT");
+
+    return res.json({ id });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    logger.error({ event: "apps.delete.failed", error });
+    return res.status(500).json(makeError("INTERNAL_ERROR", "Failed to delete app"));
+  } finally {
+    client.release();
+  }
+});
+
 // Create release (returns uploadUrl; actual upload is a separate endpoint in v1)
 appRouter.post("/:id/releases", bodySizeLimits.small, validateBody(createReleaseSchema), async (req: any, res) => {
   const ownerUserId = requireUserId(req);

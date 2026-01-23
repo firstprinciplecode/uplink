@@ -97,6 +97,7 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             "  uplink host init --path <path> [--yes]",
             "  uplink host setup --name <app> --path <path> [--yes]",
             "  uplink host list",
+            "  uplink host delete --id <app_id>",
             "  uplink host create --name <app>",
             "  uplink host deploy --name <app> --path <path> --wait",
             "",
