@@ -95,11 +95,11 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             "Hosting commands:",
             "  uplink host analyze --path <path>",
             "  uplink host init --path <path> [--yes]",
-            "  uplink host setup --name <app> --path <path> [--yes]",
+            "  uplink host setup --name <app> --path <path> [--yes] [--env-file <path>]",
             "  uplink host list",
             "  uplink host delete --id <app_id>",
             "  uplink host create --name <app>",
-            "  uplink host deploy --name <app> --path <path> --wait",
+            "  uplink host deploy --name <app> --path <path> --wait [--env-file <path>]",
             "",
             "Tip: Setup runs analyze → init → create → deploy.",
           ].join("\n");

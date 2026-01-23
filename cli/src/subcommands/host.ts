@@ -249,10 +249,22 @@ function readHostConfig(dir: string): HostConfigFile | null {
   }
 }
 
-async function updateAppConfig(appId: string, dir: string, opts: { json: boolean }): Promise<void> {
+function mergeEnv(
+  base: Record<string, string> | undefined,
+  extra: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!base && !extra) return undefined;
+  return { ...(base || {}), ...(extra || {}) };
+}
+
+async function updateAppConfig(
+  appId: string,
+  dir: string,
+  opts: { json: boolean; extraEnv?: Record<string, string> }
+): Promise<void> {
   const config = readHostConfig(dir);
-  if (!config) return;
-  const { volumes, env } = config;
+  const volumes = config?.volumes;
+  const env = mergeEnv(config?.env, opts.extraEnv);
   if (!volumes && !env) return;
 
   await apiRequest("PUT", `/v1/apps/${appId}/config`, { volumes, env });
@@ -262,6 +274,50 @@ async function updateAppConfig(appId: string, dir: string, opts: { json: boolean
     if (env) parts.push("env");
     console.log(`  Applied app config: ${parts.join(", ")}`);
   }
+}
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const raw = readFileSync(filePath, "utf8");
+  const out: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const cleaned = trimmed.startsWith("export ") ? trimmed.slice(7) : trimmed;
+    const idx = cleaned.indexOf("=");
+    if (idx === -1) continue;
+    const key = cleaned.slice(0, idx).trim();
+    if (!key) continue;
+    let value = cleaned.slice(idx + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+async function resolveEnvFile(
+  envFile: string | undefined,
+  dir: string,
+  opts: { interactive: boolean }
+): Promise<string | null> {
+  if (envFile && envFile.trim() !== "") {
+    const resolved = resolve(dir, envFile);
+    if (!existsSync(resolved)) {
+      throw new Error(`Env file not found: ${resolved}`);
+    }
+    return resolved;
+  }
+
+  const defaultPath = join(dir, ".env");
+  if (!opts.interactive || !existsSync(defaultPath)) return null;
+
+  const answer = (await promptLine("Load .env into app config? (y/N): ")).trim().toLowerCase();
+  if (answer !== "y" && answer !== "yes") return null;
+  return defaultPath;
 }
 
 export const hostCommand = new Command("host").description("Host persistent web services (Dockerfile required)");
@@ -360,6 +416,10 @@ hostCommand
 
         // Host config
         console.log(`Host config:     ${analysis.hostConfig.exists ? "exists" : "missing"}`);
+
+        // Env file
+        const envPath = join(dir, ".env");
+        console.log(`Env file:        ${existsSync(envPath) ? ".env (use --env-file to apply)" : "not found"}`);
 
         // Storage
         if (analysis.storage.length > 0) {
@@ -587,6 +647,7 @@ hostCommand
   .description("Deploy a Dockerfile-based app from a local folder")
   .requiredOption("--name <name>", "App name")
   .option("--path <path>", "Project folder (default: .)", ".")
+  .option("--env-file <path>", "Load environment variables from a .env file")
   .option("--wait", "Wait for deployment to be running", false)
   .option("--wait-timeout <seconds>", "Wait timeout in seconds (default: 300)", "300")
   .option("--wait-interval <seconds>", "Wait poll interval in seconds (default: 2)", "2")
@@ -594,10 +655,15 @@ hostCommand
   .action(async (opts) => {
     try {
       const dir = resolve(process.cwd(), String(opts.path));
+      const envFilePath = await resolveEnvFile(opts.envFile, dir, { interactive: isInteractive(opts) });
+      const extraEnv = envFilePath ? parseEnvFile(envFilePath) : undefined;
       const { tarPath, sha256, sizeBytes } = makeTarball(dir);
 
       const app = (await apiRequest("POST", "/v1/apps", { name: opts.name })) as App;
-      await updateAppConfig(app.id, dir, { json: Boolean(opts.json) });
+      await updateAppConfig(app.id, dir, { json: Boolean(opts.json), extraEnv });
+      if (envFilePath && !opts.json) {
+        console.log(`  Applied env from ${envFilePath} (${Object.keys(extraEnv || {}).length} vars)`);
+      }
       const rel = (await apiRequest("POST", `/v1/apps/${app.id}/releases`, {
         sha256,
         sizeBytes,
@@ -683,6 +749,7 @@ hostCommand
   .description("Full setup wizard: analyze, init, create, and deploy in one command")
   .option("--name <name>", "App name")
   .option("--path <path>", "Project folder (default: .)")
+  .option("--env-file <path>", "Load environment variables from a .env file")
   .option("--yes", "Skip prompts and apply defaults", false)
   .option("--wait", "Wait for deployment to be running", true)
   .option("--dry-run", "Show plan without executing", false)
@@ -693,6 +760,8 @@ hostCommand
       const dir = await resolveProjectPath(opts.path, { interactive });
       const appName = await resolveAppName(opts.name, dir, { interactive });
       const useDefaults = await resolveUseDefaults(opts.yes, { interactive });
+      const envFilePath = await resolveEnvFile(opts.envFile, dir, { interactive });
+      const extraEnv = envFilePath ? parseEnvFile(envFilePath) : undefined;
 
       // Step 1: Analyze
       if (!opts.json) console.log("\n[1/5] Analyzing project...");
@@ -786,7 +855,10 @@ hostCommand
       if (!opts.json) console.log("\n[4/5] Creating app on Uplink...");
       const app = (await apiRequest("POST", "/v1/apps", { name: appName })) as App;
       if (!opts.json) console.log(`    App: ${app.id}`);
-      await updateAppConfig(app.id, dir, { json: Boolean(opts.json) });
+      await updateAppConfig(app.id, dir, { json: Boolean(opts.json), extraEnv });
+      if (envFilePath && !opts.json) {
+        console.log(`    Applied env from ${envFilePath} (${Object.keys(extraEnv || {}).length} vars)`);
+      }
 
       // Step 5: Deploy
       if (!opts.json) console.log("\n[5/5] Deploying...");
