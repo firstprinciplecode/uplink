@@ -157,21 +157,26 @@ Response:
 - Permanent URLs (aliases): `https://<alias>.uplink.spot`
 
 ## Server Deployment (for self-hosted)
+Control plane + hosting runtime live in the private repo `uplink-hosting-runtime`.
 
 ### Deploy code changes
 ```bash
 # On server (via SSH)
-cd /opt/agentcloud
-git pull origin master
+cd /opt/uplink-hosting-runtime
+git pull origin main
+systemctl restart backend-api
 systemctl restart tunnel-relay
-systemctl restart backend-api  # if backend changed
+systemctl restart uplink-builder uplink-runner uplink-router  # if hosting runtime changed
 ```
 
 ### Services
 | Service | Command | Description |
 |---------|---------|-------------|
-| `tunnel-relay` | `systemctl status tunnel-relay` | WebSocket relay for tunnels |
 | `backend-api` | `systemctl status backend-api` | REST API server |
+| `tunnel-relay` | `systemctl status tunnel-relay` | WebSocket relay for tunnels |
+| `uplink-builder` | `systemctl status uplink-builder` | Builds Docker images |
+| `uplink-runner` | `systemctl status uplink-runner` | Runs containers |
+| `uplink-router` | `systemctl status uplink-router` | Routes host domains |
 
 ### Relay health check
 The relay exposes internal endpoints (protected by `RELAY_INTERNAL_SECRET`):

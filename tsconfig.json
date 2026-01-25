@@ -7,10 +7,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node", "express"],
-    "typeRoots": ["./node_modules/@types", "./backend/src/types"]
+    "typeRoots": ["./node_modules/@types"]
   },
   "include": [
-    "backend/src/**/*",
     "cli/src/**/*",
     "scripts/**/*"
   ]
