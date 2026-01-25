@@ -99,6 +99,7 @@ Notes:
 - `host logs` returns `NOT_READY` until a deployment is running.
 - If builds stay `queued`, check builder/runner services and build logs on the server.
 - For Prisma apps, ensure the Dockerfile copies `prisma/schema.prisma` before `npm ci` and runs `npx prisma generate` before `npm run build`.
+- Use a `.uplinkignore` file to keep tarballs small. Typical entries include `node_modules`, `.next`, `dist`, `build`, `coverage`, `.turbo`, `.cache`, `.vercel`, `*.log`, and any local SQLite `.db` files.
 
 ### JSON shapes (representative)
 - Create: `{ "tunnel": { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected?, createdAt }, "alias": "myapp"|null, "aliasError": "..."|null }`

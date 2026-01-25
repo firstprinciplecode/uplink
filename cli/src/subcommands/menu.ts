@@ -11,6 +11,7 @@ import {
   colorGreen,
   colorMagenta,
   colorRed,
+  colorWhite,
   colorYellow,
 } from "./menu/colors";
 import { DEFAULT_MENU_MESSAGE, type MenuChoice } from "./menu/types";
@@ -27,7 +28,7 @@ import {
 import { health, ports, smoke, tokenConfig, tunnelClients, tty } from "./menu/effects";
 
 // ASCII banner with color styling
-const ASCII_UPLINK = colorCyan([
+const ASCII_UPLINK = colorWhite([
   "██╗   ██╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗",
   "██║   ██║██╔══██╗██║     ██║████╗  ██║██║ ██╔╝",
   "██║   ██║██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ",
@@ -52,6 +53,7 @@ export const menuCommand = new Command("menu")
     // Determine role (admin or user) via /v1/me; check if auth failed
     let isAdmin = false;
     let authFailed = false;
+    const meStart = Date.now();
     try {
       const me = await apiRequest("GET", "/v1/me");
       isAdmin = me?.role === "admin";
@@ -65,11 +67,12 @@ export const menuCommand = new Command("menu")
         errorMsg.includes("Missing AGENTCLOUD_TOKEN");
       isAdmin = false;
     }
+    const meDurationMs = Date.now() - meStart;
 
     // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
     
-    // If authentication failed, show ONLY "Get Started" and "Exit"
+    // If authentication failed, show ONLY "Get Started", "About", and "Exit"
     if (authFailed) {
       mainMenu.push({
         label: "🚀 Get Started (Create Account)",
@@ -165,7 +168,16 @@ export const menuCommand = new Command("menu")
                     );
                   }
                 } catch (err: any) {
-                  console.log(colorYellow(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
+                  if (err?.message?.includes("UNSAFE_SHELL_CONFIG_PERMISSIONS")) {
+                    console.log(
+                      colorYellow(
+                        `\n! Could not write to ~/.${shellName}rc: file is group/world writable. Fix permissions first.`
+                      )
+                    );
+                    console.log(colorDim(`  chmod 600 ~/.${shellName}rc`));
+                  } else {
+                    console.log(colorYellow(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
+                  }
                   console.log(`\n  Please add manually:`);
                   console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`));
                 }
@@ -220,6 +232,21 @@ export const menuCommand = new Command("menu")
       });
       
       mainMenu.push({
+        label: "About",
+        action: async () => {
+          return [
+            "Uplink CLI",
+            "Open source CLI for sharing localhost and hosting apps.",
+            "Interactive menu + agent-friendly commands for automation.",
+            "",
+            "Website: https://uplink.spot",
+            "GitHub: https://github.com/firstprinciplecode/uplink",
+            "Issues: https://github.com/firstprinciplecode/uplink/issues",
+          ].join("\n");
+        },
+      });
+
+      mainMenu.push({
         label: "Exit",
         action: async () => {
           return "Goodbye!";
@@ -227,6 +254,71 @@ export const menuCommand = new Command("menu")
       });
     } else {
       // Only show other menu items if authentication succeeded
+
+    const shareMenu = buildManageTunnelsMenu({
+      apiRequest,
+      promptLine,
+      restoreRawMode,
+      truncate,
+      formatBytes,
+      inlineSelect,
+      scanCommonPorts: ports.scanCommonPorts,
+      findTunnelClients: tunnelClients.findTunnelClients,
+      createAndStartTunnel: (port: number) => tunnelClients.createAndStartTunnel(apiRequest, port),
+      killTunnelClient: tunnelClients.killTunnelClient,
+      killAllTunnelClients: tunnelClients.killAllTunnelClients,
+      colorDim,
+      colorRed,
+    });
+
+    const aliasesMenu = buildManageAliasesMenu({
+      apiRequest,
+      promptLine,
+      restoreRawMode,
+      inlineSelect,
+      findTunnelClients: tunnelClients.findTunnelClients,
+      truncate,
+    });
+
+    shareMenu.subMenu = shareMenu.subMenu || [];
+    if (aliasesMenu.subMenu) {
+      shareMenu.subMenu.push({
+        label: "Aliases",
+        subMenu: aliasesMenu.subMenu,
+      });
+    }
+    if (isAdmin) {
+      shareMenu.subMenu.push({
+        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
+        action: async () => {
+          const clients = tunnelClients.findTunnelClients();
+          if (clients.length === 0) {
+            return "No running tunnel clients found.";
+          }
+          const killed = tunnelClients.killAllTunnelClients(clients);
+          return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
+        },
+      });
+    }
+
+    mainMenu.push(shareMenu);
+
+    mainMenu.push(
+      buildHostingMenu({
+        promptLine,
+        restoreRawMode,
+      })
+    );
+
+    // Admin-only: Usage section
+    if (isAdmin) {
+      mainMenu.push(
+        buildUsageMenu({
+          apiRequest,
+          truncate,
+        })
+      );
+    }
 
     if (isAdmin) {
       mainMenu.push(
@@ -241,53 +333,6 @@ export const menuCommand = new Command("menu")
       );
     }
 
-    mainMenu.push(
-      buildHostingMenu({
-        promptLine,
-        restoreRawMode,
-      })
-    );
-
-    mainMenu.push(
-      buildManageTunnelsMenu({
-        apiRequest,
-        promptLine,
-        restoreRawMode,
-        truncate,
-        formatBytes,
-        inlineSelect,
-          scanCommonPorts: ports.scanCommonPorts,
-          findTunnelClients: tunnelClients.findTunnelClients,
-          createAndStartTunnel: (port: number) => tunnelClients.createAndStartTunnel(apiRequest, port),
-          killTunnelClient: tunnelClients.killTunnelClient,
-          killAllTunnelClients: tunnelClients.killAllTunnelClients,
-        colorDim,
-        colorRed,
-      })
-    );
-
-    // Manage Aliases (Premium feature)
-    mainMenu.push(
-      buildManageAliasesMenu({
-        apiRequest,
-        promptLine,
-        restoreRawMode,
-        inlineSelect,
-        findTunnelClients: tunnelClients.findTunnelClients,
-        truncate,
-      })
-    );
-
-    // Admin-only: Usage section
-    if (isAdmin) {
-      mainMenu.push(
-        buildUsageMenu({
-          apiRequest,
-          truncate,
-        })
-      );
-    }
-
     // Admin-only: Manage Tokens
     if (isAdmin) {
       mainMenu.push(
@@ -298,20 +343,22 @@ export const menuCommand = new Command("menu")
           truncate,
         })
       );
-
-      // Admin-only: Stop ALL Tunnel Clients (kill switch)
-      mainMenu.push({
-        label: "⚠️  Stop ALL Tunnel Clients (kill switch)",
-        action: async () => {
-          const clients = tunnelClients.findTunnelClients();
-          if (clients.length === 0) {
-            return "No running tunnel clients found.";
-          }
-          const killed = tunnelClients.killAllTunnelClients(clients);
-          return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
-        },
-      });
     }
+
+    mainMenu.push({
+      label: "About",
+      action: async () => {
+        return [
+          "Uplink CLI",
+          "Open source CLI for sharing localhost and hosting apps.",
+          "Interactive menu + agent-friendly commands for automation.",
+          "",
+          "Website: https://uplink.spot",
+          "GitHub: https://github.com/firstprinciplecode/uplink",
+          "Issues: https://github.com/firstprinciplecode/uplink/issues",
+        ].join("\n");
+      },
+    });
 
     mainMenu.push({
       label: "Exit",
@@ -431,15 +478,21 @@ export const menuCommand = new Command("menu")
       }
     };
 
+    const NAV_DEBOUNCE_MS = 30;
+    let lastNavAt = 0;
     const onKey = async (key: Buffer) => {
       if (busy) return;
       const str = key.toString();
       const currentMenu = getCurrentMenu(nav);
+      const now = Date.now();
+      const isNavKey = str === "\u001b[A" || str === "\u001b[B" || str === "\u001b[D";
       
       if (str === "\u0003") {
         cleanup();
         process.exit(0);
       } else if (str === "\u001b[D") {
+        if (now - lastNavAt < NAV_DEBOUNCE_MS) return;
+        lastNavAt = now;
         // Left arrow - go back
         if (nav.menuStack.length > 1) {
           nav = popMenu(nav);
@@ -451,15 +504,23 @@ export const menuCommand = new Command("menu")
           render();
         }
       } else if (str === "\u001b[A") {
+        if (now - lastNavAt < NAV_DEBOUNCE_MS) return;
+        lastNavAt = now;
         // Up
+        const prevSelected = nav.selected;
         nav = moveSelection(nav, -1);
-        render();
+        if (nav.selected !== prevSelected) render();
       } else if (str === "\u001b[B") {
+        if (now - lastNavAt < NAV_DEBOUNCE_MS) return;
+        lastNavAt = now;
         // Down
+        const prevSelected = nav.selected;
         nav = moveSelection(nav, 1);
-        render();
+        if (nav.selected !== prevSelected) render();
       } else if (str === "\r") {
         await handleAction();
+      } else if (isNavKey) {
+        lastNavAt = now;
       }
     };
 

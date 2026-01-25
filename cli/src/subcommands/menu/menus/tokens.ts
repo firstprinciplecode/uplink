@@ -1,3 +1,4 @@
+import { isBackInput } from "../io";
 import type { MenuChoice } from "../types";
 
 type Deps = {
@@ -39,11 +40,23 @@ export function buildManageTokensMenu(deps: Deps): MenuChoice {
       {
         label: "Create Token",
         action: async () => {
-          const roleAnswer = await promptLine("Role (admin/user, default user): ");
+          const roleAnswer = await promptLine('Role (admin/user, default user, or "back"): ');
+          if (isBackInput(roleAnswer)) {
+            restoreRawMode();
+            return "";
+          }
           const role = roleAnswer.trim().toLowerCase() === "admin" ? "admin" : "user";
-          const labelAnswer = await promptLine("Label (optional): ");
+          const labelAnswer = await promptLine('Label (optional, or "back"): ');
+          if (isBackInput(labelAnswer)) {
+            restoreRawMode();
+            return "";
+          }
           const label = labelAnswer.trim() || undefined;
-          const expiresAnswer = await promptLine("Expires in days (optional): ");
+          const expiresAnswer = await promptLine('Expires in days (optional, or "back"): ');
+          if (isBackInput(expiresAnswer)) {
+            restoreRawMode();
+            return "";
+          }
           const expiresDays = expiresAnswer.trim() ? Number(expiresAnswer) : undefined;
 
           restoreRawMode();
@@ -70,7 +83,11 @@ export function buildManageTokensMenu(deps: Deps): MenuChoice {
       {
         label: "Revoke Token",
         action: async () => {
-          const tokenIdAnswer = await promptLine("Token ID to revoke: ");
+          const tokenIdAnswer = await promptLine('Token ID to revoke (or "back"): ');
+          if (isBackInput(tokenIdAnswer)) {
+            restoreRawMode();
+            return "";
+          }
           const tokenId = tokenIdAnswer.trim();
           restoreRawMode();
           if (!tokenId) return "No token ID provided.";

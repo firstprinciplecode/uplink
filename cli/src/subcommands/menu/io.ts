@@ -15,6 +15,16 @@ export function promptLine(question: string): Promise<string> {
   });
 }
 
+export function isBackInput(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "back" || normalized === "b";
+}
+
+export async function promptLineWithBack(question: string): Promise<string | null> {
+  const answer = await promptLine(question);
+  return isBackInput(answer) ? null : answer;
+}
+
 export function clearScreen() {
   process.stdout.write("\x1b[2J\x1b[0f");
 }

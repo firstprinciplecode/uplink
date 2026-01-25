@@ -1,3 +1,4 @@
+import { isBackInput } from "../io";
 import type { MenuChoice } from "../types";
 import type { SelectOption } from "../inline-tree-select";
 
@@ -39,7 +40,7 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
   } = deps;
 
   return {
-    label: "Manage Tunnels",
+    label: "Share",
     subMenu: [
       {
         label: "Start (Auto)",
@@ -79,7 +80,11 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
               } catch {
                 /* ignore */
               }
-              const answer = await promptLine("Enter port number (default 3000): ");
+              const answer = await promptLine('Enter port number (default 3000, or "back"): ');
+              if (isBackInput(answer)) {
+                restoreRawMode();
+                return "";
+              }
               const port = Number(answer) || 3000;
               restoreRawMode();
               return await createAndStartTunnel(port);
@@ -114,7 +119,11 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
               } catch {
                 /* ignore */
               }
-              const answer = await promptLine("Enter port number (default 3000): ");
+              const answer = await promptLine('Enter port number (default 3000, or "back"): ');
+              if (isBackInput(answer)) {
+                restoreRawMode();
+                return "";
+              }
               port = Number(answer) || 3000;
             } else if (typeof result.value === "string" && result.value.startsWith("skip-")) {
               // Port with running tunnel selected - show info message
@@ -135,7 +144,11 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
       {
         label: "Start (Manual)",
         action: async () => {
-          const answer = await promptLine("Local port to expose (default 3000): ");
+          const answer = await promptLine('Local port to expose (default 3000, or "back"): ');
+          if (isBackInput(answer)) {
+            restoreRawMode();
+            return "";
+          }
           const port = Number(answer) || 3000;
           try {
             const result = await apiRequest("POST", "/v1/tunnels", { port });

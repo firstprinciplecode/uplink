@@ -6,11 +6,18 @@ export interface DockerfileTemplate {
 }
 
 // Next.js Dockerfile (supports npm, yarn, pnpm)
-function nextjsDockerfile(pm: "npm" | "yarn" | "pnpm" | "bun" | null, port: number): string {
+function nextjsDockerfile(
+  pm: "npm" | "yarn" | "pnpm" | "bun" | null,
+  port: number,
+  baseImage: string,
+  opts: { usePrisma: boolean }
+): string {
   const packageManager = pm || "npm";
+  const prismaCopy = opts.usePrisma ? "COPY prisma ./prisma\n" : "";
+  const prismaGenerate = opts.usePrisma ? " && npx prisma generate" : "";
 
   if (packageManager === "pnpm") {
-    return `FROM node:20-alpine AS base
+    return `FROM ${baseImage} AS base
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -19,7 +26,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+${prismaCopy}RUN pnpm install --frozen-lockfile${prismaGenerate}
 
 # Build stage
 FROM base AS builder
@@ -45,13 +52,13 @@ CMD ["node", "server.js"]
   }
 
   if (packageManager === "yarn") {
-    return `FROM node:20-alpine AS base
+    return `FROM ${baseImage} AS base
 
 # Dependencies stage
 FROM base AS deps
 WORKDIR /app
 COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+${prismaCopy}RUN yarn install --frozen-lockfile${prismaGenerate}
 
 # Build stage
 FROM base AS builder
@@ -77,13 +84,14 @@ CMD ["node", "server.js"]
   }
 
   // npm (default)
-  return `FROM node:20-alpine AS base
+  return `FROM ${baseImage} AS base
 
 # Dependencies stage
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci
+ENV npm_config_optional=true
+${prismaCopy}RUN npm ci --include=optional${prismaGenerate}
 
 # Build stage
 FROM base AS builder
@@ -109,11 +117,15 @@ CMD ["node", "server.js"]
 }
 
 // Express/Node.js Dockerfile
-function expressDockerfile(pm: "npm" | "yarn" | "pnpm" | "bun" | null, port: number): string {
+function expressDockerfile(
+  pm: "npm" | "yarn" | "pnpm" | "bun" | null,
+  port: number,
+  baseImage: string
+): string {
   const packageManager = pm || "npm";
 
   if (packageManager === "pnpm") {
-    return `FROM node:20-alpine
+    return `FROM ${baseImage}
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -133,7 +145,7 @@ CMD ["node", "index.js"]
   }
 
   if (packageManager === "yarn") {
-    return `FROM node:20-alpine
+    return `FROM ${baseImage}
 
 WORKDIR /app
 
@@ -151,7 +163,7 @@ CMD ["node", "index.js"]
   }
 
   // npm (default)
-  return `FROM node:20-alpine
+  return `FROM ${baseImage}
 
 WORKDIR /app
 
@@ -247,11 +259,15 @@ CMD ["./main"]
 }
 
 // Simple Node.js Dockerfile (for generic nodejs)
-function nodejsDockerfile(pm: "npm" | "yarn" | "pnpm" | "bun" | null, port: number): string {
+function nodejsDockerfile(
+  pm: "npm" | "yarn" | "pnpm" | "bun" | null,
+  port: number,
+  baseImage: string
+): string {
   const packageManager = pm || "npm";
 
   if (packageManager === "pnpm") {
-    return `FROM node:20-alpine
+    return `FROM ${baseImage}
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -269,7 +285,7 @@ CMD ["node", "index.js"]
 `;
   }
 
-  return `FROM node:20-alpine
+  return `FROM ${baseImage}
 
 WORKDIR /app
 
@@ -287,6 +303,7 @@ CMD ["node", "index.js"]
 
 export function generateDockerfile(analysis: AnalysisResult): DockerfileTemplate | null {
   const { framework, packageManager, port } = analysis;
+  const baseImage = analysis.nodeBaseImage === "debian" ? "node:20-bullseye" : "node:20-alpine";
 
   if (!framework) {
     return null;
@@ -296,7 +313,7 @@ export function generateDockerfile(analysis: AnalysisResult): DockerfileTemplate
     case "nextjs":
       return {
         name: "Next.js",
-        content: nextjsDockerfile(packageManager, port),
+        content: nextjsDockerfile(packageManager, port, baseImage, { usePrisma: analysis.usesPrisma }),
       };
 
     case "express":
@@ -305,13 +322,13 @@ export function generateDockerfile(analysis: AnalysisResult): DockerfileTemplate
     case "nestjs":
       return {
         name: framework.name,
-        content: expressDockerfile(packageManager, port),
+        content: expressDockerfile(packageManager, port, baseImage),
       };
 
     case "nodejs":
       return {
         name: "Node.js",
-        content: nodejsDockerfile(packageManager, port),
+        content: nodejsDockerfile(packageManager, port, baseImage),
       };
 
     case "flask":

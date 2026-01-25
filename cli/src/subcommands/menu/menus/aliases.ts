@@ -1,3 +1,4 @@
+import { isBackInput } from "../io";
 import type { MenuChoice } from "../types";
 import type { SelectOption } from "../inline-tree-select";
 
@@ -83,7 +84,11 @@ export function buildManageAliasesMenu(deps: Deps): MenuChoice {
               } catch {
                 /* ignore */
               }
-              const portStr = await promptLine("Enter port number (e.g. 3000): ");
+              const portStr = await promptLine('Enter port number (e.g. 3000, or "back"): ');
+              if (isBackInput(portStr)) {
+                restoreRawMode();
+                return "";
+              }
               port = Number(portStr);
               if (!port || port < 1 || port > 65535) {
                 restoreRawMode();
@@ -99,7 +104,11 @@ export function buildManageAliasesMenu(deps: Deps): MenuChoice {
             } catch {
               /* ignore */
             }
-            aliasName = await promptLine("Enter alias name (e.g. my-app): ");
+            aliasName = await promptLine('Enter alias name (e.g. my-app, or "back"): ');
+            if (isBackInput(aliasName)) {
+              restoreRawMode();
+              return "";
+            }
             restoreRawMode();
 
             if (!aliasName.trim()) {
@@ -199,7 +208,11 @@ export function buildManageAliasesMenu(deps: Deps): MenuChoice {
               } catch {
                 /* ignore */
               }
-              const portStr = await promptLine("Enter new port number: ");
+              const portStr = await promptLine('Enter new port number (or "back"): ');
+              if (isBackInput(portStr)) {
+                restoreRawMode();
+                return "";
+              }
               restoreRawMode();
               port = Number(portStr);
               if (!port || port < 1 || port > 65535) {

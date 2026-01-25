@@ -1,6 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "fs";
 
 export type DetectedShell = { shellName: "zsh" | "bash" | ""; configFile: string | null };
 
@@ -8,14 +8,24 @@ export function detectShellConfigFile(): DetectedShell {
   const shell = process.env.SHELL || "";
   const homeDir = homedir();
 
-  if (shell.includes("zsh")) return { shellName: "zsh", configFile: join(homeDir, ".zshrc") };
-  if (shell.includes("bash")) return { shellName: "bash", configFile: join(homeDir, ".bashrc") };
+  if (shell.includes("zsh")) {
+    const configFile = join(homeDir, ".zshrc");
+    return { shellName: "zsh", configFile };
+  }
+  if (shell.includes("bash")) {
+    const configFile = join(homeDir, ".bashrc");
+    return { shellName: "bash", configFile };
+  }
 
   const zshrc = join(homeDir, ".zshrc");
-  if (existsSync(zshrc)) return { shellName: "zsh", configFile: zshrc };
+  if (existsSync(zshrc)) {
+    return { shellName: "zsh", configFile: zshrc };
+  }
 
   const bashrc = join(homeDir, ".bashrc");
-  if (existsSync(bashrc)) return { shellName: "bash", configFile: bashrc };
+  if (existsSync(bashrc)) {
+    return { shellName: "bash", configFile: bashrc };
+  }
 
   return { shellName: "", configFile: null };
 }
@@ -32,6 +42,14 @@ export function shellConfigHasToken(configFile: string): boolean {
 
 export function upsertShellToken(configFile: string, token: string): { wrote: boolean; verifyOk: boolean } {
   // NOTE: caller must ensure token is safe to write here (and accepts the risk).
+  if (existsSync(configFile)) {
+    const mode = statSync(configFile).mode & 0o777;
+    const groupWritable = Boolean(mode & 0o020);
+    const worldWritable = Boolean(mode & 0o002);
+    if (groupWritable || worldWritable) {
+      throw new Error("UNSAFE_SHELL_CONFIG_PERMISSIONS");
+    }
+  }
   const configContent = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
   const lines = configContent.split("\n");
 

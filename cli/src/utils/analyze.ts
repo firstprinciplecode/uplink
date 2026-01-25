@@ -28,6 +28,12 @@ export interface Requirement {
   suggested?: string;
 }
 
+export interface HealthCheck {
+  level: "info" | "warning";
+  message: string;
+  detail?: string;
+}
+
 export interface AnalysisResult {
   framework: FrameworkInfo | null;
   packageManager: "npm" | "yarn" | "pnpm" | "bun" | null;
@@ -37,6 +43,11 @@ export interface AnalysisResult {
   dockerfile: { exists: boolean; path?: string };
   hostConfig: { exists: boolean; path?: string; config?: any };
   requirements: Requirement[];
+  healthChecks: HealthCheck[];
+  nativeNodeDeps: string[];
+  nodeBaseImage: "alpine" | "debian";
+  usesPrisma: boolean;
+  usesNextAuth: boolean;
 }
 
 function readJsonSafe(path: string): any | null {
@@ -45,6 +56,66 @@ function readJsonSafe(path: string): any | null {
   } catch {
     return null;
   }
+}
+
+function readEnvFile(path: string): Record<string, string> | null {
+  try {
+    const raw = readFileSync(path, "utf8");
+    const out: Record<string, string> = {};
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const cleaned = trimmed.startsWith("export ") ? trimmed.slice(7) : trimmed;
+      const idx = cleaned.indexOf("=");
+      if (idx === -1) continue;
+      const key = cleaned.slice(0, idx).trim();
+      if (!key) continue;
+      let value = cleaned.slice(idx + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      out[key] = value;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function readPackageDeps(dir: string): Record<string, string> {
+  const pkgPath = join(dir, "package.json");
+  const pkg = readJsonSafe(pkgPath);
+  if (!pkg) return {};
+  return { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+}
+
+function detectUsesPrisma(dir: string): boolean {
+  const deps = readPackageDeps(dir);
+  return Boolean(deps["@prisma/client"] || deps["prisma"]);
+}
+
+function detectUsesNextAuth(dir: string): boolean {
+  const deps = readPackageDeps(dir);
+  return Boolean(deps["next-auth"] || deps["@auth/core"] || deps["@auth/nextjs"]);
+}
+
+function readHostEnv(analysis: AnalysisResult): Record<string, string> {
+  const raw = analysis.hostConfig?.config?.env;
+  if (!raw || typeof raw !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(raw).filter(([, value]) => typeof value === "string")
+  ) as Record<string, string>;
+}
+
+function isLocalhostUrl(value: string): boolean {
+  return (
+    value.includes("://localhost") ||
+    value.includes("://127.0.0.1") ||
+    value.includes("://0.0.0.0")
+  );
 }
 
 function fileContains(path: string, patterns: string[]): string | null {
@@ -191,6 +262,29 @@ export function detectPackageManager(dir: string): "npm" | "yarn" | "pnpm" | "bu
   return null;
 }
 
+function detectNativeNodeDeps(dir: string): string[] {
+  const pkgPath = join(dir, "package.json");
+  const pkg = readJsonSafe(pkgPath);
+  if (!pkg) return [];
+
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const knownNativeDeps = new Set([
+    "lightningcss",
+    "sharp",
+    "better-sqlite3",
+    "sqlite3",
+    "bcrypt",
+    "bcryptjs",
+    "argon2",
+    "canvas",
+    "node-sass",
+    "playwright",
+    "puppeteer",
+  ]);
+
+  return Object.keys(deps || {}).filter((name) => knownNativeDeps.has(name));
+}
+
 export function detectDatabase(dir: string): DatabaseInfo | null {
   const pkgPath = join(dir, "package.json");
   const pkg = readJsonSafe(pkgPath);
@@ -327,12 +421,171 @@ export function detectPort(dir: string): number {
   return 3000; // Default
 }
 
+function detectHealthChecks(dir: string, analysis: AnalysisResult): HealthCheck[] {
+  const checks: HealthCheck[] = [];
+  const pkgPath = join(dir, "package.json");
+  const pkg = readJsonSafe(pkgPath);
+
+  if (!pkg) {
+    checks.push({
+      level: "warning",
+      message: "No package.json found",
+      detail: "Node apps typically require package.json with scripts and dependencies.",
+    });
+  } else {
+    const scripts = pkg.scripts || {};
+    if (!scripts.start) {
+      checks.push({
+        level: "warning",
+        message: "No start script in package.json",
+        detail: "Add a start script so the container knows how to run the app.",
+      });
+    }
+    if (analysis.framework?.name === "nextjs" && !scripts.build) {
+      checks.push({
+        level: "warning",
+        message: "No build script for Next.js",
+        detail: "Add a build script (e.g. next build) for Docker builds.",
+      });
+    }
+
+    const hasLockfile =
+      existsSync(join(dir, "package-lock.json")) ||
+      existsSync(join(dir, "pnpm-lock.yaml")) ||
+      existsSync(join(dir, "yarn.lock")) ||
+      existsSync(join(dir, "bun.lockb"));
+    if (!hasLockfile) {
+      checks.push({
+        level: "info",
+        message: "No lockfile detected",
+        detail: "Lockfiles improve reproducible builds on the builder.",
+      });
+    }
+  }
+
+  if (analysis.framework?.name === "nextjs" && !analysis.dockerfile.exists) {
+    const nextConfigPath = join(dir, "next.config.ts");
+    const nextConfigJsPath = join(dir, "next.config.js");
+    const nextConfigMjsPath = join(dir, "next.config.mjs");
+    const configPath = existsSync(nextConfigPath)
+      ? nextConfigPath
+      : existsSync(nextConfigJsPath)
+        ? nextConfigJsPath
+        : existsSync(nextConfigMjsPath)
+          ? nextConfigMjsPath
+          : null;
+    if (configPath) {
+      const content = readFileSync(configPath, "utf8");
+      if (!/output\s*:\s*["']standalone["']/.test(content)) {
+        checks.push({
+          level: "info",
+          message: "Next.js config missing output: \"standalone\"",
+          detail: "Standalone builds are recommended for smaller Docker images.",
+        });
+      }
+    }
+  }
+
+  if (analysis.framework?.name === "nextjs" && analysis.dockerfile.exists) {
+    const nextConfigPath = join(dir, "next.config.ts");
+    const nextConfigJsPath = join(dir, "next.config.js");
+    const nextConfigMjsPath = join(dir, "next.config.mjs");
+    const configPath = existsSync(nextConfigPath)
+      ? nextConfigPath
+      : existsSync(nextConfigJsPath)
+        ? nextConfigJsPath
+        : existsSync(nextConfigMjsPath)
+          ? nextConfigMjsPath
+          : null;
+    if (configPath) {
+      const content = readFileSync(configPath, "utf8");
+      if (!/output\s*:\s*["']standalone["']/.test(content)) {
+        checks.push({
+          level: "warning",
+          message: "Next.js output missing standalone build config",
+          detail: "Dockerfile expects .next/standalone; add output: \"standalone\".",
+        });
+      }
+    }
+  }
+
+  if (analysis.usesPrisma) {
+    const schemaPath = join(dir, "prisma", "schema.prisma");
+    if (!existsSync(schemaPath)) {
+      checks.push({
+        level: "warning",
+        message: "Prisma detected but schema.prisma is missing",
+        detail: "Ensure prisma/schema.prisma exists for generate and migrations.",
+      });
+    }
+    if (analysis.dockerfile.exists) {
+      const dockerfilePath = join(dir, "Dockerfile");
+      const hasGenerate = fileContains(dockerfilePath, ["prisma generate"]);
+      if (!hasGenerate) {
+        checks.push({
+          level: "warning",
+          message: "Prisma detected but Dockerfile lacks prisma generate",
+          detail: "Add `npx prisma generate` after dependency install.",
+        });
+      }
+    } else {
+      checks.push({
+        level: "info",
+        message: "Prisma detected; ensure Dockerfile runs prisma generate",
+        detail: "Generated Dockerfile will include prisma generate when enabled.",
+      });
+    }
+  }
+
+  if (analysis.usesNextAuth) {
+    const envFilePath = join(dir, ".env");
+    const envFile = existsSync(envFilePath) ? readEnvFile(envFilePath) : null;
+    const hostEnv = readHostEnv(analysis);
+    const nextAuthUrl = hostEnv.NEXTAUTH_URL || envFile?.NEXTAUTH_URL || "";
+    const nextAuthSecret = hostEnv.NEXTAUTH_SECRET || envFile?.NEXTAUTH_SECRET || "";
+    if (!nextAuthUrl) {
+      checks.push({
+        level: "warning",
+        message: "NextAuth detected but NEXTAUTH_URL is missing",
+        detail: "Set NEXTAUTH_URL to your app URL in env or host config.",
+      });
+    } else if (isLocalhostUrl(nextAuthUrl)) {
+      checks.push({
+        level: "warning",
+        message: "NEXTAUTH_URL points to localhost",
+        detail: "Use the public app URL to avoid auth callback 401s.",
+      });
+    }
+    if (!nextAuthSecret) {
+      checks.push({
+        level: "warning",
+        message: "NextAuth detected but NEXTAUTH_SECRET is missing",
+        detail: "Set NEXTAUTH_SECRET for secure session handling.",
+      });
+    }
+  }
+
+  if (analysis.nativeNodeDeps.length > 0) {
+    checks.push({
+      level: "warning",
+      message: "Native Node.js deps detected; Alpine may fail to build",
+      detail: `Deps: ${analysis.nativeNodeDeps.join(", ")}`,
+    });
+  }
+
+  return checks;
+}
+
 export function analyzeProject(dir: string): AnalysisResult {
   const framework = detectFramework(dir);
   const packageManager = detectPackageManager(dir);
   const database = detectDatabase(dir);
   const storage = detectStorage(dir);
   const port = detectPort(dir);
+  const nativeNodeDeps = detectNativeNodeDeps(dir);
+  const nodeBaseImage = nativeNodeDeps.length > 0 ? "debian" : "alpine";
+  const usesPrisma = detectUsesPrisma(dir);
+  const usesNextAuth = detectUsesNextAuth(dir);
 
   const dockerfilePath = join(dir, "Dockerfile");
   const dockerfile = {
@@ -357,9 +610,15 @@ export function analyzeProject(dir: string): AnalysisResult {
     dockerfile,
     hostConfig,
     requirements: [],
+    healthChecks: [],
+    nativeNodeDeps,
+    nodeBaseImage,
+    usesPrisma,
+    usesNextAuth,
   };
 
   analysis.requirements = buildRequirements(analysis);
+  analysis.healthChecks = detectHealthChecks(dir, analysis);
   return analysis;
 }
 
@@ -381,8 +640,11 @@ export function buildRequirements(analysis: AnalysisResult): Requirement[] {
   }
 
   if (analysis.database?.type === "sqlite") {
+    const usingPrisma = analysis.usesPrisma;
     const dbPath = analysis.database.path;
     const envVar = analysis.database.envVar;
+    const defaultEnvVar = usingPrisma ? "DATABASE_URL" : "DATABASE_PATH";
+    const defaultSuggested = usingPrisma ? "file:/data/app.db" : "/data/app.db";
     if (dbPath) {
       const volumePath = isAbsolute(dbPath) ? dirname(dbPath) : "/app";
       requirements.push({
@@ -402,14 +664,14 @@ export function buildRequirements(analysis: AnalysisResult): Requirement[] {
       requirements.push({
         type: "env_var",
         name: envVar,
-        suggested: dbPath || "/data/app.db",
+        suggested: dbPath || defaultSuggested,
         reason: "Database path env var detected",
       });
     } else if (!dbPath) {
       requirements.push({
         type: "env_var",
-        name: "DATABASE_PATH",
-        suggested: "/data/app.db",
+        name: defaultEnvVar,
+        suggested: defaultSuggested,
         reason: "Database path for persistent storage",
       });
     }

@@ -1,5 +1,6 @@
 import { spawnSync } from "child_process";
 import { resolve } from "path";
+import { isBackInput } from "../io";
 import type { MenuChoice } from "../types";
 
 type Deps = {
@@ -7,12 +8,16 @@ type Deps = {
   restoreRawMode: () => void;
 };
 
-async function resolvePath(promptLine: Deps["promptLine"]): Promise<string> {
+async function resolvePath(promptLine: Deps["promptLine"]): Promise<string | null> {
   const cwd = process.env.UPLINK_CWD || process.cwd();
   while (true) {
-    const answer = (await promptLine(`Project path (default ${cwd}): `)).trim();
+    const answerRaw = await promptLine(`Project path (default ${cwd}, or "back"): `);
+    if (isBackInput(answerRaw)) return null;
+    const answer = answerRaw.trim();
     const projectPath = resolve(cwd, answer || cwd);
-    const confirm = (await promptLine(`Use "${projectPath}"? (Y/n): `)).trim().toLowerCase();
+    const confirmRaw = await promptLine(`Use "${projectPath}"? (Y/n, or "back"): `);
+    if (isBackInput(confirmRaw)) return null;
+    const confirm = confirmRaw.trim().toLowerCase();
     if (confirm === "" || confirm === "y" || confirm === "yes") return projectPath;
   }
 }
@@ -66,6 +71,10 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         label: "Setup Wizard",
         action: async () => {
           const projectPath = await resolvePath(promptLine);
+          if (!projectPath) {
+            restoreRawMode();
+            return "";
+          }
           runCli(["host", "setup", "--path", projectPath]);
           restoreRawMode();
           return "Setup complete.";
@@ -75,6 +84,10 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         label: "Analyze Project",
         action: async () => {
           const projectPath = await resolvePath(promptLine);
+          if (!projectPath) {
+            restoreRawMode();
+            return "";
+          }
           runCli(["host", "analyze", "--path", projectPath]);
           restoreRawMode();
           return "Analysis complete.";
@@ -109,9 +122,13 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             return "No apps found.";
           }
           const menuLines = apps.map((app, idx) => `${idx + 1}) ${app.name} (${app.id})`);
-          const choice = (await promptLine(`Select app to delete:\n${menuLines.join("\n")}\n> `))
+          const choice = (await promptLine(`Select app to delete (or "back"):\n${menuLines.join("\n")}\n> `))
             .trim()
             .toLowerCase();
+          if (isBackInput(choice)) {
+            restoreRawMode();
+            return "";
+          }
           if (!choice) {
             restoreRawMode();
             return "No selection made.";
