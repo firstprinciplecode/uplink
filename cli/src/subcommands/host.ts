@@ -375,8 +375,22 @@ async function resolveEnvFile(
         .trim()
         .toLowerCase();
       if (answer === "y" || answer === "yes") {
-        writeFileSync(prodPath, readFileSync(defaultPath, "utf8"), "utf8");
-        console.log("  Created .env.production");
+        const envFromFile = readEnvFileSafe(defaultPath);
+        if (envFromFile) {
+          const filtered = filterEnvForProduction(envFromFile);
+          if (Object.keys(filtered.env).length === 0) {
+            console.log("  Skipped .env.production (no production-safe entries found)");
+          } else {
+            writeEnvFile(prodPath, filtered.env);
+            console.log("  Created .env.production");
+          }
+          if (filtered.skipped.length > 0) {
+            console.log(`  Skipped localhost entries: ${filtered.skipped.join(", ")}`);
+          }
+        } else {
+          writeFileSync(prodPath, readFileSync(defaultPath, "utf8"), "utf8");
+          console.log("  Created .env.production");
+        }
       }
     }
   }
@@ -597,10 +611,82 @@ function writeEnvFile(filePath: string, env: Record<string, string>): void {
   writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
 }
 
+function filterEnvForProduction(env: Record<string, string>): {
+  env: Record<string, string>;
+  skipped: string[];
+} {
+  const out: Record<string, string> = {};
+  const skipped: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (isLocalhostUrl(value)) {
+      skipped.push(key);
+      continue;
+    }
+    out[key] = value;
+  }
+  return { env: out, skipped };
+}
+
+function usesRuntimePrisma(dir: string): boolean {
+  const entrypoint = join(dir, "docker-entrypoint.sh");
+  if (!existsSync(entrypoint)) return false;
+  try {
+    const content = readFileSync(entrypoint, "utf8");
+    return /prisma\s+(migrate|db|generate)/.test(content);
+  } catch {
+    return false;
+  }
+}
+
 function dockerfileExpectsStandalone(dockerfilePath: string): boolean {
   if (!existsSync(dockerfilePath)) return false;
   const content = readFileSync(dockerfilePath, "utf8");
   return content.includes(".next/standalone");
+}
+
+function dockerfileRunnerHasNodeModules(dockerfilePath: string): boolean {
+  if (!existsSync(dockerfilePath)) return false;
+  const content = readFileSync(dockerfilePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  let inRunner = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^FROM\s+/i.test(trimmed)) {
+      inRunner = /AS\s+runner$/i.test(trimmed);
+      continue;
+    }
+    if (!inRunner) continue;
+    if (/^FROM\s+/i.test(trimmed)) break;
+    if (/COPY\s+--from=deps\s+\/app\/node_modules\/?\s+\.\/node_modules\/?/i.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function addRunnerNodeModulesCopy(dockerfilePath: string): boolean {
+  if (!existsSync(dockerfilePath)) return false;
+  const content = readFileSync(dockerfilePath, "utf8");
+  if (dockerfileRunnerHasNodeModules(dockerfilePath)) return false;
+  const lines = content.split(/\r?\n/);
+  let inRunner = false;
+  let insertIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (/^FROM\s+/i.test(trimmed)) {
+      inRunner = /AS\s+runner$/i.test(trimmed);
+      continue;
+    }
+    if (!inRunner) continue;
+    if (/^WORKDIR\s+/i.test(trimmed)) {
+      insertIdx = i + 1;
+      break;
+    }
+  }
+  if (insertIdx === -1) return false;
+  lines.splice(insertIdx, 0, "COPY --from=deps /app/node_modules ./node_modules");
+  writeFileSync(dockerfilePath, lines.join("\n"), "utf8");
+  return true;
 }
 
 function findSeedFiles(dir: string): string[] {
@@ -637,6 +723,7 @@ function buildPreflightChecklist(
   const envFile = readEnvFileSafe(join(dir, ".env"));
   const envProdPath = join(dir, ".env.production");
   const hasEnvProd = existsSync(envProdPath);
+  const runtimePrisma = usesRuntimePrisma(dir);
 
   if (analysis.usesNextAuth) {
     const nextAuthStatus = resolveNextAuthEnvStatus(analysis, extraEnv, hostEnv);
@@ -710,6 +797,18 @@ function buildPreflightChecklist(
         title: "Dockerfile missing `prisma generate`",
         detail: "Prisma Client must be generated during build.",
         action: "Add `npx prisma generate` after dependency install.",
+      });
+    }
+  }
+
+  if (analysis.usesPrisma && runtimePrisma) {
+    const dockerfilePath = join(dir, "Dockerfile");
+    if (analysis.dockerfile.exists && !dockerfileRunnerHasNodeModules(dockerfilePath)) {
+      items.push({
+        level: "required",
+        title: "Runtime Prisma detected but runner lacks node_modules",
+        detail: "Prisma CLI needs full node_modules at runtime (migrate/seed).",
+        action: "Copy full node_modules into the runner stage.",
       });
     }
   }
@@ -871,6 +970,39 @@ hostCommand
   });
 
 hostCommand
+  .command("preflight")
+  .description("Run preflight checks and report required setup items")
+  .option("--path <path>", "Project folder (default: .)")
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      const interactive = isInteractive(opts);
+      const dir = await resolveProjectPath(opts.path, { interactive });
+      const analysis = analyzeProject(dir);
+      const preflight = buildPreflightChecklist(dir, analysis, undefined);
+
+      if (opts.json) {
+        printJson({ analysis, preflight });
+        return;
+      }
+
+      console.log("\nPreflight Report");
+      console.log("================\n");
+      console.log(`Path:            ${dir}`);
+      if (analysis.framework) {
+        const ver = analysis.framework.version ? ` (${analysis.framework.version})` : "";
+        console.log(`Framework:       ${analysis.framework.name}${ver}`);
+      } else {
+        console.log("Framework:       (not detected)");
+      }
+      printPreflightChecklist(preflight, { showOkSummary: true });
+      console.log("");
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+hostCommand
   .command("init")
   .description("Analyze project and generate Dockerfile + uplink.host.json")
   .option("--path <path>", "Project folder (default: .)")
@@ -948,6 +1080,21 @@ hostCommand
       }
       const preflight = buildPreflightChecklist(dir, analysis, undefined);
       printPreflightChecklist(preflight, { showOkSummary: true });
+
+      if (interactive && analysis.usesPrisma && usesRuntimePrisma(dir) && analysis.dockerfile.exists) {
+        const dockerfilePath = join(dir, "Dockerfile");
+        if (!dockerfileRunnerHasNodeModules(dockerfilePath)) {
+          const answer = (await promptLine(
+            "\nRuntime Prisma detected. Copy full node_modules into runner stage? (Y/n): "
+          ))
+            .trim()
+            .toLowerCase();
+          if (answer === "" || answer === "y" || answer === "yes") {
+            const updated = addRunnerNodeModulesCopy(dockerfilePath);
+            if (updated) console.log("  Updated Dockerfile to copy node_modules into runner");
+          }
+        }
+      }
 
       if (interactive && analysis.framework?.name === "nextjs") {
         const configPath = findNextConfigPath(dir);
@@ -1249,6 +1396,7 @@ hostCommand
   .option("--path <path>", "Project folder (default: .)")
   .option("--env-file <path>", "Load environment variables from a .env file")
   .option("--yes", "Skip prompts and apply defaults", false)
+  .option("--force", "Continue even if preflight has required items", false)
   .option("--wait", "Wait for deployment to be running", true)
   .option("--wait-timeout <seconds>", "Wait timeout in seconds (default: 300)", "300")
   .option("--wait-interval <seconds>", "Wait poll interval in seconds (default: 2)", "2")
@@ -1305,6 +1453,22 @@ hostCommand
           }
         }
         printPreflightChecklist(preflight, { showOkSummary: true });
+      if (interactive && analysis.usesPrisma && usesRuntimePrisma(dir) && analysis.dockerfile.exists) {
+        const dockerfilePath = join(dir, "Dockerfile");
+        if (!dockerfileRunnerHasNodeModules(dockerfilePath)) {
+          const answer = (await promptLine(
+            "    Runtime Prisma detected. Copy full node_modules into runner stage? (Y/n): "
+          ))
+            .trim()
+            .toLowerCase();
+          if (answer === "" || answer === "y" || answer === "yes") {
+            const updated = addRunnerNodeModulesCopy(dockerfilePath);
+            if (updated && !opts.json) {
+              console.log("    Updated Dockerfile to copy node_modules into runner");
+            }
+          }
+        }
+      }
       if (interactive && analysis.framework?.name === "nextjs") {
         const configPath = findNextConfigPath(dir);
         if (configPath) {
@@ -1348,14 +1512,13 @@ hostCommand
         }
       }
 
-      if (interactive && preflight.some((item) => item.level === "required")) {
-        const answer = (await promptLine("\nContinue without resolving required items? (y/N): "))
-          .trim()
-          .toLowerCase();
-        if (answer !== "y" && answer !== "yes") {
-          if (!opts.json) console.log("Cancelled.");
-          return;
+      const hasRequiredPreflight = preflight.some((item) => item.level === "required");
+      if (hasRequiredPreflight && !opts.force) {
+        if (!opts.json) {
+          console.log("\nRequired preflight items detected.");
+          console.log("Resolve them first or re-run with --force to continue anyway.");
         }
+        return;
       }
 
       if (opts.dryRun) {
