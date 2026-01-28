@@ -189,23 +189,137 @@ async function waitForDeployment(
   throw new Error("Timed out waiting for deployment");
 }
 
+// Default patterns to always exclude from deployment artifacts
+const DEFAULT_TARBALL_EXCLUDES = [
+  // Version control
+  ".git",
+  ".gitignore",
+  ".gitattributes",
+  // macOS metadata (AppleDouble files)
+  "._*",
+  ".DS_Store",
+  ".AppleDouble",
+  ".LSOverride",
+  // Node.js
+  "node_modules",
+  ".npm",
+  ".yarn",
+  ".pnpm-store",
+  // Build artifacts (should be rebuilt in Docker)
+  ".next",
+  "dist",
+  "build",
+  ".turbo",
+  ".cache",
+  ".vercel",
+  ".netlify",
+  // Test/coverage
+  "coverage",
+  ".nyc_output",
+  // IDE/Editor
+  ".idea",
+  ".vscode",
+  "*.swp",
+  "*.swo",
+  // Logs
+  "*.log",
+  "npm-debug.log*",
+  "yarn-debug.log*",
+  "yarn-error.log*",
+  // Environment files (should use --env-file or uplink.host.json)
+  ".env",
+  ".env.local",
+  ".env.development",
+  ".env.development.local",
+  // Misc
+  "*.pid",
+  "*.seed",
+  "Thumbs.db",
+];
+
+// Patterns that indicate a problematic artifact if found in tarball
+const FORBIDDEN_TARBALL_PATTERNS = [
+  /^\._/, // AppleDouble files at root
+  /\/\._/, // AppleDouble files in subdirectories
+  /^\.DS_Store$/,
+  /\/\.DS_Store$/,
+];
+
+function validateTarballContents(tarPath: string): { valid: boolean; forbidden: string[] } {
+  const result = spawnSync("tar", ["-tzf", tarPath], {
+    stdio: "pipe",
+    encoding: "utf8",
+    maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large file lists
+  });
+
+  if (result.status !== 0) {
+    // If we can't list contents, skip validation but warn
+    console.warn("Warning: Could not validate tarball contents");
+    return { valid: true, forbidden: [] };
+  }
+
+  const files = (result.stdout || "").split("\n").filter(Boolean);
+  const forbidden: string[] = [];
+
+  for (const file of files) {
+    for (const pattern of FORBIDDEN_TARBALL_PATTERNS) {
+      if (pattern.test(file)) {
+        forbidden.push(file);
+        break;
+      }
+    }
+  }
+
+  return { valid: forbidden.length === 0, forbidden };
+}
+
 function makeTarball(sourceDir: string): { tarPath: string; sizeBytes: number; sha256: string } {
   const tmp = join(os.tmpdir(), `uplink-host-${Date.now()}-${Math.random().toString(16).slice(2)}.tgz`);
+  
+  // Read user-defined ignore files
   const ignoreFiles = [".gitignore", ".uplinkignore"]
     .map((name) => join(sourceDir, name))
     .filter((path) => existsSync(path));
   const ignoreArgs = ignoreFiles.flatMap((path) => ["--exclude-from", path]);
 
+  // Build default exclude arguments
+  const defaultExcludeArgs = DEFAULT_TARBALL_EXCLUDES.flatMap((pattern) => ["--exclude", pattern]);
+
+  // Set COPYFILE_DISABLE=1 to prevent macOS from adding AppleDouble (._*) files
+  // This is critical for macOS users - without it, tar automatically creates ._* metadata files
+  const tarEnv = {
+    ...process.env,
+    COPYFILE_DISABLE: "1",
+  };
+
   const result = spawnSync(
     "tar",
-    ["-czf", tmp, "--exclude=.git", "--exclude=node_modules", ...ignoreArgs, "-C", sourceDir, "."],
+    ["-czf", tmp, ...defaultExcludeArgs, ...ignoreArgs, "-C", sourceDir, "."],
     {
-    stdio: "pipe",
-    encoding: "utf8",
+      stdio: "pipe",
+      encoding: "utf8",
+      env: tarEnv,
     }
   );
+  
   if (result.status !== 0) {
     throw new Error(`Failed to create tarball: ${result.stderr || result.stdout || "unknown error"}`);
+  }
+
+  // Validate that no forbidden files made it into the tarball
+  const validation = validateTarballContents(tmp);
+  if (!validation.valid) {
+    const examples = validation.forbidden.slice(0, 5);
+    const moreCount = validation.forbidden.length - examples.length;
+    const moreText = moreCount > 0 ? ` (and ${moreCount} more)` : "";
+    throw new Error(
+      `Tarball contains forbidden files that will cause build failures:\n` +
+      `  ${examples.join("\n  ")}${moreText}\n\n` +
+      `These are typically macOS metadata files. To fix:\n` +
+      `  1. Run: find . -type f -name '._*' -delete\n` +
+      `  2. Run: dot_clean -m .\n` +
+      `  3. Re-run the deploy command`
+    );
   }
 
   const st = statSync(tmp);
@@ -415,6 +529,12 @@ function detectUplinkIgnoreSuggestions(dir: string, analysis: AnalysisResult): s
     if (existsSync(join(dir, name))) suggestions.add(name);
   };
 
+  // Always suggest macOS metadata patterns (they cause build failures)
+  suggestions.add("._*");
+  suggestions.add("**/._*");
+  suggestions.add(".DS_Store");
+
+  // Node.js/JavaScript
   suggestIfDir("node_modules");
   suggestIfDir(".next");
   suggestIfDir("dist");
@@ -423,6 +543,9 @@ function detectUplinkIgnoreSuggestions(dir: string, analysis: AnalysisResult): s
   suggestIfDir(".cache");
   suggestIfDir(".vercel");
   suggestIfDir("coverage");
+  suggestIfDir(".npm");
+  suggestIfDir(".yarn");
+  suggestIfDir(".pnpm-store");
 
   try {
     const rootFiles = readdirSync(dir);
@@ -433,11 +556,21 @@ function detectUplinkIgnoreSuggestions(dir: string, analysis: AnalysisResult): s
     // ignore
   }
 
+  // Environment files
+  suggestions.add(".env");
+  suggestions.add(".env.*");
+
+  // Misc
+  suggestions.add("*.pid");
+
   if (analysis.database?.type === "sqlite" && analysis.database.file) {
     suggestions.add(analysis.database.file);
   }
   if (existsSync(join(dir, "prisma", "dev.db"))) {
     suggestions.add("prisma/dev.db");
+  }
+  if (existsSync(join(dir, "prisma", "migrations"))) {
+    suggestions.add("prisma/migrations");
   }
 
   return Array.from(suggestions);
