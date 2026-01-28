@@ -139,9 +139,21 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             restoreRawMode();
             return "Invalid selection.";
           }
-          runCli(["host", "delete", "--id", selected.id]);
+          
+          // Ask about deleting volumes
+          const deleteVolumesAnswer = (await promptLine(
+            "Also delete persistent data (databases, files)? (y/N): "
+          )).trim().toLowerCase();
+          const deleteVolumes = deleteVolumesAnswer === "y" || deleteVolumesAnswer === "yes";
+          
+          const args = ["host", "delete", "--id", selected.id];
+          if (deleteVolumes) {
+            args.push("--delete-volumes");
+          }
+          runCli(args);
           restoreRawMode();
-          return `Deleted ${selected.name} (${selected.id})`;
+          const volumeNote = deleteVolumes ? " (including persistent data)" : "";
+          return `Deleted ${selected.name} (${selected.id})${volumeNote}`;
         },
       },
       {

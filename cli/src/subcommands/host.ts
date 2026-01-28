@@ -1399,12 +1399,16 @@ hostCommand
   .description("Delete a hosted app")
   .requiredOption("--id <id>", "App id (app_...)")
   .option("--yes", "Skip confirmation", false)
+  .option("--delete-volumes", "Also delete persistent volume data", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
       const interactive = isInteractive(opts);
       if (!opts.yes && interactive) {
-        const answer = (await promptLine(`Delete app ${opts.id}? This cannot be undone. (y/N): `))
+        const volumeWarning = opts.deleteVolumes
+          ? " INCLUDING ALL PERSISTENT DATA (databases, files, etc.)"
+          : "";
+        const answer = (await promptLine(`Delete app ${opts.id}${volumeWarning}? This cannot be undone. (y/N): `))
           .trim()
           .toLowerCase();
         if (answer !== "y" && answer !== "yes") {
@@ -1412,9 +1416,21 @@ hostCommand
           return;
         }
       }
-      const result = await apiRequest("DELETE", `/v1/apps/${opts.id}`);
+      const queryParams = opts.deleteVolumes ? "?deleteVolumes=true" : "";
+      const result = await apiRequest("DELETE", `/v1/apps/${opts.id}${queryParams}`);
       if (opts.json) printJson(result);
-      else console.log(`Deleted app ${opts.id}`);
+      else {
+        console.log(`Deleted app ${opts.id}`);
+        if (result.cleanupId) {
+          console.log(`  Cleanup queued: ${result.cleanupId}`);
+          console.log(`  - Containers and images will be removed`);
+          if (opts.deleteVolumes) {
+            console.log(`  - Persistent volume data will be deleted`);
+          } else {
+            console.log(`  - Persistent volume data preserved (use --delete-volumes to remove)`);
+          }
+        }
+      }
     } catch (error) {
       handleError(error, { json: opts.json });
     }
