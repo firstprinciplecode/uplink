@@ -81,6 +81,55 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         },
       },
       {
+        label: "Deploy to Existing App",
+        action: async () => {
+          // First list apps to select from
+          const output = runCliCapture(["host", "list"]);
+          if (!output || output.includes("No apps found")) {
+            restoreRawMode();
+            return "No apps found. Use Setup Wizard to create one first.";
+          }
+          const lines = output.split("\n");
+          const apps = lines
+            .map((line) => {
+              const match = line.match(/^- (.+) \((app_[^)]+)\)$/);
+              if (!match) return null;
+              return { name: match[1], id: match[2] };
+            })
+            .filter((entry): entry is { name: string; id: string } => Boolean(entry));
+          if (apps.length === 0) {
+            restoreRawMode();
+            return "No apps found. Use Setup Wizard to create one first.";
+          }
+          const menuLines = apps.map((app, idx) => `${idx + 1}) ${app.name}`);
+          const choice = (await promptLine(`Select app to deploy to (or "back"):\n${menuLines.join("\n")}\n> `))
+            .trim()
+            .toLowerCase();
+          if (isBackInput(choice)) {
+            restoreRawMode();
+            return "";
+          }
+          const index = Number(choice);
+          const selected = Number.isFinite(index) ? apps[index - 1] : apps.find((app) => app.name.toLowerCase() === choice);
+          if (!selected) {
+            restoreRawMode();
+            return "Invalid selection.";
+          }
+
+          // Now get the project path
+          const projectPath = await resolvePath(promptLine);
+          if (!projectPath) {
+            restoreRawMode();
+            return "";
+          }
+
+          // Deploy using the selected app name
+          runCli(["host", "deploy", "--name", selected.name, "--path", projectPath, "--wait"]);
+          restoreRawMode();
+          return `Deployed to ${selected.name}`;
+        },
+      },
+      {
         label: "Analyze Project",
         action: async () => {
           const projectPath = await resolvePath(promptLine);
@@ -160,16 +209,20 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         label: "Help",
         action: async () => {
           return [
-            "Hosting commands:",
-            "  uplink host analyze --path <path>",
-            "  uplink host init --path <path> [--yes]",
-            "  uplink host setup --name <app> --path <path> [--yes] [--env-file <path>]",
-            "  uplink host list",
-            "  uplink host delete --id <app_id>",
-            "  uplink host create --name <app>",
-            "  uplink host deploy --name <app> --path <path> --wait [--env-file <path>]",
+            "Menu options:",
+            "  Setup Wizard     - First-time setup: creates Dockerfile, config, app, and deploys",
+            "  Deploy           - Redeploy to an existing app (faster, skips setup)",
+            "  Analyze          - Check project for deployment readiness",
+            "  List Apps        - Show your deployed apps",
+            "  Delete App       - Remove an app and optionally its data",
             "",
-            "Tip: Setup runs analyze → init → create → deploy.",
+            "CLI commands:",
+            "  uplink host setup --name <app> --path <path>   # Full setup + deploy",
+            "  uplink host deploy --name <app> --path <path>  # Just deploy (faster)",
+            "  uplink host status --id <app_id>               # Check build/run status",
+            "  uplink host logs --id <app_id>                 # View app logs",
+            "",
+            "Tip: Use 'Deploy' for updates, 'Setup' only for new projects.",
           ].join("\n");
         },
       },
