@@ -1667,7 +1667,11 @@ hostCommand
           console.log("\nRequired preflight items detected.");
           console.log("Resolve them first or re-run with --force to continue anyway.");
         }
-        return;
+        if (!interactive || opts.json) return;
+        const answer = (await promptLine("Continue anyway? (y/N): ")).trim().toLowerCase();
+        if (answer !== "y" && answer !== "yes") {
+          return;
+        }
       }
 
       if (opts.dryRun) {
