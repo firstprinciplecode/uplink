@@ -1,14 +1,17 @@
 import fetch from "node-fetch";
 import { spawn } from "child_process";
 import { resolveProjectRoot } from "../../../utils/project-root";
+import { getResolvedApiBase, getResolvedApiToken } from "../../utils/api-base";
 
 export function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {
   return new Promise<void>((resolve, reject) => {
     const projectRoot = resolveProjectRoot(__dirname);
+    const apiBase = getResolvedApiBase();
+    const token = getResolvedApiToken(apiBase);
     const env = {
       ...process.env,
-      AGENTCLOUD_API_BASE: process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot",
-      AGENTCLOUD_TOKEN: process.env.AGENTCLOUD_TOKEN,
+      AGENTCLOUD_API_BASE: apiBase,
+      AGENTCLOUD_TOKEN: token ?? process.env.AGENTCLOUD_TOKEN,
     };
 
     if (script === "test:comprehensive") {

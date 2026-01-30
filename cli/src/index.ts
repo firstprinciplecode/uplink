@@ -10,6 +10,7 @@ import { systemCommand } from "./subcommands/system";
 import { hostCommand } from "./subcommands/host";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { ensureApiBase, parseTokenEnv } from "./utils/api-base";
 
 // Get version from package.json (CommonJS build: __dirname available)
 const pkgPath = join(__dirname, "../../package.json");
@@ -60,6 +61,17 @@ program.hook("preAction", async (thisCommand) => {
       process.env.AGENTCLOUD_TOKEN = cachedTokenStdin;
     }
   }
+
+  const parsed = parseTokenEnv(process.env.AGENTCLOUD_TOKEN);
+  if (parsed.token) {
+    process.env.AGENTCLOUD_TOKEN = parsed.token;
+    if (!process.env.AGENTCLOUD_API_BASE && parsed.apiBase) {
+      process.env.AGENTCLOUD_API_BASE = parsed.apiBase;
+    }
+  }
+
+  const isInteractive = Boolean(process.stdin.isTTY && process.stdout.isTTY && !opts.json);
+  await ensureApiBase({ interactive: isInteractive });
 });
 
 // If no command provided and not a flag, default to menu

@@ -10,6 +10,7 @@ import { promptLine } from "./menu/io";
 import os from "os";
 import fetch from "node-fetch";
 import { spawnSync } from "child_process";
+import { getResolvedApiBase, getResolvedApiToken } from "../utils/api-base";
 
 type App = { id: string; name: string; url: string; createdAt?: string; updatedAt?: string };
 type AppList = { apps: App[]; count: number };
@@ -55,21 +56,12 @@ type PreflightItem = {
 };
 
 function getApiBase(): string {
-  return process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot";
-}
-
-function isLocalApiBase(apiBase: string): boolean {
-  return (
-    apiBase.includes("://localhost") ||
-    apiBase.includes("://127.0.0.1") ||
-    apiBase.includes("://0.0.0.0")
-  );
+  return getResolvedApiBase();
 }
 
 function getApiToken(): string | undefined {
   const apiBase = getApiBase();
-  if (!isLocalApiBase(apiBase)) return process.env.AGENTCLOUD_TOKEN || undefined;
-  return process.env.AGENTCLOUD_TOKEN || process.env.AGENTCLOUD_TOKEN_DEV || undefined;
+  return getResolvedApiToken(apiBase);
 }
 
 function sha256File(path: string): string {

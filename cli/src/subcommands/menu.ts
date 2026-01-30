@@ -26,6 +26,7 @@ import {
   buildUsageMenu,
 } from "./menu/menus";
 import { health, ports, smoke, tokenConfig, tunnelClients, tty } from "./menu/effects";
+import { formatTokenForEnv, getResolvedApiBase } from "../utils/api-base";
 
 // ASCII banner with color styling
 const ASCII_UPLINK = colorWhite([
@@ -48,7 +49,7 @@ function formatBytes(bytes: number): string {
 export const menuCommand = new Command("menu")
   .description("Interactive terminal menu (arrow keys + enter)")
   .action(async () => {
-    const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+    const apiBase = getResolvedApiBase();
     
     // Determine role (admin or user) via /v1/me; check if auth failed
     let isAdmin = false;
@@ -123,6 +124,7 @@ export const menuCommand = new Command("menu")
             const token = result.token;
             const tokenId = result.id;
             const userId = result.userId;
+            const tokenExport = formatTokenForEnv(token, apiBase);
 
             process.stdout.write("\n");
             process.stdout.write(colorGreen("✓") + " Account created\n");
@@ -155,7 +157,7 @@ export const menuCommand = new Command("menu")
               const addToken = (await promptLine(promptText)).trim().toLowerCase();
               if (addToken !== "n" && addToken !== "no") {
                 try {
-                  const res = tokenConfig.upsertShellToken(configFile, token);
+                  const res = tokenConfig.upsertShellToken(configFile, tokenExport);
                   tokenAdded = res.wrote;
                   if (tokenExists) {
                     console.log(colorGreen(`\n✓ Token updated in ~/.${shellName}rc`));
@@ -179,22 +181,24 @@ export const menuCommand = new Command("menu")
                     console.log(colorYellow(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
                   }
                   console.log(`\n  Please add manually:`);
-                  console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`));
+                  console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${tokenExport}' >> ~/.${shellName}rc`));
                 }
               }
             } else {
               console.log(colorYellow(`\n→ Could not detect your shell. Add the token manually:`));
-              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`));
-              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`));
+              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${tokenExport}' >> ~/.zshrc  # for zsh`));
+              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${tokenExport}' >> ~/.bashrc  # for bash`));
             }
 
             if (!tokenAdded) {
             process.stdout.write("\n");
             process.stdout.write(colorYellow("!") + " Set this token as an environment variable:\n\n");
-            process.stdout.write(colorDim("  ") + "export AGENTCLOUD_TOKEN=" + token + "\n");
+            process.stdout.write(colorDim("  ") + "export AGENTCLOUD_TOKEN=" + tokenExport + "\n");
             if (configFile) {
               process.stdout.write(colorDim(`\n  Or add to ~/.${shellName}rc:\n`));
-              process.stdout.write(colorDim("  ") + `echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc\n`);
+              process.stdout.write(
+                colorDim("  ") + `echo 'export AGENTCLOUD_TOKEN=${tokenExport}' >> ~/.${shellName}rc\n`
+              );
               process.stdout.write(colorDim("  ") + `source ~/.${shellName}rc\n`);
             }
             process.stdout.write(colorDim("\n  Then restart this menu.\n\n"));

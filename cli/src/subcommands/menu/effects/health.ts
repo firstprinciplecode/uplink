@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import { getResolvedApiBase } from "../../../utils/api-base";
 
 export async function checkApiHealth(args: {
   apiBase?: string;
@@ -6,7 +7,7 @@ export async function checkApiHealth(args: {
   relayInternalSecret?: string;
   timeoutMs?: number;
 }): Promise<{ ok: boolean; status: number | null }> {
-  const apiBase = args.apiBase || process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+  const apiBase = args.apiBase || getResolvedApiBase();
   const healthUrl = args.healthUrl || process.env.RELAY_HEALTH_URL || `${apiBase}/health`;
   const relayInternalSecret = args.relayInternalSecret ?? process.env.RELAY_INTERNAL_SECRET ?? "";
   const timeoutMs = args.timeoutMs ?? 2000;

@@ -1,4 +1,5 @@
 import fetch, { AbortError } from "node-fetch";
+import { getResolvedApiBase, getResolvedApiToken } from "./utils/api-base";
 
 // Configuration
 const REQUEST_TIMEOUT = 30000; // 30 seconds
@@ -6,34 +7,6 @@ const MAX_RETRIES = 3;
 const MAX_RETRIES_RATE_LIMIT = 5; // More retries for rate limits
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 const INITIAL_RATE_LIMIT_DELAY = 5000; // 5 seconds for rate limit errors
-
-function getApiBase(): string {
-  return process.env.AGENTCLOUD_API_BASE ?? "https://api.uplink.spot";
-}
-
-function isLocalApiBase(apiBase: string): boolean {
-  return (
-    apiBase.includes("://localhost") ||
-    apiBase.includes("://127.0.0.1") ||
-    apiBase.includes("://0.0.0.0")
-  );
-}
-
-function getApiToken(apiBase: string): string | undefined {
-  // Production (non-local) always requires an explicit token.
-  if (!isLocalApiBase(apiBase)) {
-    return process.env.AGENTCLOUD_TOKEN || undefined;
-  }
-
-  // Local dev:
-  // - Prefer AGENTCLOUD_TOKEN if set
-  // - Otherwise allow AGENTCLOUD_TOKEN_DEV (no hardcoded default for security)
-  return (
-    process.env.AGENTCLOUD_TOKEN ||
-    process.env.AGENTCLOUD_TOKEN_DEV ||
-    undefined
-  );
-}
 
 // Check if error is retryable (network issues, 5xx errors)
 function isRetryable(error: unknown, statusCode?: number): boolean {
@@ -64,8 +37,8 @@ export async function apiRequest(
   path: string,
   body?: unknown
 ): Promise<any> {
-  const apiBase = getApiBase();
-  const apiToken = getApiToken(apiBase);
+  const apiBase = getResolvedApiBase();
+  const apiToken = getResolvedApiToken(apiBase);
   if (!apiToken) {
     throw new Error("Missing AGENTCLOUD_TOKEN");
   }

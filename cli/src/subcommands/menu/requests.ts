@@ -1,7 +1,8 @@
 import fetch from "node-fetch";
+import { getResolvedApiBase } from "../../utils/api-base";
 
 export async function unauthenticatedRequest(method: string, path: string, body?: unknown): Promise<any> {
-  const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+  const apiBase = getResolvedApiBase();
   const response = await fetch(`${apiBase}${path}`, {
     method,
     headers: {

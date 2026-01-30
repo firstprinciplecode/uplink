@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { printJson, handleError } from "../utils/machine";
+import { formatTokenForEnv, getResolvedApiBase } from "../utils/api-base";
 
 type SignupResponse = {
   id: string;
@@ -17,7 +18,7 @@ type SignupResponse = {
  * Unauthenticated request for signup (no token required)
  */
 async function signupRequest(body: Record<string, unknown>): Promise<SignupResponse> {
-  const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+  const apiBase = getResolvedApiBase();
   const url = `${apiBase}/v1/signup`;
 
   const res = await fetch(url, {
@@ -60,6 +61,8 @@ export const signupCommand = new Command("signup")
       if (opts.json) {
         printJson(result);
       } else {
+        const apiBase = getResolvedApiBase();
+        const tokenExport = formatTokenForEnv(result.token, apiBase);
         console.log("Account created successfully!");
         console.log("");
         console.log(`  Token:    ${result.token}`);
@@ -71,7 +74,7 @@ export const signupCommand = new Command("signup")
         console.log("Save this token securely - it will not be shown again.");
         console.log("");
         console.log("To use this token, set the environment variable:");
-        console.log(`  export AGENTCLOUD_TOKEN="${result.token}"`);
+        console.log(`  export AGENTCLOUD_TOKEN="${tokenExport}"`);
       }
     } catch (error) {
       handleError(error, { json: opts.json });

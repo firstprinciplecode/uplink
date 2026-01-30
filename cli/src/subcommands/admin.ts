@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { apiRequest } from "../http";
+import { getResolvedApiBase } from "../utils/api-base";
 
 export const adminCommand = new Command("admin")
   .description("Admin commands for system management");
@@ -28,7 +29,7 @@ adminCommand
   .action(async (opts) => {
     try {
       // Check health
-      const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
+      const apiBase = getResolvedApiBase();
       let health = { status: "unknown" };
       try {
         const fetch = (await import("node-fetch")).default;
