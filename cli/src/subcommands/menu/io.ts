@@ -1,4 +1,14 @@
 import readline from "readline";
+import { colorBold } from "./colors";
+
+const choiceTokenRegex = /\((?:Y\/n|y\/N|y\/n|Y\/N)\)/g;
+const backTokenRegex = /"back"|'back'/g;
+
+function stylePrompt(question: string): string {
+  return question
+    .replace(choiceTokenRegex, (match) => colorBold(match))
+    .replace(backTokenRegex, (match) => colorBold(match));
+}
 
 export function promptLine(question: string): Promise<string> {
   return new Promise((resolve) => {
@@ -8,7 +18,7 @@ export function promptLine(question: string): Promise<string> {
       /* ignore */
     }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
+    rl.question(stylePrompt(question), (answer) => {
       rl.close();
       resolve(answer);
     });

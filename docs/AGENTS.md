@@ -100,6 +100,12 @@ Notes:
 - If builds stay `queued`, check builder/runner services and build logs on the server.
 - For Prisma apps, ensure the Dockerfile copies `prisma/schema.prisma` before `npm ci` and runs `npx prisma generate` before `npm run build`.
 - Use a `.uplinkignore` file to keep tarballs small. Typical entries include `node_modules`, `.next`, `dist`, `build`, `coverage`, `.turbo`, `.cache`, `.vercel`, `*.log`, and any local SQLite `.db` files.
+- `host list` (non-JSON) prints two lines per app: `- name (app_id)` and the URL on the next line.
+- `host delete` requires typing `DELETE` unless `--yes` is provided.
+
+## Interactive menu notes
+- All selection lists use arrow keys + Enter (no numeric entry required).
+- Hosted app lists display the app URL alongside name and ID.
 
 ### JSON shapes (representative)
 - Create: `{ "tunnel": { id, url?, token?, alias?, aliasUrl?, targetPort, status, connected?, createdAt }, "alias": "myapp"|null, "aliasError": "..."|null }`

@@ -40,6 +40,12 @@ uplink        # open menu
 - My Tunnels → see status and permanent URL if set
 - Create Permanent URL → pick tunnel → enter alias (if premium enabled)
 
+### Hosting (interactive)
+- Hosting → Setup Wizard → analyze + create + deploy
+- Hosting → Deploy to Existing App → select app with arrow keys
+- Hosting → List Hosted Apps → select app to view ID + URL
+- Hosting → Delete Hosted App → select app, confirm options (type `DELETE` to proceed)
+
 ## Quick start (non-interactive)
 ```bash
 # Create tunnel (any port: 3000, 8080, 5173, etc.)

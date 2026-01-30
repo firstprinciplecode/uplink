@@ -1,12 +1,37 @@
 import { spawnSync } from "child_process";
 import { resolve } from "path";
 import { isBackInput } from "../io";
+import type { SelectOption } from "../inline-tree-select";
 import type { MenuChoice } from "../types";
 
 type Deps = {
   promptLine: (question: string) => Promise<string>;
   restoreRawMode: () => void;
+  inlineSelect: (
+    title: string,
+    options: SelectOption[],
+    includeBack?: boolean
+  ) => Promise<{ index: number; value: string | number | null } | null>;
 };
+
+type HostedApp = { name: string; id: string; url?: string };
+
+function parseHostedApps(output: string): HostedApp[] {
+  const lines = output.split("\n");
+  const apps: HostedApp[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    const match = line.match(/^- (.+) \((app_[^)]+)\)$/);
+    if (!match) continue;
+    const nextLine = lines[i + 1]?.trim();
+    const url =
+      nextLine && (nextLine.startsWith("http://") || nextLine.startsWith("https://"))
+        ? nextLine
+        : undefined;
+    apps.push({ name: match[1], id: match[2], url });
+  }
+  return apps;
+}
 
 async function resolvePath(promptLine: Deps["promptLine"]): Promise<string | null> {
   const cwd = process.env.UPLINK_CWD || process.cwd();
@@ -62,7 +87,7 @@ function runCliCapture(args: string[]): string {
 }
 
 export function buildHostingMenu(deps: Deps): MenuChoice {
-  const { restoreRawMode, promptLine } = deps;
+  const { restoreRawMode, promptLine, inlineSelect } = deps;
 
   return {
     label: "Hosting",
@@ -89,28 +114,21 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             restoreRawMode();
             return "No apps found. Use Setup Wizard to create one first.";
           }
-          const lines = output.split("\n");
-          const apps = lines
-            .map((line) => {
-              const match = line.match(/^- (.+) \((app_[^)]+)\)$/);
-              if (!match) return null;
-              return { name: match[1], id: match[2] };
-            })
-            .filter((entry): entry is { name: string; id: string } => Boolean(entry));
+          const apps = parseHostedApps(output);
           if (apps.length === 0) {
             restoreRawMode();
             return "No apps found. Use Setup Wizard to create one first.";
           }
-          const menuLines = apps.map((app, idx) => `${idx + 1}) ${app.name}`);
-          const choice = (await promptLine(`Select app to deploy to (or "back"):\n${menuLines.join("\n")}\n> `))
-            .trim()
-            .toLowerCase();
-          if (isBackInput(choice)) {
+          const options: SelectOption[] = apps.map((app) => ({
+            label: `${app.name} (${app.id})`,
+            value: app.id,
+          }));
+          const choice = await inlineSelect("Select app to deploy to", options, true);
+          if (choice === null) {
             restoreRawMode();
             return "";
           }
-          const index = Number(choice);
-          const selected = Number.isFinite(index) ? apps[index - 1] : apps.find((app) => app.name.toLowerCase() === choice);
+          const selected = apps.find((app) => app.id === choice.value);
           if (!selected) {
             restoreRawMode();
             return "Invalid selection.";
@@ -146,8 +164,39 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         label: "List Hosted Apps",
         action: async () => {
           const output = runCliCapture(["host", "list"]);
+          if (!output || output.includes("No apps found")) {
+            restoreRawMode();
+            return "No apps found.";
+          }
+          const apps = parseHostedApps(output);
+          if (apps.length === 0) {
+            restoreRawMode();
+            return "No apps found.";
+          }
+          const options: SelectOption[] = apps.map((app) => ({
+            label: `${app.name} (${app.id})${app.url ? ` ${app.url}` : ""}`,
+            value: app.id,
+          }));
+          const choice = await inlineSelect("Hosted apps", options, true);
+          if (choice === null) {
+            restoreRawMode();
+            return "";
+          }
+          const selected = apps.find((app) => app.id === choice.value);
+          if (!selected) {
+            restoreRawMode();
+            return "Invalid selection.";
+          }
           restoreRawMode();
-          return output || "No apps found.";
+          return [
+            `App: ${selected.name}`,
+            `ID:  ${selected.id}`,
+            selected.url ? `URL: ${selected.url}` : "",
+            "",
+            "Commands:",
+            `  uplink host status --id ${selected.id}`,
+            `  uplink host logs --id ${selected.id}`,
+          ].join("\n");
         },
       },
       {
@@ -158,32 +207,21 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             restoreRawMode();
             return "No apps found.";
           }
-          const lines = output.split("\n");
-          const apps = lines
-            .map((line) => {
-              const match = line.match(/^- (.+) \((app_[^)]+)\)$/);
-              if (!match) return null;
-              return { name: match[1], id: match[2] };
-            })
-            .filter((entry): entry is { name: string; id: string } => Boolean(entry));
+          const apps = parseHostedApps(output);
           if (apps.length === 0) {
             restoreRawMode();
             return "No apps found.";
           }
-          const menuLines = apps.map((app, idx) => `${idx + 1}) ${app.name} (${app.id})`);
-          const choice = (await promptLine(`Select app to delete (or "back"):\n${menuLines.join("\n")}\n> `))
-            .trim()
-            .toLowerCase();
-          if (isBackInput(choice)) {
+          const options: SelectOption[] = apps.map((app) => ({
+            label: `${app.name} (${app.id})`,
+            value: app.id,
+          }));
+          const choice = await inlineSelect("Select app to delete", options, true);
+          if (choice === null) {
             restoreRawMode();
             return "";
           }
-          if (!choice) {
-            restoreRawMode();
-            return "No selection made.";
-          }
-          const index = Number(choice);
-          const selected = Number.isFinite(index) ? apps[index - 1] : apps.find((app) => app.id === choice);
+          const selected = apps.find((app) => app.id === choice.value);
           if (!selected) {
             restoreRawMode();
             return "Invalid selection.";

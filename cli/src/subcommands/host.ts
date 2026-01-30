@@ -7,6 +7,7 @@ import { createHash } from "crypto";
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { promptLine } from "./menu/io";
+import { colorRed } from "./menu/colors";
 import os from "os";
 import fetch from "node-fetch";
 import { spawnSync } from "child_process";
@@ -126,6 +127,8 @@ async function waitForDeployment(
   let pollCount = 0;
   let intervalMs = opts.intervalMs;
   let sameSummaryCount = 0;
+  let lastHeartbeatAt = start;
+  const heartbeatIntervalMs = 30_000;
   while (Date.now() - start < opts.timeoutMs) {
     pollCount += 1;
     let status: AppStatus;
@@ -167,6 +170,16 @@ async function waitForDeployment(
     if (!opts.json && summary !== lastSummary) {
       console.log(`Status: ${summary}`);
       lastSummary = summary;
+    }
+
+    if (!opts.json && Date.now() - lastHeartbeatAt >= heartbeatIntervalMs) {
+      const elapsedMs = Date.now() - start;
+      const elapsedSec = Math.floor(elapsedMs / 1000);
+      const minutes = Math.floor(elapsedSec / 60);
+      const seconds = elapsedSec % 60;
+      const elapsedLabel = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+      console.log(`Waiting... (${elapsedLabel} elapsed)`);
+      lastHeartbeatAt = Date.now();
     }
 
     if (status.activeRelease?.id === releaseId && status.activeRelease?.buildStatus === "failed") {
@@ -1400,10 +1413,11 @@ hostCommand
         const volumeWarning = opts.deleteVolumes
           ? " INCLUDING ALL PERSISTENT DATA (databases, files, etc.)"
           : "";
-        const answer = (await promptLine(`Delete app ${opts.id}${volumeWarning}? This cannot be undone. (y/N): `))
-          .trim()
-          .toLowerCase();
-        if (answer !== "y" && answer !== "yes") {
+        const confirmPrompt =
+          `Delete app ${opts.id}${volumeWarning}? This cannot be undone.\n` +
+          colorRed("Type DELETE to confirm: ");
+        const answer = (await promptLine(confirmPrompt)).trim();
+        if (answer !== "DELETE") {
           if (!opts.json) console.log("Cancelled.");
           return;
         }
