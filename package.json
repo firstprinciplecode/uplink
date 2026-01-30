@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.1.35",
+  "version": "0.1.37",
   "description": "Expose localhost to the internet in seconds. Interactive terminal UI, permanent custom domains, zero config. A modern ngrok alternative.",
   "keywords": [
     "tunnel",
@@ -33,7 +33,7 @@
     "node": ">=20.0.0"
   },
   "bin": {
-    "uplink": "./cli/bin/uplink.js"
+    "uplink": "cli/bin/uplink.js"
   },
   "files": [
     "cli/",
