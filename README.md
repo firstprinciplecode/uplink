@@ -45,6 +45,8 @@ uplink        # open menu
 - Hosting → Deploy to Existing App → select app with arrow keys
 - Hosting → List Hosted Apps → select app to view ID + URL
 - Hosting → Delete Hosted App → select app, confirm options (type `DELETE` to proceed)
+- Next.js default: server hosting expects `output: "standalone"`
+- Vite / CRA: static build is supported (dist/build served as static)
 
 ## Quick start (non-interactive)
 ```bash

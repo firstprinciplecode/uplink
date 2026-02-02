@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { apiRequest } from "../http";
 import { handleError, printJson } from "../utils/machine";
 import { analyzeProject, AnalysisResult, buildRequirements } from "../utils/analyze";
+import { getFrameworkOutputCheck } from "../utils/framework-output";
 import { generateDockerfile, generateHostConfig } from "../templates";
 import { createHash } from "crypto";
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
@@ -651,13 +652,15 @@ function findNextConfigPath(dir: string): string | null {
   return null;
 }
 
-function hasStandaloneOutputConfig(content: string): boolean {
-  return /output\s*:\s*["']standalone["']/.test(content);
-}
-
 function applyStandaloneOutputConfig(configPath: string): boolean {
   const content = readFileSync(configPath, "utf8");
-  if (hasStandaloneOutputConfig(content)) return false;
+  const outputRegex = /output\s*:\s*["'](?:standalone|export)["']\s*,?/g;
+  if (outputRegex.test(content)) {
+    const updated = content.replace(outputRegex, 'output: "standalone",');
+    if (updated === content) return false;
+    writeFileSync(configPath, updated, "utf8");
+    return true;
+  }
   const nextConfigAssign = /(const\s+nextConfig[^=]*=\s*\{)/;
   const moduleExportsAssign = /(module\.exports\s*=\s*\{)/;
   const exportDefaultAssign = /(export\s+default\s*\{)/;
@@ -670,6 +673,26 @@ function applyStandaloneOutputConfig(configPath: string): boolean {
   if (updated === content) return false;
   writeFileSync(configPath, updated, "utf8");
   return true;
+}
+
+function updateNextOutputMode(
+  analysis: AnalysisResult,
+  mode: "standalone" | "export" | "unknown",
+  configPath?: string
+): void {
+  if (analysis.framework?.name !== "nextjs") return;
+  analysis.frameworkOutput = {
+    framework: "nextjs",
+    mode,
+    distDir: analysis.frameworkOutput?.distDir,
+    configPath: configPath || analysis.frameworkOutput?.configPath,
+  };
+}
+
+function formatFrameworkOutputGuidance(analysis: AnalysisResult): string[] {
+  const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+  if (!outputCheck) return [];
+  return outputCheck.guidance;
 }
 
 function dockerfileHasPrismaGenerate(dockerfilePath: string): boolean {
@@ -907,22 +930,23 @@ function buildPreflightChecklist(
   }
 
   if (analysis.framework?.name === "nextjs") {
-    const configPath = findNextConfigPath(dir);
-    const hasStandalone = configPath ? hasStandaloneOutputConfig(readFileSync(configPath, "utf8")) : false;
+    const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
     const dockerfilePath = join(dir, "Dockerfile");
-    if (analysis.dockerfile.exists && dockerfileExpectsStandalone(dockerfilePath) && !hasStandalone) {
+    const expectsStandalone = analysis.dockerfile.exists && dockerfileExpectsStandalone(dockerfilePath);
+    if (outputCheck?.mode === "export") {
       items.push({
-        level: "required",
-        title: "Next.js output is missing `standalone`",
-        detail: "Dockerfile expects .next/standalone.",
-        action: "Add `output: \"standalone\"` to your Next.js config.",
+        level: expectsStandalone ? "required" : "recommended",
+        title: "Next.js output is set to export",
+        detail: "Static export does not produce .next/standalone.",
+        action: outputCheck.guidance.join(" "),
       });
-    } else if (!analysis.dockerfile.exists && configPath && !hasStandalone) {
+    } else if (outputCheck?.mode === "unknown") {
+      const level = expectsStandalone ? "required" : "recommended";
       items.push({
-        level: "recommended",
-        title: "Next.js output is not set to `standalone`",
+        level,
+        title: "Next.js output mode not detected",
         detail: "Standalone builds reduce image size and simplify runtime.",
-        action: "Consider adding `output: \"standalone\"`.",
+        action: outputCheck.guidance.join(" "),
       });
     }
   }
@@ -1030,6 +1054,13 @@ hostCommand
           console.log(`Framework:       ${analysis.framework.name}${ver}`);
         } else {
           console.log("Framework:       (not detected)");
+        }
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (outputCheck) {
+          console.log(`Output mode:     ${outputCheck.mode}`);
+          if (analysis.frameworkOutput?.distDir) {
+            console.log(`Output dir:      ${analysis.frameworkOutput.distDir}`);
+          }
         }
 
         // Package manager
@@ -1190,6 +1221,13 @@ hostCommand
       } else {
         console.log("  Framework:       (not detected)");
       }
+      const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+      if (outputCheck) {
+        console.log(`  Output mode:     ${outputCheck.mode}`);
+        if (analysis.frameworkOutput?.distDir) {
+          console.log(`  Output dir:      ${analysis.frameworkOutput.distDir}`);
+        }
+      }
       if (analysis.packageManager) {
         console.log(`  Package manager: ${analysis.packageManager}`);
       }
@@ -1237,8 +1275,8 @@ hostCommand
       if (interactive && analysis.framework?.name === "nextjs") {
         const configPath = findNextConfigPath(dir);
         if (configPath) {
-          const content = readFileSync(configPath, "utf8");
-          if (!hasStandaloneOutputConfig(content)) {
+          const outputMode = analysis.frameworkOutput?.mode || "unknown";
+          if (outputMode !== "standalone") {
             const answer = (await promptLine(
               `\nAdd output: "standalone" to ${basename(configPath)}? (Y/n): `
             ))
@@ -1246,7 +1284,10 @@ hostCommand
               .toLowerCase();
             if (answer === "" || answer === "y" || answer === "yes") {
               const updated = applyStandaloneOutputConfig(configPath);
-              if (updated) console.log("  Updated Next.js config for standalone output");
+              if (updated) {
+                updateNextOutputMode(analysis, "standalone", configPath);
+                console.log("  Updated Next.js config for standalone output");
+              }
             }
           }
         }
@@ -1293,6 +1334,16 @@ hostCommand
 
       // Generate Dockerfile if needed
       if (needsDockerfile) {
+        const outputGuidance = formatFrameworkOutputGuidance(analysis);
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (analysis.framework?.name === "nextjs" && outputCheck && outputCheck.mode !== "standalone") {
+          console.log(`\n${outputCheck.summary}`);
+          for (const line of outputGuidance) {
+            console.log(`  ${line}`);
+          }
+          console.log("  Resolve this or provide a Dockerfile manually.");
+          return;
+        }
         if (analysis.nativeNodeDeps.length > 0) {
           const choice = opts.yes
             ? "y"
@@ -1337,11 +1388,11 @@ hostCommand
 
       // Next.js specific: check for standalone output
       if (analysis.framework?.name === "nextjs" && needsDockerfile) {
-        const configPath = findNextConfigPath(dir);
-        if (configPath) {
-          const content = readFileSync(configPath, "utf8");
-          if (!hasStandaloneOutputConfig(content)) {
-            console.log("\n  Note: Add `output: \"standalone\"` to your next.config for Docker builds");
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (outputCheck && outputCheck.mode !== "standalone") {
+          console.log(`\n  Note: ${outputCheck.summary}`);
+          for (const line of outputCheck.guidance) {
+            console.log(`  ${line}`);
           }
         }
       }
@@ -1588,6 +1639,13 @@ hostCommand
       const preflight = buildPreflightChecklist(dir, analysis, extraEnv);
       if (!opts.json) {
         console.log(`    Framework: ${analysis.framework?.name || "(not detected)"}`);
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (outputCheck) {
+          console.log(`    Output mode: ${outputCheck.mode}`);
+          if (analysis.frameworkOutput?.distDir) {
+            console.log(`    Output dir: ${analysis.frameworkOutput.distDir}`);
+          }
+        }
         const sqliteMeta = getSqliteMeta(analysis.database);
         const dbPath = sqliteMeta.path ? ` path=${sqliteMeta.path}` : "";
         const dbEnv = sqliteMeta.envVar ? ` env=${sqliteMeta.envVar}` : "";
@@ -1627,8 +1685,8 @@ hostCommand
       if (interactive && analysis.framework?.name === "nextjs") {
         const configPath = findNextConfigPath(dir);
         if (configPath) {
-          const content = readFileSync(configPath, "utf8");
-          if (!hasStandaloneOutputConfig(content)) {
+          const outputMode = analysis.frameworkOutput?.mode || "unknown";
+          if (outputMode !== "standalone") {
             const answer = (await promptLine(
               `    Add output: "standalone" to ${basename(configPath)}? (Y/n): `
             ))
@@ -1637,6 +1695,7 @@ hostCommand
             if (answer === "" || answer === "y" || answer === "yes") {
               const updated = applyStandaloneOutputConfig(configPath);
               if (updated && !opts.json) {
+                updateNextOutputMode(analysis, "standalone", configPath);
                 console.log("    Updated Next.js config for standalone output");
               }
             }
@@ -1710,6 +1769,18 @@ hostCommand
 
       // Step 2: Generate Dockerfile
       if (!analysis.dockerfile.exists) {
+        const outputGuidance = formatFrameworkOutputGuidance(analysis);
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (analysis.framework?.name === "nextjs" && outputCheck && outputCheck.mode !== "standalone") {
+          if (!opts.json) {
+            console.log(`\n${outputCheck.summary}`);
+            for (const line of outputGuidance) {
+              console.log(`  ${line}`);
+            }
+            console.log("  Resolve this or provide a Dockerfile manually.");
+          }
+          return;
+        }
         if (analysis.nativeNodeDeps.length > 0) {
           const choice = useDefaults
             ? "y"
@@ -1756,12 +1827,12 @@ hostCommand
 
       // Next.js: check for standalone output
       if (analysis.framework?.name === "nextjs") {
-        const configPath = findNextConfigPath(dir);
-        if (configPath) {
-          const content = readFileSync(configPath, "utf8");
-          if (!hasStandaloneOutputConfig(content)) {
-            if (!opts.json) {
-              console.log("\n    Note: Your next.config may need `output: \"standalone\"` for Docker builds");
+        const outputCheck = getFrameworkOutputCheck(analysis.frameworkOutput);
+        if (outputCheck && outputCheck.mode !== "standalone") {
+          if (!opts.json) {
+            console.log(`\n    Note: ${outputCheck.summary}`);
+            for (const line of outputCheck.guidance) {
+              console.log(`    ${line}`);
             }
           }
         }

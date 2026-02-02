@@ -102,6 +102,7 @@ Notes:
 - Use a `.uplinkignore` file to keep tarballs small. Typical entries include `node_modules`, `.next`, `dist`, `build`, `coverage`, `.turbo`, `.cache`, `.vercel`, `*.log`, and any local SQLite `.db` files.
 - `host list` (non-JSON) prints two lines per app: `- name (app_id)` and the URL on the next line.
 - `host delete` requires typing `DELETE` unless `--yes` is provided.
+- Hosting output modes: Next.js expects `output: "standalone"` for server builds. Vite and CRA are treated as static builds (dist/build).
 
 ## Interactive menu notes
 - All selection lists use arrow keys + Enter (no numeric entry required).

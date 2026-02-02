@@ -116,6 +116,109 @@ CMD ["node", "server.js"]
 `;
 }
 
+// Static site Dockerfile (Vite, CRA)
+function staticDockerfile(
+  pm: "npm" | "yarn" | "pnpm" | "bun" | null,
+  port: number,
+  baseImage: string,
+  distDir: string
+): string {
+  const packageManager = pm || "npm";
+
+  if (packageManager === "pnpm") {
+    return `FROM ${baseImage} AS base
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Dependencies stage
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${port}
+
+RUN npm install -g serve
+COPY --from=builder /app/${distDir} ./public
+
+EXPOSE ${port}
+CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+`;
+  }
+
+  if (packageManager === "yarn") {
+    return `FROM ${baseImage} AS base
+
+# Dependencies stage
+FROM base AS deps
+WORKDIR /app
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN yarn build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${port}
+
+RUN npm install -g serve
+COPY --from=builder /app/${distDir} ./public
+
+EXPOSE ${port}
+CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+`;
+  }
+
+  // npm (default)
+  return `FROM ${baseImage} AS base
+
+# Dependencies stage
+FROM base AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+ENV npm_config_optional=true
+RUN npm ci --include=optional
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${port}
+
+RUN npm install -g serve
+COPY --from=builder /app/${distDir} ./public
+
+EXPOSE ${port}
+CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+`;
+}
+
 // Express/Node.js Dockerfile
 function expressDockerfile(
   pm: "npm" | "yarn" | "pnpm" | "bun" | null,
@@ -311,10 +414,29 @@ export function generateDockerfile(analysis: AnalysisResult): DockerfileTemplate
 
   switch (framework.name) {
     case "nextjs":
+      if (analysis.frameworkOutput?.mode && analysis.frameworkOutput.mode !== "standalone") {
+        return null;
+      }
       return {
         name: "Next.js",
         content: nextjsDockerfile(packageManager, port, baseImage, { usePrisma: analysis.usesPrisma }),
       };
+
+    case "vite": {
+      const distDir = analysis.frameworkOutput?.distDir || "dist";
+      return {
+        name: "Vite (static)",
+        content: staticDockerfile(packageManager, port, baseImage, distDir),
+      };
+    }
+
+    case "cra": {
+      const distDir = analysis.frameworkOutput?.distDir || "build";
+      return {
+        name: "Create React App (static)",
+        content: staticDockerfile(packageManager, port, baseImage, distDir),
+      };
+    }
 
     case "express":
     case "fastify":

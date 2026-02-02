@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, basename, isAbsolute, dirname } from "path";
+import { detectFrameworkOutput, type FrameworkOutputInfo } from "./framework-output";
 
 export interface FrameworkInfo {
   name: string;
@@ -36,6 +37,7 @@ export interface HealthCheck {
 
 export interface AnalysisResult {
   framework: FrameworkInfo | null;
+  frameworkOutput: FrameworkOutputInfo | null;
   packageManager: "npm" | "yarn" | "pnpm" | "bun" | null;
   database: DatabaseInfo | null;
   storage: StorageInfo[];
@@ -205,6 +207,14 @@ export function detectFramework(dir: string): FrameworkInfo | null {
     // Next.js
     if (deps["next"]) {
       return { name: "nextjs", version: deps["next"]?.replace(/[\^~]/, "") };
+    }
+    // Vite
+    if (deps["vite"]) {
+      return { name: "vite", version: deps["vite"]?.replace(/[\^~]/, "") };
+    }
+    // Create React App
+    if (deps["react-scripts"]) {
+      return { name: "cra", version: deps["react-scripts"]?.replace(/[\^~]/, "") };
     }
     // Express
     if (deps["express"]) {
@@ -463,49 +473,21 @@ function detectHealthChecks(dir: string, analysis: AnalysisResult): HealthCheck[
     }
   }
 
-  if (analysis.framework?.name === "nextjs" && !analysis.dockerfile.exists) {
-    const nextConfigPath = join(dir, "next.config.ts");
-    const nextConfigJsPath = join(dir, "next.config.js");
-    const nextConfigMjsPath = join(dir, "next.config.mjs");
-    const configPath = existsSync(nextConfigPath)
-      ? nextConfigPath
-      : existsSync(nextConfigJsPath)
-        ? nextConfigJsPath
-        : existsSync(nextConfigMjsPath)
-          ? nextConfigMjsPath
-          : null;
-    if (configPath) {
-      const content = readFileSync(configPath, "utf8");
-      if (!/output\s*:\s*["']standalone["']/.test(content)) {
-        checks.push({
-          level: "info",
-          message: "Next.js config missing output: \"standalone\"",
-          detail: "Standalone builds are recommended for smaller Docker images.",
-        });
-      }
-    }
-  }
-
-  if (analysis.framework?.name === "nextjs" && analysis.dockerfile.exists) {
-    const nextConfigPath = join(dir, "next.config.ts");
-    const nextConfigJsPath = join(dir, "next.config.js");
-    const nextConfigMjsPath = join(dir, "next.config.mjs");
-    const configPath = existsSync(nextConfigPath)
-      ? nextConfigPath
-      : existsSync(nextConfigJsPath)
-        ? nextConfigJsPath
-        : existsSync(nextConfigMjsPath)
-          ? nextConfigMjsPath
-          : null;
-    if (configPath) {
-      const content = readFileSync(configPath, "utf8");
-      if (!/output\s*:\s*["']standalone["']/.test(content)) {
-        checks.push({
-          level: "warning",
-          message: "Next.js output missing standalone build config",
-          detail: "Dockerfile expects .next/standalone; add output: \"standalone\".",
-        });
-      }
+  if (analysis.framework?.name === "nextjs") {
+    const output = analysis.frameworkOutput;
+    if (output?.mode === "export") {
+      checks.push({
+        level: "warning",
+        message: "Next.js output is set to export",
+        detail: "Uplink hosting expects standalone output or a static-export Dockerfile.",
+      });
+    } else if (output?.mode === "unknown") {
+      const level = analysis.dockerfile.exists ? "warning" : "info";
+      checks.push({
+        level,
+        message: "Next.js output mode not detected",
+        detail: "Set output: \"standalone\" in next.config.* for server hosting.",
+      });
     }
   }
 
@@ -578,6 +560,7 @@ function detectHealthChecks(dir: string, analysis: AnalysisResult): HealthCheck[
 
 export function analyzeProject(dir: string): AnalysisResult {
   const framework = detectFramework(dir);
+  const frameworkOutput = detectFrameworkOutput(dir, framework);
   const packageManager = detectPackageManager(dir);
   const database = detectDatabase(dir);
   const storage = detectStorage(dir);
@@ -603,6 +586,7 @@ export function analyzeProject(dir: string): AnalysisResult {
 
   const analysis: AnalysisResult = {
     framework,
+    frameworkOutput,
     packageManager,
     database,
     storage,
