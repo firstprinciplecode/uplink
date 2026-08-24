@@ -13,6 +13,7 @@ import os from "os";
 import fetch from "node-fetch";
 import { spawnSync } from "child_process";
 import { getResolvedApiBase, getResolvedApiToken } from "../utils/api-base";
+import { domainsCommand } from "./host-domains";
 
 type App = { id: string; name: string; url: string; createdAt?: string; updatedAt?: string };
 type AppList = { apps: App[]; count: number };
@@ -590,6 +591,8 @@ function writeUplinkIgnore(dir: string, entries: string[]): void {
 }
 
 export const hostCommand = new Command("host").description("Host persistent web services (Dockerfile required)");
+
+hostCommand.addCommand(domainsCommand);
 
 async function resolveSqliteConfig(
   analysis: AnalysisResult,
