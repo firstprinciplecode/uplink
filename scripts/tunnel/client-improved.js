@@ -61,6 +61,7 @@ let reconnectDelay = INITIAL_RECONNECT_DELAY;
 let reconnectTimer = null;
 let isConnected = false;
 let isRegistered = false;
+let shuttingDown = false;
 let healthCheckTimer = null;
 let lastHealthTimeoutLog = 0;
 let stats = {
@@ -140,6 +141,7 @@ function checkLocalService() {
 }
 
 function connect() {
+  if (shuttingDown) return;
   if (socket && !socket.destroyed) {
     socket.destroy();
   }
@@ -216,6 +218,10 @@ function connect() {
           stats.reconnects = 0; // Reset reconnect count on successful registration
         } else if (msg.type === "error") {
           log("error", "Relay error:", msg.message || "Unknown error");
+          if (/invalid token/i.test(String(msg.message || ""))) {
+            log("error", "Token rejected by relay; exiting");
+            shutdown(1);
+          }
         }
       } catch (err) {
         log("error", "Parse error:", err.message, `(message length: ${line.length})`);
@@ -228,7 +234,7 @@ function connect() {
     isRegistered = false;
     closeAllWsSessions();
     logError(err, "Connection error");
-    scheduleReconnect();
+    if (!shuttingDown) scheduleReconnect();
   });
 
   socket.on("close", () => {
@@ -236,7 +242,8 @@ function connect() {
     isConnected = false;
     isRegistered = false;
     closeAllWsSessions();
-    
+
+    if (shuttingDown) return;
     if (wasRegistered) {
       log("warn", "Connection closed. Attempting to reconnect...");
       scheduleReconnect();
@@ -247,6 +254,7 @@ function connect() {
 }
 
 function scheduleReconnect() {
+  if (shuttingDown) return;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
   }
@@ -445,28 +453,36 @@ function sendErrorResponse(id, status, message) {
 }
 
 // Graceful shutdown
-function shutdown() {
+function shutdown(exitCode = 0) {
+  if (shuttingDown) {
+    process.exit(exitCode);
+    return;
+  }
+  shuttingDown = true;
   log("info", "Shutting down...");
-  
+
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
-  
+
   if (healthCheckTimer) {
     clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
   }
-  
+
   closeAllWsSessions();
 
   if (socket && !socket.destroyed) {
-    socket.end();
+    socket.removeAllListeners("close");
+    socket.removeAllListeners("error");
+    socket.destroy();
   }
-  
-  // Print stats
+
   const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
   log("info", `Stats: ${stats.requests} requests, ${stats.errors} errors, ${stats.reconnects} reconnects, ${uptime}s uptime`);
-  
-  process.exit(0);
+
+  process.exit(exitCode);
 }
 
 // Start connection

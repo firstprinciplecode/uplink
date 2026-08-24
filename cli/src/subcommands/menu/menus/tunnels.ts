@@ -16,8 +16,10 @@ type Deps = {
   scanCommonPorts: () => Promise<number[]>;
   findTunnelClients: () => Array<{ pid: number; port: number; token: string }>;
   createAndStartTunnel: (port: number) => Promise<string>;
-  killTunnelClient: (pid: number) => boolean;
-  killAllTunnelClients: (clients: Array<{ pid: number; port: number; token: string }>) => number;
+  stopTunnelClients: (
+    clients: Array<{ pid: number; port: number; token: string }>,
+    opts?: { connectedGhosts?: boolean }
+  ) => Promise<{ killed: number; deleted: number }>;
   colorDim: (text: string) => string;
   colorRed: (text: string) => string;
 };
@@ -33,8 +35,7 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
     scanCommonPorts,
     findTunnelClients,
     createAndStartTunnel,
-    killTunnelClient,
-    killAllTunnelClients,
+    stopTunnelClients,
     colorDim,
     colorRed,
   } = deps;
@@ -186,21 +187,22 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
         label: "Stop Tunnel",
         action: async () => {
           try {
-            // Find running tunnel client processes
             const processes = findTunnelClients();
 
             if (processes.length === 0) {
+              const ghost = await stopTunnelClients([], { connectedGhosts: true });
               restoreRawMode();
+              if (ghost.deleted > 0) {
+                return `✓ Removed ${ghost.deleted} relay-connected tunnel${ghost.deleted !== 1 ? "s" : ""} with no local client`;
+              }
               return "No running tunnel clients found.";
             }
 
-            // Build options from running tunnels
             const options: SelectOption[] = processes.map((p) => ({
               label: `Port ${p.port} ${colorDim(`(${truncate(p.token, 8)})`)}`,
               value: p.pid,
             }));
 
-            // Add "Stop all" option if more than one tunnel
             if (processes.length > 1) {
               options.push({ label: colorRed("Stop all tunnels"), value: "all" });
             }
@@ -208,28 +210,25 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
             const result = await inlineSelect("Select tunnel to stop", options, true);
 
             if (result === null) {
-              // User selected Back
               restoreRawMode();
-              return ""; // Return empty to go back without message
+              return "";
             }
 
-            let killed = 0;
-            if (result.value === "all") {
-              // Kill all
-              killed = killAllTunnelClients(processes);
-            } else {
-              // Kill specific client
-              const pid = result.value as number;
-              const ok = killTunnelClient(pid);
-              if (!ok) {
-                restoreRawMode();
-                throw new Error(`Failed to kill process ${pid}`);
-              }
-              killed = 1;
-            }
+            const selected =
+              result.value === "all"
+                ? processes
+                : processes.filter((p) => {
+                    const pid = result.value as number;
+                    const chosen = processes.find((c) => c.pid === pid);
+                    return p.pid === pid || (chosen && p.token === chosen.token);
+                  });
 
+            const { killed, deleted } = await stopTunnelClients(selected);
             restoreRawMode();
-            return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
+            if (killed === 0 && deleted === 0) {
+              throw new Error("Failed to stop tunnel");
+            }
+            return `✓ Stopped ${killed} local client${killed !== 1 ? "s" : ""}, removed ${deleted} tunnel record${deleted !== 1 ? "s" : ""}`;
           } catch (err: any) {
             restoreRawMode();
             throw err;

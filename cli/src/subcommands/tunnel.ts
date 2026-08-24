@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { apiRequest } from "../http";
 import { handleError, printJson } from "../utils/machine";
+import { findTunnelClients, killTunnelClient } from "./menu/effects/tunnel-clients";
 
 type TunnelResponse = {
   id: string;
@@ -10,6 +11,7 @@ type TunnelResponse = {
   token?: string;
   alias?: string | null;
   status?: string;
+  connected?: boolean;
   createdAt?: string;
   updatedAt?: string;
   ingressHttpUrl?: string;
@@ -100,8 +102,10 @@ tunnelCommand
         }
         console.log(`Tunnels (${result.count}):`);
         for (const t of result.tunnels) {
+          const connected = t.connected ? "connected" : "idle";
+          const token = t.token ? `${String(t.token).slice(0, 8)}…` : "-";
           console.log(
-            `${t.id}  ${t.url ?? t.ingressHttpUrl ?? "-"}  token=${t.token ?? "-"}  alias=${t.alias ?? "-"}  status=${t.status ?? "-"}`
+            `${t.id}  ${t.url ?? t.ingressHttpUrl ?? "-"}  token=${token}  alias=${t.alias ?? "-"}  status=${t.status ?? "-"}  ${connected}`
           );
         }
       }
@@ -171,14 +175,52 @@ tunnelCommand
     }
   });
 
-// Stop (delete) tunnel
+// Stop (delete) tunnel and kill any matching local client
 tunnelCommand
   .command("stop")
-  .description("Stop (delete) a tunnel")
-  .requiredOption("--id <id>", "Tunnel id")
+  .description("Stop a tunnel: kill the local client and delete the record")
+  .option("--id <id>", "Tunnel id")
+  .option("--all", "Stop every tunnel for this account", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
+    if (!opts.all && !opts.id) {
+      console.error("Provide --id or --all");
+      process.exit(2);
+    }
+
     try {
+      if (opts.all) {
+        const listed = await apiRequest("GET", "/v1/tunnels") as TunnelListResponse;
+        let killed = 0;
+        for (const client of findTunnelClients()) {
+          if (killTunnelClient(client.pid)) killed++;
+        }
+        let deleted = 0;
+        for (const t of listed.tunnels || []) {
+          if (!t.id) continue;
+          try {
+            await apiRequest("DELETE", `/v1/tunnels/${t.id}`);
+            deleted++;
+          } catch {
+            /* already gone */
+          }
+        }
+        if (opts.json) {
+          printJson({ ok: true, killed, deleted });
+        } else {
+          console.log(`Stopped ${killed} local client(s), removed ${deleted} tunnel record(s)`);
+        }
+        return;
+      }
+
+      const listed = await apiRequest("GET", "/v1/tunnels") as TunnelListResponse;
+      const target = (listed.tunnels || []).find((t) => t.id === opts.id);
+      if (target?.token) {
+        for (const client of findTunnelClients().filter((c) => c.token === target.token)) {
+          killTunnelClient(client.pid);
+        }
+      }
+
       const result = await apiRequest("DELETE", `/v1/tunnels/${opts.id}`) as { id: string; status: string };
       if (opts.json) {
         printJson(result);

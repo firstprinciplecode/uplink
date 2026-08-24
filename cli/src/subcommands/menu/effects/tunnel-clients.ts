@@ -39,10 +39,22 @@ export function findTunnelClients(): TunnelClient[] {
 
 export function killTunnelClient(pid: number): boolean {
   try {
-    execSync(`kill -TERM ${pid}`, { stdio: "ignore" });
-    return true;
+    process.kill(pid, "SIGTERM");
   } catch {
     return false;
+  }
+  try {
+    execSync(`kill -0 ${pid} && sleep 0.4 && kill -KILL ${pid} || true`, {
+      stdio: "ignore",
+    });
+  } catch {
+    /* process already gone */
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
   }
 }
 
@@ -54,7 +66,43 @@ export function killAllTunnelClients(clients: TunnelClient[]): number {
   return killed;
 }
 
+type ApiTunnel = { id?: string; token?: string; connected?: boolean };
+
 type ApiRequest = (method: string, path: string, body?: unknown) => Promise<any>;
+
+export async function stopTunnelClients(
+  apiRequest: ApiRequest,
+  clients: TunnelClient[],
+  opts: { connectedGhosts?: boolean } = {}
+): Promise<{ killed: number; deleted: number }> {
+  const tokens = new Set(clients.map((c) => c.token));
+  let deleted = 0;
+
+  try {
+    const result = await apiRequest("GET", "/v1/tunnels");
+    const tunnels = (result.tunnels || []) as ApiTunnel[];
+    for (const tunnel of tunnels) {
+      if (!tunnel.id) continue;
+      const matched = Boolean(tunnel.token && tokens.has(tunnel.token));
+      const ghost = Boolean(opts.connectedGhosts && tunnel.connected);
+      if (!matched && !ghost) continue;
+      try {
+        await apiRequest("DELETE", `/v1/tunnels/${tunnel.id}`);
+        deleted++;
+      } catch {
+        /* keep stopping the rest */
+      }
+    }
+  } catch {
+    /* still kill local processes */
+  }
+
+  let killed = 0;
+  for (const c of clients) {
+    if (killTunnelClient(c.pid)) killed++;
+  }
+  return { killed, deleted };
+}
 
 /**
  * Create a tunnel via API and start the local client in background.

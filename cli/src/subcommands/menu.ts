@@ -265,8 +265,7 @@ export const menuCommand = new Command("menu")
       scanCommonPorts: ports.scanCommonPorts,
       findTunnelClients: tunnelClients.findTunnelClients,
       createAndStartTunnel: (port: number) => tunnelClients.createAndStartTunnel(apiRequest, port),
-      killTunnelClient: tunnelClients.killTunnelClient,
-      killAllTunnelClients: tunnelClients.killAllTunnelClients,
+      stopTunnelClients: (clients, opts) => tunnelClients.stopTunnelClients(apiRequest, clients, opts),
       colorDim,
       colorRed,
     });
@@ -293,10 +292,16 @@ export const menuCommand = new Command("menu")
         action: async () => {
           const clients = tunnelClients.findTunnelClients();
           if (clients.length === 0) {
+            const ghost = await tunnelClients.stopTunnelClients(apiRequest, [], {
+              connectedGhosts: true,
+            });
+            if (ghost.deleted > 0) {
+              return `✓ Removed ${ghost.deleted} relay-connected tunnel${ghost.deleted !== 1 ? "s" : ""} with no local client`;
+            }
             return "No running tunnel clients found.";
           }
-          const killed = tunnelClients.killAllTunnelClients(clients);
-          return `✓ Stopped ${killed} tunnel client${killed !== 1 ? "s" : ""}`;
+          const { killed, deleted } = await tunnelClients.stopTunnelClients(apiRequest, clients);
+          return `✓ Stopped ${killed} local client${killed !== 1 ? "s" : ""}, removed ${deleted} tunnel record${deleted !== 1 ? "s" : ""}`;
         },
       });
     }
