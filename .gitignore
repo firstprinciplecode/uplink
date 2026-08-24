@@ -62,6 +62,9 @@ docs/*
 !docs/AGENTS.md
 !docs/MENU_STRUCTURE.md
 
+# Accidental local copy of the private hosting-runtime backend — do not publish
+/backend/
+
 
 
 
