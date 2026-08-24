@@ -50,6 +50,8 @@ const httpAgent = new http.Agent({
 const clients = new Map();
 // requestId -> { res, token, alias, startedAt }
 const pending = new Map();
+// wsId -> { socket, token } — active WebSocket (upgrade) passthrough sessions
+const wsSessions = new Map();
 // alias -> { token, timestamp }
 const aliasCache = new Map();
 const ALIAS_CACHE_TTL = 60000;
@@ -315,7 +317,7 @@ async function resolveAliasToToken(alias) {
 // Extract token from Host header: abc123.x.uplink.spot -> abc123
 function extractTokenFromHost(host) {
   if (!host) return null;
-  const lower = host.toLowerCase();
+  const lower = host.toLowerCase().replace(/:\d+$/, "");
   const parts = lower.split(".");
   if (parts.length < 3) return null;
   const token = parts[0];
@@ -328,7 +330,7 @@ function extractTokenFromHost(host) {
 
 function extractAliasFromHost(host) {
   if (!host) return null;
-  const lower = host.toLowerCase();
+  const lower = host.toLowerCase().replace(/:\d+$/, "");
   const parts = lower.split(".");
   if (parts.length < 3) return null;
   const alias = parts[0];
@@ -406,7 +408,67 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
           log("registered client", msg.token.substring(0, 8) + "...", "port", msg.targetPort, "ip", clientIp);
           socket.write(JSON.stringify({ type: "registered" }) + "\n");
           
+        } else if (msg.type === "response-head" && msg.id) {
+          // Streaming response: headers first, then response-chunk messages,
+          // then response-end. Entry stays in `pending` until the stream ends.
+          const entry = pending.get(msg.id);
+          if (!entry) {
+            log("warn", "Response head for unknown request:", msg.id);
+            return;
+          }
+          entry.started = true;
+
+          const res = entry.res;
+          Object.entries(msg.headers || {}).forEach(([k, v]) => {
+            try {
+              if (["connection", "keep-alive", "transfer-encoding", "upgrade"].includes(k.toLowerCase())) {
+                return;
+              }
+              res.setHeader(k, v);
+            } catch {
+              /* ignore bad headers */
+            }
+          });
+          res.statusCode = msg.status || 502;
+
+          const nowMs = Date.now();
+          const tTok = getTraffic(trafficByToken, entry.token);
+          if (tTok) {
+            tTok.responses += 1;
+            tTok.lastSeenAt = nowMs;
+            tTok.lastStatus = msg.status || 502;
+          }
+          const tAli = getTraffic(trafficByAlias, entry.alias);
+          if (tAli) {
+            tAli.responses += 1;
+            tAli.lastSeenAt = nowMs;
+            tAli.lastStatus = msg.status || 502;
+          }
+
+        } else if (msg.type === "response-chunk" && msg.id) {
+          const entry = pending.get(msg.id);
+          if (!entry) return;
+          const data = Buffer.from(msg.data || "", "base64");
+          entry.res.write(data);
+          const tTok = getTraffic(trafficByToken, entry.token);
+          if (tTok) {
+            tTok.bytesOut += data.length;
+            tTok.lastSeenAt = Date.now();
+          }
+          const tAli = getTraffic(trafficByAlias, entry.alias);
+          if (tAli) {
+            tAli.bytesOut += data.length;
+            tAli.lastSeenAt = Date.now();
+          }
+
+        } else if (msg.type === "response-end" && msg.id) {
+          const entry = pending.get(msg.id);
+          if (!entry) return;
+          pending.delete(msg.id);
+          entry.res.end();
+
         } else if (msg.type === "response" && msg.id) {
+          // Legacy single-message response (kept for older tunnel clients)
           const entry = pending.get(msg.id);
           if (!entry) {
             log("warn", "Response for unknown request:", msg.id);
@@ -452,6 +514,25 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
           
           res.statusCode = msg.status || 502;
           res.end(body);
+
+        } else if (msg.type === "ws-data" && msg.id) {
+          const session = wsSessions.get(msg.id);
+          if (session && !session.socket.destroyed) {
+            const data = Buffer.from(msg.data || "", "base64");
+            session.socket.write(data);
+            const tTok = getTraffic(trafficByToken, session.token);
+            if (tTok) {
+              tTok.bytesOut += data.length;
+              tTok.lastSeenAt = Date.now();
+            }
+          }
+
+        } else if (msg.type === "ws-close" && msg.id) {
+          const session = wsSessions.get(msg.id);
+          wsSessions.delete(msg.id);
+          if (session && !session.socket.destroyed) {
+            session.socket.end();
+          }
         }
       } catch (err) {
         logError(err, "Control parse error");
@@ -463,6 +544,13 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
     if (registeredToken) {
       const clientData = clients.get(registeredToken);
       clients.delete(registeredToken);
+      // Tear down any WebSocket sessions owned by this client
+      for (const [wsId, session] of wsSessions.entries()) {
+        if (session.token === registeredToken) {
+          wsSessions.delete(wsId);
+          if (!session.socket.destroyed) session.socket.destroy();
+        }
+      }
       log("client disconnected", registeredToken.substring(0, 8) + "...", "ip", clientData?.clientIp || "unknown");
     }
   });
@@ -566,6 +654,7 @@ const httpServer = http.createServer(async (req, res) => {
           aliasesTracked: trafficByAlias.size,
           connected: clients.size,
           pending: pending.size,
+          wsSessions: wsSessions.size,
         },
         byToken,
         byAlias,
@@ -692,9 +781,10 @@ const httpServer = http.createServer(async (req, res) => {
     return res.end("Failed to forward request");
   }
 
-  // Timeout
+  // Timeout applies only until the response starts streaming
   const timer = setTimeout(() => {
-    if (pending.has(id)) {
+    const entry = pending.get(id);
+    if (entry && !entry.started) {
       pending.delete(id);
       res.statusCode = 504;
       res.end("Gateway timeout");
@@ -705,6 +795,109 @@ const httpServer = http.createServer(async (req, res) => {
     clearTimeout(timer);
     pending.delete(id);
   });
+});
+
+// WebSocket / HTTP Upgrade passthrough.
+// The relay reconstructs the raw upgrade request and streams bytes in both
+// directions over the control channel (ws-open / ws-data / ws-close), making
+// the session a transparent TCP passthrough after the handshake. This is what
+// allows things like Next.js HMR websockets to work through the tunnel.
+httpServer.on("upgrade", async (req, socket, head) => {
+  stats.requests++;
+  const host = req.headers.host || "";
+
+  let token = extractTokenFromHost(host);
+  let aliasKey = null;
+  if (!token) {
+    const alias = extractAliasFromHost(host);
+    if (alias) {
+      aliasKey = alias;
+      token = await resolveAliasToToken(alias);
+    }
+  }
+  if (!token) {
+    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    return socket.destroy();
+  }
+
+  if (!checkRateLimit(token)) {
+    socket.write("HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n");
+    return socket.destroy();
+  }
+
+  const clientData = clients.get(token);
+  if (!clientData) {
+    socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    return socket.destroy();
+  }
+
+  const id = randomUUID();
+
+  // Reconstruct the raw HTTP upgrade request so the local server sees the
+  // exact handshake the browser sent (rawHeaders preserves casing and order).
+  const headerLines = [];
+  for (let i = 0; i < req.rawHeaders.length; i += 2) {
+    headerLines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+  }
+  const rawHead = `${req.method} ${req.url} HTTP/1.1\r\n${headerLines.join("\r\n")}\r\n\r\n`;
+
+  wsSessions.set(id, { socket, token });
+
+  const tTok = getTraffic(trafficByToken, token);
+  if (tTok) {
+    tTok.requests += 1;
+    tTok.lastSeenAt = Date.now();
+  }
+  const tAli = getTraffic(trafficByAlias, aliasKey);
+  if (tAli) {
+    tAli.requests += 1;
+    tAli.lastSeenAt = Date.now();
+  }
+
+  try {
+    clientData.socket.write(
+      JSON.stringify({
+        type: "ws-open",
+        id,
+        head: Buffer.concat([Buffer.from(rawHead), head]).toString("base64"),
+      }) + "\n"
+    );
+  } catch (err) {
+    logError(err, "Failed to open ws session");
+    wsSessions.delete(id);
+    return socket.destroy();
+  }
+
+  socket.on("data", (data) => {
+    if (!wsSessions.has(id)) return;
+    const t = getTraffic(trafficByToken, token);
+    if (t) {
+      t.bytesIn += data.length;
+      t.lastSeenAt = Date.now();
+    }
+    try {
+      clientData.socket.write(
+        JSON.stringify({ type: "ws-data", id, data: data.toString("base64") }) + "\n"
+      );
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  const closeSession = () => {
+    if (!wsSessions.has(id)) return;
+    wsSessions.delete(id);
+    try {
+      clientData.socket.write(JSON.stringify({ type: "ws-close", id }) + "\n");
+    } catch {
+      /* control channel gone; client-side cleanup handles it */
+    }
+  };
+  socket.on("close", closeSession);
+  socket.on("error", closeSession);
+
+  socket.setKeepAlive(true, 15000);
+  socket.setNoDelay(true);
 });
 
 // Tune keep-alive for better throughput

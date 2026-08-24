@@ -55,6 +55,8 @@ function optionalRead(path) {
 
 // State
 let socket = null;
+// wsId -> net.Socket — active WebSocket (upgrade) passthrough sessions to the local service
+const wsSessions = new Map();
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
 let reconnectTimer = null;
 let isConnected = false;
@@ -197,6 +199,17 @@ function connect() {
         const msg = JSON.parse(line);
         if (msg.type === "request") {
           handleRequest(msg);
+        } else if (msg.type === "ws-open") {
+          handleWsOpen(msg);
+        } else if (msg.type === "ws-data") {
+          const local = wsSessions.get(msg.id);
+          if (local && !local.destroyed) {
+            local.write(Buffer.from(msg.data || "", "base64"));
+          }
+        } else if (msg.type === "ws-close") {
+          const local = wsSessions.get(msg.id);
+          wsSessions.delete(msg.id);
+          if (local && !local.destroyed) local.end();
         } else if (msg.type === "registered") {
           isRegistered = true;
           log("success", `Registered with relay (token: ${token.substring(0, 8)}...)`);
@@ -213,6 +226,7 @@ function connect() {
   socket.on("error", (err) => {
     isConnected = false;
     isRegistered = false;
+    closeAllWsSessions();
     logError(err, "Connection error");
     scheduleReconnect();
   });
@@ -221,6 +235,7 @@ function connect() {
     const wasRegistered = isRegistered;
     isConnected = false;
     isRegistered = false;
+    closeAllWsSessions();
     
     if (wasRegistered) {
       log("warn", "Connection closed. Attempting to reconnect...");
@@ -286,39 +301,45 @@ function handleRequest(msg) {
     headers: cleanHeaders,
     timeout: REQUEST_TIMEOUT,
   };
+  log("info", `Local ${options.method} ${options.path} host=${cleanHeaders.host || cleanHeaders.Host || "-"}`);
 
   const req = http.request(options, (resp) => {
-    const chunks = [];
-    let totalSize = 0;
-    
+    // Stream the response over the control channel instead of buffering it.
+    // This removes the response size cap (needed e.g. for large dev-mode JS
+    // chunks) and keeps memory usage flat regardless of response size.
+    let aborted = false;
+    const send = (obj) => {
+      if (!socket || socket.destroyed || !isRegistered) {
+        aborted = true;
+        resp.destroy();
+        return false;
+      }
+      return socket.write(JSON.stringify(obj) + "\n");
+    };
+
+    send({
+      type: "response-head",
+      id: msg.id,
+      status: resp.statusCode,
+      headers: resp.headers,
+    });
+
     resp.on("data", (d) => {
-      chunks.push(d);
-      totalSize += d.length;
-      
-      // Check response size
-      if (totalSize > MAX_BODY_SIZE) {
-        req.destroy();
-        log("error", `Response too large: ${totalSize} bytes (max: ${MAX_BODY_SIZE})`);
-        sendErrorResponse(msg.id, 413, "Response entity too large");
-        return;
+      if (aborted) return;
+      const ok = send({ type: "response-chunk", id: msg.id, data: d.toString("base64") });
+      // Backpressure: pause the local response while the control socket drains
+      if (ok === false && socket && !socket.destroyed) {
+        resp.pause();
+        socket.once("drain", () => resp.resume());
       }
     });
-    
+
     resp.on("end", () => {
-      const body = Buffer.concat(chunks);
-      const resMsg = {
-        type: "response",
-        id: msg.id,
-        status: resp.statusCode,
-        headers: resp.headers,
-        body: body.length ? body.toString("base64") : "",
-      };
-      
-      if (socket && !socket.destroyed && isRegistered) {
-        socket.write(JSON.stringify(resMsg) + "\n");
-      } else {
-        log("warn", "Cannot send response: not connected");
-      }
+      if (!aborted) send({ type: "response-end", id: msg.id });
+    });
+
+    resp.on("error", () => {
+      if (!aborted) send({ type: "response-end", id: msg.id });
     });
   });
 
@@ -353,6 +374,56 @@ function handleRequest(msg) {
   req.end();
 }
 
+// WebSocket / HTTP Upgrade passthrough: open a raw TCP connection to the
+// local service, replay the original handshake bytes, then stream data in
+// both directions over the control channel until either side closes.
+function handleWsOpen(msg) {
+  if (!msg.id || !msg.head) return;
+  stats.requests++;
+
+  const local = net.createConnection({ host: "127.0.0.1", port }, () => {
+    local.write(Buffer.from(msg.head, "base64"));
+  });
+  local.setNoDelay(true);
+  wsSessions.set(msg.id, local);
+
+  local.on("data", (data) => {
+    if (!socket || socket.destroyed || !isRegistered) return;
+    try {
+      socket.write(
+        JSON.stringify({ type: "ws-data", id: msg.id, data: data.toString("base64") }) + "\n"
+      );
+    } catch {
+      local.destroy();
+    }
+  });
+
+  const closeSession = () => {
+    if (!wsSessions.has(msg.id)) return;
+    wsSessions.delete(msg.id);
+    if (socket && !socket.destroyed && isRegistered) {
+      try {
+        socket.write(JSON.stringify({ type: "ws-close", id: msg.id }) + "\n");
+      } catch {
+        /* control channel gone */
+      }
+    }
+  };
+  local.on("close", closeSession);
+  local.on("error", (err) => {
+    stats.errors++;
+    logError(err, "Local ws connection error");
+    closeSession();
+  });
+}
+
+function closeAllWsSessions() {
+  for (const [, local] of wsSessions.entries()) {
+    if (!local.destroyed) local.destroy();
+  }
+  wsSessions.clear();
+}
+
 function sendErrorResponse(id, status, message) {
   if (!socket || socket.destroyed || !isRegistered) {
     return;
@@ -385,6 +456,8 @@ function shutdown() {
     clearInterval(healthCheckTimer);
   }
   
+  closeAllWsSessions();
+
   if (socket && !socket.destroyed) {
     socket.end();
   }
