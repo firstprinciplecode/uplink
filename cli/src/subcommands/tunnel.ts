@@ -1,7 +1,11 @@
 import { Command } from "commander";
 import { apiRequest } from "../http";
 import { handleError, printJson } from "../utils/machine";
-import { findTunnelClients, killTunnelClient } from "./menu/effects/tunnel-clients";
+import {
+  findTunnelClients,
+  killTunnelClient,
+  startTunnelClient,
+} from "./menu/effects/tunnel-clients";
 
 type TunnelResponse = {
   id: string;
@@ -10,11 +14,13 @@ type TunnelResponse = {
   port?: number;
   token?: string;
   alias?: string | null;
+  aliasUrl?: string | null;
   status?: string;
   connected?: boolean;
   createdAt?: string;
   updatedAt?: string;
   ingressHttpUrl?: string;
+  targetPort?: number;
 };
 
 type TunnelListResponse = {
@@ -24,16 +30,18 @@ type TunnelListResponse = {
 
 type TunnelStatsResponse = any;
 
-export const tunnelCommand = new Command("tunnel")
-  .description("Manage tunnels non-interactively (agent-friendly)");
+export const tunnelCommand = new Command("tunnel").description(
+  "Manage tunnels non-interactively (agent-friendly)"
+);
 
-// Create tunnel
+// Create tunnel + start local client (unless --no-client)
 tunnelCommand
   .command("create")
-  .description("Create a tunnel")
+  .description("Create a tunnel and start the local client")
   .requiredOption("--port <port>", "Local port to expose")
   .option("--alias <alias>", "Optional permanent alias (if enabled on account)")
   .option("--project <project>", "Optional project id")
+  .option("--api-only", "Create API record only; do not start the local client", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     const port = Number(opts.port);
@@ -43,42 +51,75 @@ tunnelCommand
     }
 
     try {
+      const existing = findTunnelClients().filter((c) => c.port === port);
+      if (existing.length > 0 && !opts.apiOnly) {
+        const err = `Tunnel client already running on port ${port} (pid ${existing[0].pid})`;
+        if (opts.json) {
+          printJson({ error: err, existing: existing[0] });
+        } else {
+          console.error(err);
+        }
+        process.exit(2);
+      }
+
       const body: Record<string, unknown> = { port };
       if (opts.project) body.project = opts.project;
 
-      const tunnel = await apiRequest("POST", "/v1/tunnels", body) as TunnelResponse;
+      const tunnel = (await apiRequest("POST", "/v1/tunnels", body)) as TunnelResponse;
       let aliasResult: TunnelResponse | null = null;
       let aliasError: string | null = null;
 
       if (opts.alias) {
         try {
-          aliasResult = await apiRequest("POST", `/v1/tunnels/${tunnel.id}/alias`, {
+          aliasResult = (await apiRequest("POST", `/v1/tunnels/${tunnel.id}/alias`, {
             alias: opts.alias,
-          }) as TunnelResponse;
+          })) as TunnelResponse;
         } catch (err: any) {
           aliasError = err?.message || String(err);
         }
       }
 
+      let client: { pid: number; started: boolean } | null = null;
+      if (!opts.apiOnly) {
+        const token = tunnel.token;
+        if (!token) {
+          throw new Error("Tunnel created but API returned no token; cannot start client");
+        }
+        const started = startTunnelClient({ token, port });
+        // Brief wait so list/connected is more likely accurate for agents.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        client = { pid: started.pid, started: true };
+      }
+
+      const url =
+        aliasResult?.aliasUrl ||
+        aliasResult?.url ||
+        tunnel.url ||
+        tunnel.ingressHttpUrl ||
+        null;
+      const alias = aliasResult?.alias ?? tunnel.alias ?? null;
+
       if (opts.json) {
         printJson({
-          tunnel,
-          alias: aliasResult?.alias ?? null,
+          tunnel: {
+            ...tunnel,
+            alias,
+            aliasUrl: aliasResult?.aliasUrl ?? tunnel.aliasUrl ?? null,
+            url: tunnel.url ?? tunnel.ingressHttpUrl,
+          },
+          alias,
           aliasError,
+          url,
+          client,
         });
       } else {
         console.log(`Created tunnel ${tunnel.id}`);
-        console.log(`  url:   ${tunnel.url ?? tunnel.ingressHttpUrl ?? "-"}`);
-        console.log(`  token: ${tunnel.token ?? "-"}`);
-        if (opts.alias) {
-          if (aliasResult?.alias) {
-            console.log(`  alias: ${aliasResult.alias}`);
-          } else if (aliasError) {
-            console.log(`  alias: failed - ${aliasError}`);
-          }
-        } else if (tunnel.alias) {
-          console.log(`  alias: ${tunnel.alias}`);
-        }
+        console.log(`  url:    ${url ?? "-"}`);
+        console.log(`  token:  ${tunnel.token ?? "-"}`);
+        if (alias) console.log(`  alias:  ${alias}`);
+        else if (aliasError) console.log(`  alias:  failed - ${aliasError}`);
+        if (client) console.log(`  client: started (pid ${client.pid})`);
+        else console.log(`  client: not started (--api-only)`);
       }
     } catch (error) {
       handleError(error, { json: opts.json });
@@ -92,7 +133,7 @@ tunnelCommand
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const result = await apiRequest("GET", "/v1/tunnels") as TunnelListResponse;
+      const result = (await apiRequest("GET", "/v1/tunnels")) as TunnelListResponse;
       if (opts.json) {
         printJson(result);
       } else {
@@ -123,9 +164,9 @@ tunnelCommand
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const result = await apiRequest("POST", `/v1/tunnels/${opts.id}/alias`, {
+      const result = (await apiRequest("POST", `/v1/tunnels/${opts.id}/alias`, {
         alias: opts.alias,
-      }) as TunnelResponse;
+      })) as TunnelResponse;
       if (opts.json) {
         printJson(result);
       } else {
@@ -144,7 +185,10 @@ tunnelCommand
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const result = await apiRequest("DELETE", `/v1/tunnels/${opts.id}/alias`) as TunnelResponse;
+      const result = (await apiRequest(
+        "DELETE",
+        `/v1/tunnels/${opts.id}/alias`
+      )) as TunnelResponse;
       if (opts.json) {
         printJson(result);
       } else {
@@ -163,7 +207,10 @@ tunnelCommand
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
-      const result = await apiRequest("GET", `/v1/tunnels/${opts.id}/stats`) as TunnelStatsResponse;
+      const result = (await apiRequest(
+        "GET",
+        `/v1/tunnels/${opts.id}/stats`
+      )) as TunnelStatsResponse;
       if (opts.json) {
         printJson(result);
       } else {
@@ -190,7 +237,7 @@ tunnelCommand
 
     try {
       if (opts.all) {
-        const listed = await apiRequest("GET", "/v1/tunnels") as TunnelListResponse;
+        const listed = (await apiRequest("GET", "/v1/tunnels")) as TunnelListResponse;
         let killed = 0;
         for (const client of findTunnelClients()) {
           if (killTunnelClient(client.pid)) killed++;
@@ -213,7 +260,7 @@ tunnelCommand
         return;
       }
 
-      const listed = await apiRequest("GET", "/v1/tunnels") as TunnelListResponse;
+      const listed = (await apiRequest("GET", "/v1/tunnels")) as TunnelListResponse;
       const target = (listed.tunnels || []).find((t) => t.id === opts.id);
       if (target?.token) {
         for (const client of findTunnelClients().filter((c) => c.token === target.token)) {
@@ -221,14 +268,16 @@ tunnelCommand
         }
       }
 
-      const result = await apiRequest("DELETE", `/v1/tunnels/${opts.id}`) as { id: string; status: string };
+      const result = (await apiRequest("DELETE", `/v1/tunnels/${opts.id}`)) as {
+        id: string;
+        status: string;
+      };
       if (opts.json) {
         printJson(result);
       } else {
         console.log(`Stopped tunnel ${result.id} (status=${result.status})`);
       }
-    } catch (error: any) {
-      console.error(error?.message || String(error));
-      process.exit(30);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });

@@ -1,5 +1,5 @@
 import { clearScreen } from "./io";
-import { colorBold, colorCyan, colorDim, colorGreen, colorRed } from "./colors";
+import { colorBold, colorDim, colorGreen, colorRed } from "./colors";
 import { DEFAULT_MENU_MESSAGE, type MenuChoice } from "./types";
 
 export type RenderArgs = {
@@ -107,7 +107,7 @@ export function renderMenu(args: RenderArgs) {
       const styledLine = line
         .replace(/^✓/, colorGreen("✓"))
         .replace(/^✗/, colorRed("✗"))
-        .replace(/^→/, colorCyan("→"));
+        .replace(/^→/, colorDim("→"));
       console.log(styledLine);
     });
   }

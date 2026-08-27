@@ -6,7 +6,8 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "express"],
+    "jsx": "react-jsx",
+    "types": ["node", "react"],
     "typeRoots": ["./node_modules/@types"]
   },
   "include": [

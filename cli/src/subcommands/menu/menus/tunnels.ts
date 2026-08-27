@@ -44,7 +44,7 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
     label: "Share",
     subMenu: [
       {
-        label: "Start (Auto)",
+        label: "Start tunnel",
         action: async () => {
           try {
             // Scan for active ports
@@ -143,48 +143,7 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
         },
       },
       {
-        label: "Start (Manual)",
-        action: async () => {
-          const answer = await promptLine('Local port to expose (default 3000, or "back"): ');
-          if (isBackInput(answer)) {
-            restoreRawMode();
-            return "";
-          }
-          const port = Number(answer) || 3000;
-          try {
-            const result = await apiRequest("POST", "/v1/tunnels", { port });
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            const url = result.url || "(no url)";
-            const token = result.token || "(no token)";
-            const httpFallback = typeof url === "string" && url.startsWith("https://") ? url.replace(/^https:\/\//, "http://") : "";
-            return [
-              `Created tunnel: ${url}`,
-              httpFallback && url !== httpFallback ? `HTTP fallback: ${httpFallback}` : "",
-              `Token: ${token}`,
-              "",
-              "To start the tunnel client, run:",
-              `  node scripts/tunnel/client-improved.js --token ${token} --port ${port} --ctrl ${process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071"}`,
-            ]
-              .filter(Boolean)
-              .join("\n");
-          } catch (err: any) {
-            try {
-              process.stdin.setRawMode(true);
-              process.stdin.resume();
-            } catch {
-              /* ignore */
-            }
-            throw err;
-          }
-        },
-      },
-      {
-        label: "Stop Tunnel",
+        label: "Stop tunnel",
         action: async () => {
           try {
             const processes = findTunnelClients();

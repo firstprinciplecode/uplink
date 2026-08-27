@@ -1,7 +1,43 @@
 import { execSync, spawn } from "child_process";
+import { existsSync } from "fs";
+import path from "path";
 import { resolveProjectRoot } from "../../../utils/project-root";
 
 export type TunnelClient = { pid: number; port: number; token: string };
+
+export function resolveTunnelClientPath(): string {
+  const projectRoot = resolveProjectRoot(__dirname);
+  const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
+  if (!existsSync(clientPath)) {
+    throw new Error(`Tunnel client not found at ${clientPath}`);
+  }
+  return clientPath;
+}
+
+/** Start the local tunnel client in the background (detached). */
+export function startTunnelClient(opts: {
+  token: string;
+  port: number;
+  ctrl?: string;
+}): { pid: number; clientPath: string } {
+  const projectRoot = resolveProjectRoot(__dirname);
+  const clientPath = resolveTunnelClientPath();
+  const ctrl = opts.ctrl || process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
+  const clientProcess = spawn(
+    "node",
+    [clientPath, "--token", opts.token, "--port", String(opts.port), "--ctrl", ctrl],
+    {
+      stdio: "ignore",
+      detached: true,
+      cwd: projectRoot,
+    }
+  );
+  clientProcess.unref();
+  if (!clientProcess.pid) {
+    throw new Error("Failed to start tunnel client process");
+  }
+  return { pid: clientProcess.pid, clientPath };
+}
 
 export function findTunnelClients(): TunnelClient[] {
   try {
@@ -127,19 +163,8 @@ export async function createAndStartTunnel(apiRequest: ApiRequest, port: number)
   const url = result.url || "(no url)";
   const token = result.token || "(no token)";
   const alias = result.alias || null;
-  const ctrl = process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
 
-  // Start tunnel client in background
-  // (CommonJS build: __dirname available)
-  const path = require("path");
-  const projectRoot = resolveProjectRoot(__dirname);
-  const clientPath = path.join(projectRoot, "scripts/tunnel/client-improved.js");
-  const clientProcess = spawn("node", [clientPath, "--token", token, "--port", String(port), "--ctrl", ctrl], {
-    stdio: "ignore",
-    detached: true,
-    cwd: projectRoot,
-  });
-  clientProcess.unref();
+  startTunnelClient({ token, port });
 
   // Wait a moment for client to connect
   await new Promise((resolve) => setTimeout(resolve, 2000));

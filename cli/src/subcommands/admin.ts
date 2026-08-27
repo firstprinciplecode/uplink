@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { apiRequest } from "../http";
 import { getResolvedApiBase } from "../utils/api-base";
+import { handleError } from "../utils/machine";
 
 export const adminCommand = new Command("admin")
   .description("Admin commands for system management");
@@ -63,10 +64,8 @@ adminCommand
         console.log(`  Created 24h: ${stats.databases.createdLast24h}`);
         console.log();
       }
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error getting status:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -118,10 +117,8 @@ adminCommand
         }
         console.log();
       }
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error listing tunnels:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -176,10 +173,8 @@ adminCommand
         }
         console.log();
       }
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error listing databases:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -222,10 +217,8 @@ tokensCommand
       console.log("\nIMPORTANT: This token is shown only once. Store it securely.\n");
       console.log(result.token);
       console.log();
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error creating token:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -287,10 +280,8 @@ tokensCommand
         );
       }
       console.log();
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error listing tokens:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -306,7 +297,7 @@ tokensCommand
       const token = opts.token ? String(opts.token) : "";
       if (!id && !token) {
         console.error("Provide --id or --token");
-        process.exit(1);
+        process.exit(2);
       }
 
       const result = await apiRequest("POST", "/v1/admin/tokens/revoke", {
@@ -319,10 +310,8 @@ tokensCommand
       } else {
         console.log(`✅ Revoked token${id ? ` ${id}` : ""} at ${result.revokedAt || ""}`);
       }
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error revoking token:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 
@@ -344,12 +333,10 @@ adminCommand
         }
       } else {
         console.error("Specify what to cleanup: --dev-user-tunnels");
-        process.exit(1);
+        process.exit(2);
       }
-    } catch (error: any) {
-      const errorMsg = error.message || error.toString() || JSON.stringify(error);
-      console.error("Error during cleanup:", errorMsg);
-      process.exit(1);
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
 

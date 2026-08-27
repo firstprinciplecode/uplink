@@ -1,20 +1,15 @@
 # Uplink CLI
 
-Share your local app with others for demos, testing, review, and quick feedback — without deploying.
+**Software for agents** — share localhost, host apps, and attach domains from the terminal. Built for Cursor, Claude Code, Codex, Windsurf, and humans who live in a shell.
 
 ![Uplink CLI](./assets/cli-screenshot.png)
 
 ## Key features
-- **Expose any local port**: Turn `localhost:<port>` into a public HTTPS URL like `https://abc123.x.uplink.spot`
-- **Agent-first**: Works well with Cursor, Claude Code, Codex, Windsurf (and other agentic tools)
-- **Terminal-native**: Start/stop tunnels and manage URLs from an interactive menu
-- **No browser required**: Create an account + token from the CLI (`uplink signup`), then automate everything
-- **Open source CLI**: Inspect, extend, and contribute
-
-## Why use Uplink
-- **Fastest way to share localhost**: Great for “can you look at this?” moments
-- **Works great with agents**: machine-readable `--json`, stable exit codes, and stdin token support
-- **Share links + optional permanent URLs**: Permanent URLs are available if enabled on your account
+- **Share any local port**: `localhost:<port>` → public HTTPS (`https://abc123.x.uplink.spot`)
+- **Agent-first**: `--json`, stable exit codes, `--token-stdin` (no browser required)
+- **Hosting**: deploy Next.js / Vite / static apps to Uplink
+- **Domains**: list registrar inventory and attach custom hostnames to hosted apps
+- **Interactive menu**: `uplink` for humans; CLI subcommands for agents
 
 Learn more at [uplink.spot](https://uplink.spot)
 
@@ -32,50 +27,54 @@ uplink signup --json                     # creates account + token
 export AGENTCLOUD_TOKEN=your-token-here  # save securely
 ```
 
+## Quick start (agents)
+```bash
+# Create tunnel + start local client (URL works immediately)
+echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel create --port 3000 --json
+
+# List / stop
+echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel list --json
+echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel stop --id tun_xxx --json
+```
+
+Full contract: **[AGENTS.md](./AGENTS.md)** (also at `docs/AGENTS.md`).
+
 ## Quick start (interactive)
 ```bash
 uplink        # open menu
 ```
-- Start Tunnel → pick or enter port → get URL (e.g., https://abc123.x.uplink.spot)
-- My Tunnels → see status and permanent URL if set
-- Create Permanent URL → pick tunnel → enter alias (if premium enabled)
+- **Share** → Start tunnel → pick port → public URL
+- **Hosting** → Setup / Deploy / List / Delete
+- **Domains** → connect registrar, attach hostname to a hosted app
 
-### Hosting (interactive)
-- Hosting → Setup Wizard → analyze + create + deploy
-- Hosting → Deploy to Existing App → select app with arrow keys
-- Hosting → List Hosted Apps → select app to view ID + URL
-- Hosting → Delete Hosted App → select app, confirm options (type `DELETE` to proceed)
-- Next.js default: server hosting expects `output: "standalone"`
-- Vite / CRA: static build is supported (dist/build served as static)
-
-## Quick start (non-interactive)
+## Hosting (non-interactive)
 ```bash
-# Create tunnel (any port: 3000, 8080, 5173, etc.)
-echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel create --port 3000 --json
+echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin host setup \
+  --path . --name myapp --yes --json
+```
 
-# List tunnels
-echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel list --json
-
-# Set alias (if enabled on account)
-echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel alias-set --id tun_xxx --alias myapp --json
+## Domains (non-interactive)
+```bash
+uplink domains providers connect godaddy --token-env GODADDY_PAT --json
+uplink domains list --json
+echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin \
+  host domains add --id app_xxx --hostname example.com --json
 ```
 
 ## Agent essentials
 - **`--json`**: stdout = JSON only; stderr = logs/errors
 - **`--token-stdin`**: read token once from stdin (avoid argv leaks)
 - **`--api-base`**: override API host if needed
-- **Exit codes**: 0 ok; 2 usage; 10 auth missing/invalid; 20 network; 30 server/unknown  
-See `docs/AGENTS.md` for the full contract.
+- **Exit codes**: 0 ok · 2 usage · 10 auth · 20 network · 30 server/unknown
 
 ## Key commands
 - `uplink menu` — interactive UI
-- `uplink tunnel create --port <p> [--alias <a>] [--json]`
-- `uplink tunnel list --json`
-- `uplink tunnel alias-set --id <id> --alias <a> --json`
-- `uplink tunnel alias-delete --id <id> --json`
-- `uplink tunnel stats --id <id> --json`
-- `uplink tunnel stop --id <id> --json`
-- `uplink signup --json` — create user + token (no auth)
+- `uplink signup --json`
+- `uplink tunnel create --port <p> [--alias <a>] [--json]` — starts client
+- `uplink tunnel list|stats|stop|alias-set|alias-delete --json`
+- `uplink host setup|deploy|list|status|logs|delete …`
+- `uplink host domains add|verify|list|remove …`
+- `uplink domains list|check|providers …`
 
 ## Environment
 ```bash
@@ -86,14 +85,14 @@ export TUNNEL_DOMAIN=x.uplink.spot
 ```
 
 ## Troubleshooting
-- “No running tunnel clients found” — make sure the tunnel client is still running; restart `uplink` and start a tunnel.
-- Auth errors — verify `AGENTCLOUD_TOKEN` is set/exported; use `--token-stdin`.
-- Relay errors — ensure `TUNNEL_CTRL=tunnel.uplink.spot:7071`.
+- URL not live — ensure something is listening on the port and the client started (`tunnel list` → `connected`)
+- Auth errors — verify `AGENTCLOUD_TOKEN`; prefer `--token-stdin`
+- Relay errors — `TUNNEL_CTRL=tunnel.uplink.spot:7071`
+- Domain search TUI — not bundled on npm; use `domains list` / `check` / `host domains *`
 
 ## Docs
-- Menu reference: `docs/MENU_STRUCTURE.md`
-- Agent guide: `docs/AGENTS.md`
-- Open source CLI scope vs backend: `docs/OPEN_SOURCE_CLI.md`
+- Agents: [AGENTS.md](./AGENTS.md)
+- Menu: [docs/MENU_STRUCTURE.md](./docs/MENU_STRUCTURE.md)
 
 ## License
-MIT
+MIT — see [LICENSE](./LICENSE)

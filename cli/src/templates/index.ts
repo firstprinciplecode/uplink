@@ -154,7 +154,7 @@ RUN npm install -g serve
 COPY --from=builder /app/${distDir} ./public
 
 EXPOSE ${port}
-CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+CMD ["sh", "-c", "serve -s public -l \${PORT}"]
 `;
   }
 
@@ -184,7 +184,7 @@ RUN npm install -g serve
 COPY --from=builder /app/${distDir} ./public
 
 EXPOSE ${port}
-CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+CMD ["sh", "-c", "serve -s public -l \${PORT}"]
 `;
   }
 
@@ -215,7 +215,7 @@ RUN npm install -g serve
 COPY --from=builder /app/${distDir} ./public
 
 EXPOSE ${port}
-CMD ["sh", "-c", "serve -s public -l ${PORT}"]
+CMD ["sh", "-c", "serve -s public -l \${PORT}"]
 `;
 }
 

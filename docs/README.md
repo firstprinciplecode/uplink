@@ -3,19 +3,19 @@
 ## Quick Start
 
 ```bash
-# Install
 npm install -g uplink-cli
-
-# Launch interactive menu
-uplink menu
+uplink menu          # interactive
+uplink --help        # commands
 ```
 
 ## Documentation
 
-- **[AGENTS.md](./AGENTS.md)** - Programmatic CLI usage for AI agents and automation
-- **[MENU_STRUCTURE.md](./MENU_STRUCTURE.md)** - Interactive menu reference
+- **[AGENTS.md](../AGENTS.md)** (also mirrored here) — programmatic CLI for AI agents
+- **[MENU_STRUCTURE.md](./MENU_STRUCTURE.md)** — interactive menu reference
+- **[OPEN_SOURCE_CLI.md](./OPEN_SOURCE_CLI.md)** — public CLI vs private backend scope
 
 ## Links
 
 - Website: [uplink.spot](https://uplink.spot)
+- npm: [uplink-cli](https://www.npmjs.com/package/uplink-cli)
 - API: `https://api.uplink.spot`

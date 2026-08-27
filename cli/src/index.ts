@@ -8,9 +8,11 @@ import { tunnelCommand } from "./subcommands/tunnel";
 import { signupCommand } from "./subcommands/signup";
 import { systemCommand } from "./subcommands/system";
 import { hostCommand } from "./subcommands/host";
+import { domainsCommand } from "./subcommands/domains";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { ensureApiBase, parseTokenEnv } from "./utils/api-base";
+import { handleError } from "./utils/machine";
 
 // Get version from package.json (CommonJS build: __dirname available)
 const pkgPath = join(__dirname, "../../package.json");
@@ -20,7 +22,7 @@ const program = new Command();
 
 program
   .name("uplink")
-  .description("Agent-friendly cloud CLI")
+  .description("Software for agents — share localhost, host apps, attach domains")
   .version(pkg.version)
   .option("--api-base <url>", "Override API base URL (default env AGENTCLOUD_API_BASE)")
   .option("--token-stdin", "Read AGENTCLOUD_TOKEN from stdin once");
@@ -33,6 +35,7 @@ program.addCommand(signupCommand);
 program.addCommand(systemCommand);
 program.addCommand(menuCommand);
 program.addCommand(hostCommand);
+program.addCommand(domainsCommand);
 
 // Global pre-action hook to apply shared options
 let cachedTokenStdin: string | null = null;
@@ -83,7 +86,6 @@ if (process.argv.length === 2) {
 }
 
 program.parseAsync(process.argv).catch((err) => {
-  console.error(err);
-  process.exit(1);
+  handleError(err);
 });
 

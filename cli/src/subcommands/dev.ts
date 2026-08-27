@@ -1,26 +1,33 @@
 import { Command } from "commander";
 import { spawn } from "child_process";
 import { apiRequest } from "../http";
-import path from "path";
+import { handleError, printJson } from "../utils/machine";
+import { resolveTunnelClientPath } from "./menu/effects/tunnel-clients";
 
 export const devCommand = new Command("dev")
-  .description("Run local dev with optional tunnel")
-  .option("--tunnel", "Enable tunnel")
+  .description("Run local tunnel client against a new tunnel (foreground)")
+  .option("--tunnel", "Enable tunnel", false)
   .option("--port <port>", "Local port to expose", "3000")
   .option("--json", "Output JSON", false)
-  .option("--improved", "Use improved client with auto-reconnect and better error handling", false)
   .action(async (opts) => {
     const port = Number(opts.port);
-    if (opts.tunnel) {
-      // Request tunnel from control plane
+    if (!Number.isFinite(port) || port <= 0) {
+      console.error("Invalid port. Provide a positive integer.");
+      process.exit(2);
+    }
+
+    if (!opts.tunnel) {
+      console.log("Tunnel not enabled. Provide --tunnel to expose localhost.");
+      console.log("Prefer: uplink tunnel create --port <port> --json");
+      return;
+    }
+
+    try {
       const result = await apiRequest("POST", "/v1/tunnels", { port });
       if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+        printJson(result);
       } else {
         console.log(`Tunnel URL: ${result.url}`);
-        // If the control-plane returns an https URL for the dev.uplink.spot domain,
-        // it may not actually be reachable unless TLS is configured on the relay.
-        // Print an HTTP fallback to reduce confusion during development.
         if (
           typeof result.url === "string" &&
           result.url.startsWith("https://") &&
@@ -30,14 +37,7 @@ export const devCommand = new Command("dev")
         }
       }
 
-      // Spawn tunnel client (use improved version if requested)
-      const clientFile = opts.improved ? "client-improved.js" : "client.js";
-      const clientPath = path.join(
-        process.cwd(),
-        "scripts",
-        "tunnel",
-        clientFile
-      );
+      const clientPath = resolveTunnelClientPath();
       const ctrlHost = process.env.TUNNEL_CTRL ?? "tunnel.uplink.spot:7071";
       const args = [
         clientPath,
@@ -48,10 +48,11 @@ export const devCommand = new Command("dev")
         "--ctrl",
         ctrlHost,
       ];
-      console.log(`Starting tunnel client: node ${args.join(" ")}`);
+      if (!opts.json) {
+        console.log(`Starting tunnel client: node ${args.join(" ")}`);
+      }
       const child = spawn("node", args, { stdio: "inherit" });
 
-      // Forward Ctrl+C / termination to the child so the tunnel shuts down cleanly.
       const shutdown = () => {
         try {
           child.kill("SIGINT");
@@ -62,7 +63,6 @@ export const devCommand = new Command("dev")
       process.on("SIGINT", shutdown);
       process.on("SIGTERM", shutdown);
 
-      // Keep the CLI process alive while the tunnel client is running.
       await new Promise<void>((resolve) => {
         child.on("exit", (code, signal) => {
           process.off("SIGINT", shutdown);
@@ -78,9 +78,7 @@ export const devCommand = new Command("dev")
           resolve();
         });
       });
-    } else {
-      console.log("Tunnel not enabled. Provide --tunnel to expose localhost.");
+    } catch (error) {
+      handleError(error, { json: opts.json });
     }
   });
-
-

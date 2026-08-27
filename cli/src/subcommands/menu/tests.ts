@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import { spawn } from "child_process";
-import { resolveProjectRoot } from "../../../utils/project-root";
+import { resolveProjectRoot } from "../../utils/project-root";
 import { getResolvedApiBase, getResolvedApiToken } from "../../utils/api-base";
 
 export function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "test:comprehensive") {

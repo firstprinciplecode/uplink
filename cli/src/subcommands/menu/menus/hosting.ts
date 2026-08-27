@@ -14,9 +14,13 @@ type Deps = {
   ) => Promise<{ index: number; value: string | number | null } | null>;
 };
 
-type HostedApp = { name: string; id: string; url?: string };
+export type HostedApp = { name: string; id: string; url?: string };
 
-function parseHostedApps(output: string): HostedApp[] {
+function appOptionLabel(app: HostedApp): string {
+  return app.url ? `${app.name}  ${app.url}` : app.name;
+}
+
+export function parseHostedApps(output: string): HostedApp[] {
   const lines = output.split("\n");
   const apps: HostedApp[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -47,7 +51,7 @@ async function resolvePath(promptLine: Deps["promptLine"]): Promise<string | nul
   }
 }
 
-function runCli(args: string[]): void {
+export function runCli(args: string[], extraEnv?: Record<string, string>): void {
   try {
     process.stdin.setRawMode(false);
   } catch {
@@ -57,6 +61,7 @@ function runCli(args: string[]): void {
   const cmd = cliBin ? [cliBin, ...args] : [process.argv[1], ...args];
   const result = spawnSync(process.execPath, cmd, {
     stdio: "inherit",
+    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
   });
   if (result.error) throw result.error;
   if (result.status && result.status !== 0) {
@@ -64,7 +69,7 @@ function runCli(args: string[]): void {
   }
 }
 
-function runCliCapture(args: string[]): string {
+export function runCliCapture(args: string[], extraEnv?: Record<string, string>): string {
   try {
     process.stdin.setRawMode(false);
   } catch {
@@ -75,6 +80,7 @@ function runCliCapture(args: string[]): string {
   const result = spawnSync(process.execPath, cmd, {
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
+    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
   });
   if (result.error) throw result.error;
   if (result.status && result.status !== 0) {
@@ -120,7 +126,7 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             return "No apps found. Use Setup Wizard to create one first.";
           }
           const options: SelectOption[] = apps.map((app) => ({
-            label: `${app.name} (${app.id})`,
+            label: appOptionLabel(app),
             value: app.id,
           }));
           const choice = await inlineSelect("Select app to deploy to", options, true);
@@ -161,45 +167,6 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
         },
       },
       {
-        label: "List Hosted Apps",
-        action: async () => {
-          const output = runCliCapture(["host", "list"]);
-          if (!output || output.includes("No apps found")) {
-            restoreRawMode();
-            return "No apps found.";
-          }
-          const apps = parseHostedApps(output);
-          if (apps.length === 0) {
-            restoreRawMode();
-            return "No apps found.";
-          }
-          const options: SelectOption[] = apps.map((app) => ({
-            label: `${app.name} (${app.id})${app.url ? ` ${app.url}` : ""}`,
-            value: app.id,
-          }));
-          const choice = await inlineSelect("Hosted apps", options, true);
-          if (choice === null) {
-            restoreRawMode();
-            return "";
-          }
-          const selected = apps.find((app) => app.id === choice.value);
-          if (!selected) {
-            restoreRawMode();
-            return "Invalid selection.";
-          }
-          restoreRawMode();
-          return [
-            `App: ${selected.name}`,
-            `ID:  ${selected.id}`,
-            selected.url ? `URL: ${selected.url}` : "",
-            "",
-            "Commands:",
-            `  uplink host status --id ${selected.id}`,
-            `  uplink host logs --id ${selected.id}`,
-          ].join("\n");
-        },
-      },
-      {
         label: "Delete Hosted App",
         action: async () => {
           const output = runCliCapture(["host", "list"]);
@@ -213,7 +180,7 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             return "No apps found.";
           }
           const options: SelectOption[] = apps.map((app) => ({
-            label: `${app.name} (${app.id})`,
+            label: appOptionLabel(app),
             value: app.id,
           }));
           const choice = await inlineSelect("Select app to delete", options, true);
@@ -251,8 +218,9 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
             "  Setup Wizard     - First-time setup: creates Dockerfile, config, app, and deploys",
             "  Deploy           - Redeploy to an existing app (faster, skips setup)",
             "  Analyze          - Check project for deployment readiness",
-            "  List Apps        - Show your deployed apps",
+            "  Apps              - Arrow through apps to inspect url, status, and size",
             "  Delete App       - Remove an app and optionally its data",
+            "  Custom domains   - also under the top-level Domains menu",
             "",
             "CLI commands:",
             "  uplink host setup --name <app> --path <path>   # Full setup + deploy",

@@ -1,4 +1,4 @@
-import { colorCyan, colorDim } from "./colors";
+import { colorBold, colorDim } from "./colors";
 
 // Inline arrow-key selector (returns selected option, or null for "Back")
 export type SelectOption = { label: string; value: string | number | null };
@@ -32,11 +32,11 @@ export async function inlineSelect(
         let branchColor: string;
 
         if (isSelected) {
-          branchColor = colorCyan(branch);
+          branchColor = colorBold(branch);
           if (opt.label === "Back") {
             label = colorDim(opt.label);
           } else {
-            label = colorCyan(opt.label);
+            label = colorBold(opt.label);
           }
         } else {
           branchColor = colorDim(branch);
@@ -58,13 +58,14 @@ export async function inlineSelect(
     allOptions.forEach((opt, idx) => {
       const isLast = idx === allOptions.length - 1;
       const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorCyan(branch) : colorDim(branch);
-      const label = idx === 0 ? colorCyan(opt.label) : opt.label === "Back" ? colorDim(opt.label) : opt.label;
+      const branchColor = idx === 0 ? colorBold(branch) : colorDim(branch);
+      const label = idx === 0 ? colorBold(opt.label) : opt.label === "Back" ? colorDim(opt.label) : opt.label;
       console.log(`${branchColor} ${label}`);
     });
 
     // Set up key handler
     try {
+      process.stdin.ref();
       process.stdin.setRawMode(true);
       process.stdin.resume();
     } catch {

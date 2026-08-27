@@ -4,4 +4,5 @@ export { buildManageTokensMenu } from "./tokens";
 export { buildManageTunnelsMenu } from "./tunnels";
 export { buildManageAliasesMenu } from "./aliases";
 export { buildHostingMenu } from "./hosting";
+export { buildDomainsMenu } from "./domains";
 

@@ -10,13 +10,35 @@ function stylePrompt(question: string): string {
     .replace(backTokenRegex, (match) => colorBold(match));
 }
 
+export function prepareStdinForPrompt(): void {
+  try {
+    process.stdin.setRawMode(false);
+  } catch {
+    /* ignore */
+  }
+  process.stdin.ref();
+  process.stdin.resume();
+  process.stdin.setEncoding("utf8");
+  drainStdin();
+}
+
+/** Drop a leftover Enter from Ink so readline does not auto-answer the next prompt. */
+function drainStdin(): void {
+  const stdin = process.stdin as NodeJS.ReadStream & { read?: () => unknown };
+  if (typeof stdin.read !== "function") return;
+  try {
+    let chunk: unknown;
+    while ((chunk = stdin.read()) !== null) {
+      void chunk;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function promptLine(question: string): Promise<string> {
   return new Promise((resolve) => {
-    try {
-      process.stdin.setRawMode(false);
-    } catch {
-      /* ignore */
-    }
+    prepareStdinForPrompt();
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question(stylePrompt(question), (answer) => {
       rl.close();

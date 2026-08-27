@@ -67,5 +67,5 @@ export function colorSoftGray(text: string) {
 }
 
 export function colorAccent(text: string) {
-  return `${c.brightBlue}${text}${c.reset}`;
+  return `${c.bold}${c.brightWhite}${text}${c.reset}`;
 }
