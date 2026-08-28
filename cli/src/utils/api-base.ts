@@ -2,6 +2,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { createInterface } from "readline";
+import { readStoredCredentials } from "./credentials";
 
 export const DEFAULT_API_BASE = "https://api.uplink.spot";
 
@@ -75,6 +76,8 @@ export function getResolvedApiBase(): string {
   if (envBase) return envBase;
   const parsedToken = parseTokenEnv(process.env.AGENTCLOUD_TOKEN);
   if (parsedToken.apiBase) return parsedToken.apiBase;
+  const storedBase = normalizeApiBase(readStoredCredentials()?.apiBase);
+  if (storedBase) return storedBase;
   const configBase = readApiBaseConfig();
   if (configBase) return configBase;
   return DEFAULT_API_BASE;
@@ -83,6 +86,8 @@ export function getResolvedApiBase(): string {
 export function getResolvedApiToken(apiBase: string): string | undefined {
   const parsedToken = parseTokenEnv(process.env.AGENTCLOUD_TOKEN);
   if (parsedToken.token) return parsedToken.token;
+  const stored = readStoredCredentials();
+  if (stored?.token) return stored.token;
   if (isLocalApiBase(apiBase)) {
     return process.env.AGENTCLOUD_TOKEN_DEV || undefined;
   }
@@ -126,6 +131,12 @@ export async function ensureApiBase(options: { interactive: boolean }): Promise<
   if (parsedToken.apiBase) {
     process.env.AGENTCLOUD_API_BASE = parsedToken.apiBase;
     return parsedToken.apiBase;
+  }
+
+  const storedBase = normalizeApiBase(readStoredCredentials()?.apiBase);
+  if (storedBase) {
+    process.env.AGENTCLOUD_API_BASE = storedBase;
+    return storedBase;
   }
 
   const configBase = readApiBaseConfig();

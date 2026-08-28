@@ -1,6 +1,6 @@
 import type { SelectOption } from "../inline-tree-select";
 import type { MenuChoice } from "../types";
-import { launchDomainking } from "../../../utils/launchDomainking";
+import { buildFindDomainAction } from "./domain-check";
 import { parseHostedApps, runCli, runCliCapture } from "./hosting";
 
 type Deps = {
@@ -18,6 +18,7 @@ const PROVIDER_OPTIONS: SelectOption[] = [
   { label: "Cloudflare", value: "cloudflare" },
   { label: "Hostinger", value: "hostinger" },
   { label: "Namecheap", value: "namecheap" },
+  { label: "DreamHost", value: "dreamhost" },
 ];
 
 async function pickHostedApp(
@@ -114,10 +115,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
       },
       {
         label: "Find a domain",
-        action: async () => {
-          restoreRawMode();
-          return launchDomainking();
-        },
+        action: buildFindDomainAction(deps),
       },
       {
         label: "Attach to app",
@@ -180,7 +178,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
           return [
             "Uplink lists domains you already own at connected registrars, then attaches them to hosted apps.",
             "",
-            "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap",
+            "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap / DreamHost",
             "  Connect     — save a registrar token (same as the CLI)",
             "  Find        — search names that are not yours yet",
             "  Attach      — bind a hostname to a hosted app",

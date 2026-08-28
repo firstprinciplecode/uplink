@@ -5,6 +5,7 @@ import { devCommand } from "./subcommands/dev";
 import { adminCommand } from "./subcommands/admin";
 import { menuCommand } from "./subcommands/menu";
 import { tunnelCommand } from "./subcommands/tunnel";
+import { loginCommand } from "./subcommands/login";
 import { signupCommand } from "./subcommands/signup";
 import { systemCommand } from "./subcommands/system";
 import { hostCommand } from "./subcommands/host";
@@ -12,6 +13,7 @@ import { domainsCommand } from "./subcommands/domains";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { ensureApiBase, parseTokenEnv } from "./utils/api-base";
+import { readStoredCredentials } from "./utils/credentials";
 import { handleError } from "./utils/machine";
 
 // Get version from package.json (CommonJS build: __dirname available)
@@ -32,6 +34,7 @@ program.addCommand(devCommand);
 program.addCommand(adminCommand);
 program.addCommand(tunnelCommand);
 program.addCommand(signupCommand);
+program.addCommand(loginCommand);
 program.addCommand(systemCommand);
 program.addCommand(menuCommand);
 program.addCommand(hostCommand);
@@ -70,6 +73,14 @@ program.hook("preAction", async (thisCommand) => {
     process.env.AGENTCLOUD_TOKEN = parsed.token;
     if (!process.env.AGENTCLOUD_API_BASE && parsed.apiBase) {
       process.env.AGENTCLOUD_API_BASE = parsed.apiBase;
+    }
+  } else {
+    const stored = readStoredCredentials();
+    if (stored?.token && !process.env.AGENTCLOUD_TOKEN) {
+      process.env.AGENTCLOUD_TOKEN = stored.token;
+      if (!process.env.AGENTCLOUD_API_BASE && stored.apiBase) {
+        process.env.AGENTCLOUD_API_BASE = stored.apiBase;
+      }
     }
   }
 

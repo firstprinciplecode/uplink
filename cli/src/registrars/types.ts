@@ -1,4 +1,4 @@
-export const PROVIDER_IDS = ["godaddy", "cloudflare", "hostinger", "namecheap"] as const;
+export const PROVIDER_IDS = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export function isProviderId(value: string): value is ProviderId {
@@ -10,6 +10,8 @@ export type RegistrarCredentials = {
   apiUser?: string;
   apiKey?: string;
   accountId?: string;
+  /** Additional API keys for providers with multiple accounts (e.g. DreamHost). */
+  extraTokens?: string[];
 };
 
 export type InventoryDomain = {

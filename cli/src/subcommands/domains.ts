@@ -14,8 +14,13 @@ import {
   type RegistrarCredentials,
 } from "../registrars";
 import { canPrompt, promptSecret, readEnvValue } from "../registrars/secret";
+import {
+  checkDomainAvailability,
+  formatPublicAvailability,
+} from "../utils/domain-availability";
 
-const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap"];
+// DreamHost last: it can only confirm ownership, not quote availability.
+const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost"];
 
 function parseProvider(raw?: string): ProviderId | undefined {
   if (!raw) return undefined;
@@ -49,15 +54,22 @@ async function credentialsFromFlags(
     return { apiKey, apiUser };
   }
 
-  const token = opts.tokenEnv
-    ? readEnvValue(opts.tokenEnv)
+  // --token-env accepts a comma-separated list of env names for providers
+  // with multiple accounts (e.g. dreamhost).
+  const envNames = (opts.tokenEnv || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const tokens = envNames.length
+    ? envNames.map((name) => readEnvValue(name))
     : interactive
-      ? await promptSecret(`${provider} API token: `)
-      : "";
-  if (!token) {
+      ? [await promptSecret(`${provider} API token: `)].filter(Boolean)
+      : [];
+  if (tokens.length === 0 || !tokens[0]) {
     throw new Error(`${provider} needs --token-env <VAR> (do not pass the secret on the command line)`);
   }
-  const creds: RegistrarCredentials = { token };
+  const creds: RegistrarCredentials = { token: tokens[0] };
+  if (tokens.length > 1) creds.extraTokens = tokens.slice(1);
   if (opts.accountEnv) creds.accountId = readEnvValue(opts.accountEnv);
   return creds;
 }
@@ -88,12 +100,6 @@ async function listInventory(providerFilter?: ProviderId): Promise<InventoryDoma
 
 async function quoteDomain(domain: string, providerFilter?: ProviderId): Promise<DomainQuote> {
   const store = readRegistrarStore();
-  const inventory = await listInventory(providerFilter).catch(() => [] as InventoryDomain[]);
-  const owned = inventory.find((item) => item.domain === domain);
-  if (owned) {
-    return { domain, provider: owned.provider, status: "owned", buyable: false };
-  }
-
   const ids = providerFilter
     ? [providerFilter]
     : CHECK_ORDER.filter((id) => store[id]);
@@ -138,7 +144,7 @@ domainsCommand.action(() => {
 domainsCommand
   .command("list")
   .description("List domains owned at connected registrars")
-  .option("--provider <id>", "Only this provider (godaddy|cloudflare|hostinger|namecheap)")
+  .option("--provider <id>", "Only this provider (godaddy|cloudflare|hostinger|namecheap|dreamhost)")
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
@@ -163,7 +169,7 @@ domainsCommand
 
 domainsCommand
   .command("check")
-  .description("Ask a connected registrar if a domain is buyable, and at what price")
+  .description("Check domain availability (public DNS/RDAP; connected registrars add price)")
   .argument("<domain>", "Domain name (e.g. example.com)")
   .option("--provider <id>", "Which registrar to ask")
   .option("--json", "Output JSON", false)
@@ -172,6 +178,27 @@ domainsCommand
       const domain = String(domainArg).trim().toLowerCase();
       if (!domain.includes(".")) throw new Error("Pass a full domain like example.com");
       const provider = parseProvider(opts.provider);
+
+      // No registrar connected: fall back to public DNS/RDAP availability.
+      const store = readRegistrarStore();
+      const hasRegistrar = provider ? Boolean(store[provider]) : CHECK_ORDER.some((id) => store[id]);
+      if (!hasRegistrar) {
+        const result = await checkDomainAvailability(domain);
+        if (opts.json) {
+          printJson({
+            domain: result.domain,
+            provider: "public",
+            status: result.status,
+            buyable: null,
+            detail: result.detail,
+            note: "Connect a registrar for price and purchase info.",
+          });
+          return;
+        }
+        console.log(formatPublicAvailability(result));
+        return;
+      }
+
       const quote = await quoteDomain(domain, provider);
       if (opts.json) {
         printJson(quote);
@@ -217,8 +244,8 @@ providers
 providers
   .command("connect")
   .description("Save a registrar credential after a live check")
-  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap")
-  .option("--token-env <name>", "Env var holding the API token or Namecheap API key")
+  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost")
+  .option("--token-env <name>", "Env var holding the API token (comma-separate names for multiple keys)")
   .option("--user-env <name>", "Env var holding the Namecheap API user")
   .option("--account-env <name>", "Env var holding a Cloudflare account id (optional)")
   .option("--json", "Output JSON", false)
@@ -226,7 +253,7 @@ providers
     try {
       const provider = String(providerArg).toLowerCase();
       if (!isProviderId(provider)) {
-        throw new Error(`Unknown provider: ${providerArg}. Use godaddy, cloudflare, hostinger, or namecheap`);
+        throw new Error(`Unknown provider: ${providerArg}. Use godaddy, cloudflare, hostinger, namecheap, or dreamhost`);
       }
       const adapter = getAdapter(provider);
       const creds = await credentialsFromFlags(provider, opts);
@@ -250,7 +277,7 @@ providers
 providers
   .command("disconnect")
   .description("Remove a saved registrar credential")
-  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap")
+  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost")
   .option("--json", "Output JSON", false)
   .action((providerArg: string, opts) => {
     try {

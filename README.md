@@ -20,17 +20,26 @@ npm install -g uplink-cli
 npx uplink-cli --help
 ```
 
-## Authenticate (no browser)
+## Start without signup
 ```bash
-uplink signup --json                     # creates account + token
-# or interactive: uplink (Get Started)
-export AGENTCLOUD_TOKEN=your-token-here  # save securely
+# Guest token is created and saved automatically
+uplink tunnel create --port 3000 --json
 ```
+
+Guest access includes one active tunnel for 24 hours and public domain search.
+
+## Unlock persistent features
+```bash
+uplink login --email you@example.com
+uplink login --email you@example.com --code 123456 --json
+```
+
+Email verification preserves the guest tunnel and unlocks hosting, databases, and registrar features. Aliases and custom domains still depend on the account plan.
 
 ## Quick start (agents)
 ```bash
-# Create tunnel + start local client (URL works immediately)
-echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel create --port 3000 --json
+# Creates guest access automatically when needed
+uplink tunnel create --port 3000 --json
 
 # List / stop
 echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin tunnel list --json
@@ -69,6 +78,7 @@ echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin \
 
 ## Key commands
 - `uplink menu` — interactive UI
+- `uplink login --email <email> [--code <code>] [--json]`
 - `uplink signup --json`
 - `uplink tunnel create --port <p> [--alias <a>] [--json]` — starts client
 - `uplink tunnel list|stats|stop|alias-set|alias-delete --json`
@@ -86,7 +96,7 @@ export TUNNEL_DOMAIN=x.uplink.spot
 
 ## Troubleshooting
 - URL not live — ensure something is listening on the port and the client started (`tunnel list` → `connected`)
-- Auth errors — verify `AGENTCLOUD_TOKEN`; prefer `--token-stdin`
+- Auth errors — verify `AGENTCLOUD_TOKEN` or `~/.uplink/credentials`; prefer `--token-stdin` for agents
 - Relay errors — `TUNNEL_CTRL=tunnel.uplink.spot:7071`
 - Domain search TUI — not bundled on npm; use `domains list` / `check` / `host domains *`
 

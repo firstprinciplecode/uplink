@@ -6,6 +6,7 @@ import {
   killTunnelClient,
   startTunnelClient,
 } from "./menu/effects/tunnel-clients";
+import { ensureGuestAccess } from "../utils/guest-access";
 
 type TunnelResponse = {
   id: string;
@@ -51,6 +52,7 @@ tunnelCommand
     }
 
     try {
+      await ensureGuestAccess();
       const existing = findTunnelClients().filter((c) => c.port === port);
       if (existing.length > 0 && !opts.apiOnly) {
         const err = `Tunnel client already running on port ${port} (pid ${existing[0].pid})`;

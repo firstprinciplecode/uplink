@@ -13,20 +13,24 @@ The menu adapts by auth and role. Arrow keys + Enter (no numeric entry).
 
 | State | Condition | Main options |
 |-------|-----------|--------------|
-| Unauthenticated | No / invalid `AGENTCLOUD_TOKEN` | Get Started, Find a domain, About, Exit |
-| User | Valid token | Share, Hosting, Domains, About, Exit |
+| Guest | No / invalid token → guest access is created silently on menu open | Share, Check domain availability, Continue with email, About, Exit |
+| Verified user | Email-verified token | Share, Hosting, Domains, About, Exit |
 | Admin | `role: admin` | Same as user + Usage, System Status, Manage Tokens |
+| Offline | API unreachable | Connection details, About, Exit |
+
+There is no separate "unauthenticated" menu: opening the menu without a usable token mints a guest token (1 active tunnel, 24-hour expiry) and shows the same Share menu everyone gets — including port scanning and tunnel management.
 
 ---
 
-## Unauthenticated
+## Guest
 
 ```
 UPLINK
-● offline
+● connected
 
-Get Started          → signup; optional save AGENTCLOUD_TOKEN to shell rc
-Find a domain        → domain search TUI if Domainking is available
+Share                     → same full Share menu as verified users (no Aliases)
+Check domain availability → Domainking TUI if bundled, else inline `domains check` (public DNS/RDAP)
+Continue with email       → preserve guest tunnel; unlock Hosting + Domains
 About
 Exit
 ```

@@ -7,13 +7,15 @@ Package name: `uplink-cli` · Binary: `uplink`
 
 ## Auth
 
+- `uplink tunnel create` automatically creates guest access when no token exists. Guest access includes **1 active tunnel**, expiring after **24 hours**.
 - Use `AGENTCLOUD_TOKEN` (bearer). Prefer stdin over argv:
   ```bash
   echo "$TOKEN" | uplink --token-stdin …
   ```
+- Humans: `uplink login --email you@example.com` then `--code 123456`. This upgrades current guest access, preserves its tunnel, and unlocks persistent features. Credentials are saved to `~/.uplink/credentials` (chmod 600).
 - API base: `--api-base https://api.uplink.spot` or `AGENTCLOUD_API_BASE`.
 
-## Signup (no auth required)
+## Explicit guest token (optional)
 
 ```bash
 uplink signup --json
@@ -26,6 +28,8 @@ Save `token` from the JSON — it is shown only once. Then:
 export AGENTCLOUD_TOKEN='…'
 ```
 
+Explicit signup creates guest access. A later email login upgrades that guest account when the current token is available.
+
 ## Machine-mode contract
 
 | Rule | Detail |
@@ -37,7 +41,11 @@ export AGENTCLOUD_TOKEN='…'
 | Exit `20` | network |
 | Exit `30` | server / unknown |
 
+Guest accounts can share one local port and use public domain search. Hosting, databases, aliases, and custom domains require a verified email account. Gate error: `ACCOUNT_VERIFICATION_REQUIRED`.
+
 Premium aliases may return `ALIAS_NOT_ENABLED` / `ALIAS_LIMIT_REACHED`.
+
+Free hosting (new accounts): **1 app**, **100 MB** of live artifacts, **no custom domains**, app **sleeps after 30 minutes idle**. Errors: `HOST_APP_LIMIT_REACHED`, `HOST_STORAGE_LIMIT_REACHED`, `HOST_DOMAIN_NOT_ENABLED`. Check quota: the `hosting` object on `GET /v1/me`.
 
 ## Tunnels (share localhost)
 
@@ -110,6 +118,7 @@ The bare `uplink domains` search TUI is **optional** and not bundled with npm �
 uplink domains providers connect godaddy --token-env GODADDY_PAT --json
 uplink domains providers connect cloudflare --token-env CF_API_TOKEN --json
 uplink domains providers connect hostinger --token-env HOSTINGER_API_TOKEN --json
+uplink domains providers connect dreamhost --token-env DREAMHOST_API_KEY --json
 uplink domains providers connect namecheap --token-env NAMECHEAP_API_KEY --user-env NAMECHEAP_API_USER --json
 uplink domains providers list --json
 uplink domains providers disconnect godaddy --json
@@ -123,7 +132,7 @@ echo "$TOKEN" | uplink --token-stdin host domains list --id app_xxx --json
 echo "$TOKEN" | uplink --token-stdin host domains remove --id app_xxx --hostname example.com --json
 ```
 
-Do not treat RDAP “available” as buyable unless `domains check` says `buyable: true`. Purchase is not wired yet.
+`domains check` works without a registrar: it falls back to public DNS/RDAP and returns `provider: "public"` with no price. Do not treat RDAP “available” as buyable unless `domains check` says `buyable: true`. Purchase is not wired yet.
 
 ## Databases (optional)
 
@@ -142,6 +151,10 @@ echo "$TOKEN" | uplink --token-stdin db delete --id db_xxx --yes --json
 | Auth errors | Missing/invalid `AGENTCLOUD_TOKEN`; use `--token-stdin` |
 | `ALIAS_NOT_ENABLED` | Account does not have permanent aliases |
 | Domain search TUI missing | Expected on npm — use `domains list` / `check` / `host domains *` |
+| `HOST_APP_LIMIT_REACHED` | Free plan is 1 hosted app — delete one or the account needs hosting granted |
+| `HOST_STORAGE_LIMIT_REACHED` | Upload exceeds the 100 MB free hosting budget |
+| `HOST_DOMAIN_NOT_ENABLED` | Custom domains are paid — `*.host.uplink.spot` still works |
+| First request after idle is slow | Free apps sleep after 30 minutes; the router wakes them |
 | Hosting stuck `queued` | Edge builder/runner issue — check `host status` / `host logs` |
 
 ## Interactive menu

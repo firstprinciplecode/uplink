@@ -1,4 +1,5 @@
 import { cloudflareAdapter } from "./cloudflare";
+import { dreamhostAdapter } from "./dreamhost";
 import { godaddyAdapter } from "./godaddy";
 import { hostingerAdapter } from "./hostinger";
 import { namecheapAdapter } from "./namecheap";
@@ -10,6 +11,7 @@ export const adapters: RegistrarAdapter[] = [
   cloudflareAdapter,
   hostingerAdapter,
   namecheapAdapter,
+  dreamhostAdapter,
 ];
 
 const byId = new Map(adapters.map((adapter) => [adapter.id, adapter]));

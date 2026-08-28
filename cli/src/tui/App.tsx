@@ -13,6 +13,11 @@ export type MenuStatus = {
   tunnels: TunnelLine[];
   apps: { name: string; id: string; url?: string; createdAt?: string }[];
   providers: string[];
+  storageUsedBytes: number;
+  storageLimitBytes: number;
+  appLimit: number;
+  alwaysOn: boolean;
+  idleMinutes: number | null;
 };
 
 export type MenuOutcome =

@@ -5,9 +5,13 @@ import { getResolvedApiBase, getResolvedApiToken } from "../utils/api-base";
 import type { MenuStatus } from "./App";
 
 const SNAPSHOT_TIMEOUT_MS = 2000;
+/** Hard max for a single upload (paid). Free accounts are tighter via /v1/me. */
 const ARTIFACT_CAP_BYTES = 500_000_000;
 
 export { ARTIFACT_CAP_BYTES };
+
+const FREE_STORAGE = 100_000_000;
+const FREE_APP_LIMIT = 1;
 
 type JsonObject = Record<string, unknown>;
 
@@ -76,19 +80,44 @@ async function fetchHealth(): Promise<{ connected: boolean; latencyMs: number | 
   return { connected: true, latencyMs: Date.now() - started };
 }
 
+function parseHosting(me: JsonObject | null): {
+  storageUsedBytes: number;
+  storageLimitBytes: number;
+  appLimit: number;
+  alwaysOn: boolean;
+  idleMinutes: number | null;
+} {
+  const hosting = asObject(me?.hosting);
+  const storage = asObject(hosting?.storageBytes);
+  const apps = asObject(hosting?.apps);
+  const used = Number(storage?.used);
+  const limit = Number(storage?.limit);
+  const appLimit = Number(apps?.limit);
+  return {
+    storageUsedBytes: Number.isFinite(used) ? used : 0,
+    storageLimitBytes: Number.isFinite(limit) ? limit : FREE_STORAGE,
+    appLimit: Number.isFinite(appLimit) ? appLimit : FREE_APP_LIMIT,
+    alwaysOn: hosting?.alwaysOn === true,
+    idleMinutes: typeof hosting?.idleMinutes === "number" ? hosting.idleMinutes : 30,
+  };
+}
+
 export async function fetchMenuSnapshot(): Promise<MenuStatus> {
   const tunnels = localTunnels();
-  const [healthStatus, apps, providers] = await Promise.all([
+  const [healthStatus, apps, providers, meBody] = await Promise.all([
     fetchHealth(),
     fetchApps(),
     Promise.resolve(connectedProviders()),
+    apiGet("/v1/me"),
   ]);
+  const hosting = parseHosting(asObject(meBody));
   return {
     connected: healthStatus.connected,
     latencyMs: healthStatus.latencyMs,
     tunnels,
     apps,
     providers,
+    ...hosting,
   };
 }
 

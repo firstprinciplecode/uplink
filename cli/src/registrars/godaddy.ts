@@ -80,6 +80,12 @@ export const godaddyAdapter: RegistrarAdapter = {
       return { domain, provider: "godaddy", status: "taken", buyable: false };
     }
 
+    // Fall back only when this API version is unavailable. Retrying a 401,
+    // 429, or 5xx against v1 wastes quota and can hide the real failure.
+    if (v3.status !== 404 && v3.status !== 405) {
+      throw httpError(v3, await v3.text());
+    }
+
     const v1 = await godaddyFetch(
       creds,
       `/v1/domains/available?domain=${encodeURIComponent(domain)}`

@@ -1,7 +1,6 @@
 import fetch from "node-fetch";
 import { apiRequest } from "../http";
 import { clearScreen, promptLine, restoreRawMode, truncate } from "../subcommands/menu/io";
-import { unauthenticatedRequest } from "../subcommands/menu/requests";
 import { inlineSelect } from "../subcommands/menu/inline-tree-select";
 import {
   colorDim,
@@ -19,10 +18,12 @@ import {
   buildSystemStatusMenu,
   buildUsageMenu,
 } from "../subcommands/menu/menus";
-import { ports, smoke, tokenConfig, tunnelClients } from "../subcommands/menu/effects";
+import { buildFindDomainAction } from "../subcommands/menu/menus/domain-check";
+import { ports, smoke, tunnelClients } from "../subcommands/menu/effects";
 import { runInkMenu } from "./runMenu";
-import { launchDomainking } from "../utils/launchDomainking";
 import { fetchMenuSnapshot } from "./snapshot";
+import { isEmail, normalizeEmail, persistLogin, requestLoginCode, verifyLoginCode } from "../utils/login-flow";
+import { ensureGuestAccess } from "../utils/guest-access";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -32,221 +33,116 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
+async function continueWithEmail(): Promise<string | undefined> {
+  restoreRawMode();
+  clearScreen();
+  try {
+    process.stdout.write("\n");
+    process.stdout.write(colorWhite("UPLINK") + colorDim("  Continue with email\n\n"));
+    const email = normalizeEmail(await promptLine("Email: "));
+    if (!isEmail(email)) return "Invalid email.";
+
+    await requestLoginCode(email);
+    process.stdout.write(`\nCode sent to ${email}.\n`);
+    const code = (await promptLine("Code: ")).trim();
+    if (!/^\d{6}$/.test(code)) return "Code must be 6 digits.";
+
+    const result = await verifyLoginCode(email, code);
+    if (!result?.token) return "Invalid response from server. Token not received.";
+    const savedTo = persistLogin(result, email);
+    process.stdout.write(`\n${colorGreen("✓")} Account verified\n`);
+    process.stdout.write(colorDim(`  ${savedTo}\n\n`));
+    return "Email verified. Run uplink again to see Hosting and Domains.";
+  } catch (err: any) {
+    const errorMsg = err?.message || String(err);
+    if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
+      return "Too many attempts. Please try again later.";
+    }
+    return `Email verification failed: ${errorMsg}`;
+  } finally {
+    restoreRawMode();
+  }
+}
+
+const aboutItem: MenuChoice = {
+  label: "About",
+  action: async () => {
+    return [
+      "Uplink CLI",
+      "Open source CLI for sharing localhost and hosting apps.",
+      "Interactive menu + agent-friendly commands for automation.",
+      "",
+      "Website: https://uplink.spot",
+      "GitHub: https://github.com/firstprinciplecode/uplink",
+      "Issues: https://github.com/firstprinciplecode/uplink/issues",
+    ].join("\n");
+  },
+};
+
+const exitItem: MenuChoice = {
+  label: "Exit",
+  action: async () => "Goodbye!",
+};
+
 export async function startMenuSession(): Promise<void> {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      console.error("Uplink menu needs an interactive terminal. Use `uplink --help` for commands.");
+      process.exit(1);
+    }
+
     const apiBase = process.env.AGENTCLOUD_API_BASE || "https://api.uplink.spot";
-    
-    // Determine role (admin or user) via /v1/me; check if auth failed
+
     let isAdmin = false;
-    let authFailed = false;
-    const meStart = Date.now();
-    try {
+    let accountType: "guest" | "verified" | "admin" | null = null;
+    let connectionError: string | null = null;
+
+    const resolveAccount = async (): Promise<void> => {
       const me = await apiRequest("GET", "/v1/me");
       isAdmin = me?.role === "admin";
+      accountType = isAdmin ? "admin" : me?.accountType === "verified" ? "verified" : "guest";
+    };
+
+    try {
+      await resolveAccount();
     } catch (err: any) {
-      // Check if it's an authentication error
       const errorMsg = err?.message || String(err);
-      authFailed =
+      const authFailed =
         errorMsg.includes("UNAUTHORIZED") ||
         errorMsg.includes("401") ||
         errorMsg.includes("Missing or invalid token") ||
         errorMsg.includes("Missing AGENTCLOUD_TOKEN");
-      isAdmin = false;
+      if (authFailed) {
+        // No usable token: quietly create guest access so everyone gets the same menu.
+        try {
+          await ensureGuestAccess({ force: true });
+          await resolveAccount();
+        } catch (guestErr: any) {
+          connectionError = guestErr?.message || String(guestErr);
+        }
+      } else {
+        connectionError = errorMsg;
+      }
     }
-    const meDurationMs = Date.now() - meStart;
 
-    // Build menu structure dynamically by role and auth status
     const mainMenu: MenuChoice[] = [];
-    
-    // If authentication failed, show ONLY "Get Started", "About", and "Exit"
-    if (authFailed) {
+
+    if (!accountType) {
+      // API unreachable (or guest provisioning failed): minimal offline menu.
       mainMenu.push({
-        label: "🚀 Get Started (Create Account)",
-        action: async () => {
-          restoreRawMode();
-          clearScreen();
-          try {
-            process.stdout.write("\n");
-            process.stdout.write(colorWhite("UPLINK") + colorDim("  Create Account\n"));
-            process.stdout.write("\n");
-
-            const label = (await promptLine("Label (optional): ")).trim();
-            const expiresInput = (await promptLine("Expires in days (optional): ")).trim();
-            const expiresDays = expiresInput ? Number(expiresInput) : undefined;
-
-            if (expiresDays && (isNaN(expiresDays) || expiresDays <= 0)) {
-              restoreRawMode();
-              return "Invalid expiration days. Please enter a positive number or leave empty.";
-            }
-
-            process.stdout.write("\nCreating your token...\n");
-            process.stdout.write("");
-            let result;
-            try {
-              result = await unauthenticatedRequest("POST", "/v1/signup", {
-                label: label || undefined,
-                expiresInDays: expiresDays || undefined,
-              });
-              if (!result) {
-                restoreRawMode();
-                return "❌ Error: No response from server.";
-              }
-            } catch (err: any) {
-              restoreRawMode();
-              const errorMsg = err?.message || String(err);
-              console.error("\n❌ Signup error:", errorMsg);
-              if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
-                return "⚠️  Too many signup attempts. Please try again later.";
-              }
-              return `❌ Error creating account: ${errorMsg}`;
-            }
-
-            if (!result || !result.token) {
-              restoreRawMode();
-              return "❌ Error: Invalid response from server. Token not received.";
-            }
-
-            const token = result.token;
-            const tokenId = result.id;
-            const userId = result.userId;
-
-            process.stdout.write("\n");
-            process.stdout.write(colorGreen("✓") + " Account created\n");
-            process.stdout.write("\n");
-            process.stdout.write(colorDim("├─") + " Token     " + token + "\n");
-            process.stdout.write(colorDim("├─") + " ID        " + tokenId + "\n");
-            process.stdout.write(colorDim("├─") + " User      " + userId + "\n");
-            process.stdout.write(colorDim("├─") + " Role      " + result.role + "\n");
-            if (result.expiresAt) {
-              process.stdout.write(colorDim("└─") + " Expires   " + result.expiresAt + "\n");
-            } else {
-              process.stdout.write(colorDim("└─") + " Expires   " + colorDim("never") + "\n");
-            }
-            process.stdout.write("\n");
-            process.stdout.write(colorDim("!") + " Save this token securely — shown only once\n");
-
-            // Try to automatically add token to shell config
-            const detected = tokenConfig.detectShellConfigFile();
-            let configFile: string | null = detected.configFile;
-            let shellName = detected.shellName;
-
-            let tokenAdded = false;
-            const tokenExists = configFile ? tokenConfig.shellConfigHasToken(configFile) : false;
-
-            if (configFile) {
-              const promptText = tokenExists
-                ? `\n→ Update existing token in ~/.${shellName}rc? (Y/n): `
-                : `\n→ Add token to ~/.${shellName}rc? (Y/n): `;
-              
-              const addToken = (await promptLine(promptText)).trim().toLowerCase();
-              if (addToken !== "n" && addToken !== "no") {
-                try {
-                  const res = tokenConfig.upsertShellToken(configFile, token);
-                  tokenAdded = res.wrote;
-                  if (tokenExists) {
-                    console.log(colorGreen(`\n✓ Token updated in ~/.${shellName}rc`));
-                  } else {
-                    console.log(colorGreen(`\n✓ Token added to ~/.${shellName}rc`));
-                  }
-                  if (!res.verifyOk) {
-                    console.log(
-                      colorRed(`\n! Token may not have been written correctly. Check ~/.${shellName}rc`)
-                    );
-                  }
-                } catch (err: any) {
-                  if (err?.message?.includes("UNSAFE_SHELL_CONFIG_PERMISSIONS")) {
-                    console.log(
-                      colorRed(
-                        `\n! Could not write to ~/.${shellName}rc: file is group/world writable. Fix permissions first.`
-                      )
-                    );
-                    console.log(colorDim(`  chmod 600 ~/.${shellName}rc`));
-                  } else {
-                    console.log(colorRed(`\n! Could not write to ~/.${shellName}rc: ${err.message}`));
-                  }
-                  console.log(`\n  Please add manually:`);
-                  console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc`));
-                }
-              }
-            } else {
-              console.log(colorDim(`\n→ Could not detect your shell. Add the token manually:`));
-              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.zshrc  # for zsh`));
-              console.log(colorDim(`  echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.bashrc  # for bash`));
-            }
-
-            if (!tokenAdded) {
-            process.stdout.write("\n");
-            process.stdout.write(colorDim("!") + " Set this token as an environment variable:\n\n");
-            process.stdout.write(colorDim("  ") + "export AGENTCLOUD_TOKEN=" + token + "\n");
-            if (configFile) {
-              process.stdout.write(colorDim(`\n  Or add to ~/.${shellName}rc:\n`));
-              process.stdout.write(colorDim("  ") + `echo 'export AGENTCLOUD_TOKEN=${token}' >> ~/.${shellName}rc\n`);
-              process.stdout.write(colorDim("  ") + `source ~/.${shellName}rc\n`);
-            }
-            process.stdout.write(colorDim("\n  Then restart this menu.\n\n"));
-            }
-
-            restoreRawMode();
-
-            if (tokenAdded) {
-              process.env.AGENTCLOUD_TOKEN = token;
-              // Use stdout writes to avoid buffering/race with process.exit()
-              process.stdout.write(`\n${colorGreen("✓")} Token saved to ~/.${shellName}rc\n`);
-              process.stdout.write(`\n${colorDim("→")} Next: run in your terminal:\n`);
-              process.stdout.write(colorDim(`   source ~/.${shellName}rc && uplink\n\n`));
-              
-              setTimeout(() => {
-                process.exit(0);
-              }, 3000);
-              
-              return undefined as any;
-            }
-
-            console.log("\nPress Enter to continue...");
-            await promptLine("");
-            restoreRawMode();
-            return "Token created! Please set AGENTCLOUD_TOKEN environment variable and restart the menu.";
-          } catch (err: any) {
-            restoreRawMode();
-            const errorMsg = err?.message || String(err);
-            if (errorMsg.includes("429") || errorMsg.includes("RATE_LIMIT")) {
-              return "⚠️  Too many signup attempts. Please try again later.";
-            }
-            return `❌ Error creating account: ${errorMsg}`;
-          }
-        },
-      });
-      
-      mainMenu.push({
-        label: "Find a domain",
-        action: async () => {
-          restoreRawMode();
-          return launchDomainking();
-        },
-      });
-
-      mainMenu.push({
-        label: "About",
+        label: "Connection details",
         action: async () => {
           return [
-            "Uplink CLI",
-            "Open source CLI for sharing localhost and hosting apps.",
-            "Interactive menu + agent-friendly commands for automation.",
+            `Could not reach ${apiBase}.`,
             "",
-            "Website: https://uplink.spot",
-            "GitHub: https://github.com/firstprinciplecode/uplink",
-            "Issues: https://github.com/firstprinciplecode/uplink/issues",
+            connectionError ?? "Unknown error.",
+            "",
+            "Check your network, then run uplink again.",
           ].join("\n");
         },
       });
-
-      mainMenu.push({
-        label: "Exit",
-        action: async () => {
-          return "Goodbye!";
-        },
-      });
+      mainMenu.push(aboutItem);
+      mainMenu.push(exitItem);
     } else {
-      // Only show other menu items if authentication succeeded
 
     const shareMenu = buildManageTunnelsMenu({
       apiRequest,
@@ -263,21 +159,22 @@ export async function startMenuSession(): Promise<void> {
       colorRed,
     });
 
-    const aliasesMenu = buildManageAliasesMenu({
-      apiRequest,
-      promptLine,
-      restoreRawMode,
-      inlineSelect,
-      findTunnelClients: tunnelClients.findTunnelClients,
-      truncate,
-    });
-
     shareMenu.subMenu = shareMenu.subMenu || [];
-    if (aliasesMenu.subMenu) {
-      shareMenu.subMenu.push({
-        label: "Aliases",
-        subMenu: aliasesMenu.subMenu,
+    if (accountType !== "guest") {
+      const aliasesMenu = buildManageAliasesMenu({
+        apiRequest,
+        promptLine,
+        restoreRawMode,
+        inlineSelect,
+        findTunnelClients: tunnelClients.findTunnelClients,
+        truncate,
       });
+      if (aliasesMenu.subMenu) {
+        shareMenu.subMenu.push({
+          label: "Aliases",
+          subMenu: aliasesMenu.subMenu,
+        });
+      }
     }
     if (isAdmin) {
       shareMenu.subMenu.push({
@@ -301,21 +198,31 @@ export async function startMenuSession(): Promise<void> {
 
     mainMenu.push(shareMenu);
 
-    mainMenu.push(
-      buildHostingMenu({
-        promptLine,
-        restoreRawMode,
-        inlineSelect,
-      })
-    );
-
-    mainMenu.push(
-      buildDomainsMenu({
-        promptLine,
-        restoreRawMode,
-        inlineSelect,
-      })
-    );
+    if (accountType === "guest") {
+      mainMenu.push({
+        label: "Check domain availability",
+        action: buildFindDomainAction({ promptLine, restoreRawMode }),
+      });
+      mainMenu.push({
+        label: "Continue with email  (unlock hosting + domains)",
+        action: continueWithEmail,
+      });
+    } else {
+      mainMenu.push(
+        buildHostingMenu({
+          promptLine,
+          restoreRawMode,
+          inlineSelect,
+        })
+      );
+      mainMenu.push(
+        buildDomainsMenu({
+          promptLine,
+          restoreRawMode,
+          inlineSelect,
+        })
+      );
+    }
 
     // Admin-only: Usage section
     if (isAdmin) {
@@ -352,30 +259,8 @@ export async function startMenuSession(): Promise<void> {
       );
     }
 
-    mainMenu.push({
-      label: "About",
-      action: async () => {
-        return [
-          "Uplink CLI",
-          "Open source CLI for sharing localhost and hosting apps.",
-          "Interactive menu + agent-friendly commands for automation.",
-          "",
-          "Website: https://uplink.spot",
-          "GitHub: https://github.com/firstprinciplecode/uplink",
-          "Issues: https://github.com/firstprinciplecode/uplink/issues",
-        ].join("\n");
-      },
-    });
-
-    mainMenu.push({
-      label: "Exit",
-      action: async () => "Goodbye!",
-    });
-    }
-
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      console.error("Uplink menu needs an interactive terminal. Use `uplink --help` for commands.");
-      process.exit(1);
+    mainMenu.push(aboutItem);
+    mainMenu.push(exitItem);
     }
 
     await runInkMenu({ tree: mainMenu, getStatus: fetchMenuSnapshot });

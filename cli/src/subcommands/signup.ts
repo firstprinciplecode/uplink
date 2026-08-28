@@ -39,7 +39,7 @@ async function signupRequest(body: Record<string, unknown>): Promise<SignupRespo
 }
 
 export const signupCommand = new Command("signup")
-  .description("Create a new user account and token (no auth required)")
+  .description("Create an explicit guest token (tunnel create does this automatically)")
   .option("--label <label>", "Optional label for the token")
   .option("--expires-days <days>", "Token expiration in days (optional)")
   .option("--json", "Output JSON", false)
@@ -63,7 +63,7 @@ export const signupCommand = new Command("signup")
       } else {
         const apiBase = getResolvedApiBase();
         const tokenExport = formatTokenForEnv(result.token, apiBase);
-        console.log("Account created successfully!");
+        console.log("Guest access created successfully!");
         console.log("");
         console.log(`  Token:    ${result.token}`);
         console.log(`  User ID:  ${result.userId}`);

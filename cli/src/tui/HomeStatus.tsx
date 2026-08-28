@@ -1,45 +1,73 @@
 import { Box, Text } from "ink";
 import type { MenuStatus } from "./App";
 import { Wordmark } from "./brand";
+import { formatBytes } from "./format";
 
 const LABEL_WIDTH = 12;
-const BAR_CAP = 24;
+const SPACE_GAUGE = 16;
 
-function CountBar({ count }: { count: number }) {
-  if (count <= 0) return null;
-  const filled = Math.min(count, BAR_CAP);
-  return (
-    <Text>
-      <Text color="green">{"█".repeat(filled)}</Text>
-      {count > BAR_CAP ? <Text dimColor> +{count - BAR_CAP}</Text> : null}
-    </Text>
-  );
+function formatLimit(n: number): string {
+  return n < 0 ? "∞" : String(n);
 }
 
-function Metric({ label, count }: { label: string; count: number }) {
+function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Box>
       <Box width={LABEL_WIDTH}>
         <Text dimColor>{label}</Text>
       </Box>
-      <Box width={4}>
-        {count > 0 ? <Text>{count}</Text> : <Text dimColor>—</Text>}
+      <Text>{value}</Text>
+    </Box>
+  );
+}
+
+function SpaceMetric({ usedBytes, limitBytes }: { usedBytes: number; limitBytes: number }) {
+  const used = Math.max(0, usedBytes);
+  const unlimited = limitBytes < 0;
+  const cap = unlimited ? Math.max(used, 1) : Math.max(limitBytes, 1);
+  const left = unlimited ? used : Math.max(0, limitBytes - used);
+  const ratio = unlimited ? 0 : Math.min(1, used / cap);
+  const filled = Math.round(ratio * SPACE_GAUGE);
+  const nearlyFull = !unlimited && ratio >= 0.85;
+
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Box width={LABEL_WIDTH}>
+          <Text dimColor>space</Text>
+        </Box>
+        <Text>
+          <Text color={nearlyFull ? "red" : "green"}>{"█".repeat(filled)}</Text>
+          <Text dimColor>{"░".repeat(SPACE_GAUGE - filled)}</Text>
+          <Text dimColor>
+            {"  "}
+            {unlimited ? `${formatBytes(used)} used` : `${formatBytes(left)} left`}
+          </Text>
+        </Text>
       </Box>
-      <CountBar count={count} />
+      <Box>
+        <Box width={LABEL_WIDTH}>
+          <Text> </Text>
+        </Box>
+        <Text dimColor>
+          {unlimited ? "unlimited" : `of ${formatBytes(limitBytes)} hosting budget`}
+        </Text>
+      </Box>
     </Box>
   );
 }
 
 export function HomeStatus({ status }: { status: MenuStatus }) {
   const latency =
-    status.connected && status.latencyMs != null ? `${status.latencyMs}ms` : "—";
+    status.connected && status.latencyMs != null ? `${status.latencyMs}ms` : "0ms";
+  const plan = status.alwaysOn ? "always-on" : `sleep after ${status.idleMinutes ?? 30}m idle`;
 
   return (
     <Box flexDirection="column">
       <Wordmark />
       <Box marginTop={1}>
-        <Text color={status.connected ? "green" : "red"}>
-          {status.connected ? "connected" : "offline"}
+        <Text color={status.connected ? "green" : "yellow"}>
+          ● {status.connected ? "connected" : "offline"}
         </Text>
         <Text dimColor> · {latency}</Text>
       </Box>
@@ -47,9 +75,14 @@ export function HomeStatus({ status }: { status: MenuStatus }) {
         <Text dimColor>{"─".repeat(36)}</Text>
       </Box>
       <Box flexDirection="column">
-        <Metric label="apps" count={status.apps.length} />
-        <Metric label="tunnels" count={status.tunnels.length} />
-        <Metric label="registrars" count={status.providers.length} />
+        <Metric
+          label="apps"
+          value={`${status.apps.length} / ${formatLimit(status.appLimit)}`}
+        />
+        <Metric label="tunnels" value={String(status.tunnels.length)} />
+        <Metric label="registrars" value={String(status.providers.length)} />
+        <SpaceMetric usedBytes={status.storageUsedBytes} limitBytes={status.storageLimitBytes} />
+        <Metric label="plan" value={plan} />
       </Box>
       <Box marginTop={1}>
         <Text dimColor>{"─".repeat(36)}</Text>
