@@ -42,7 +42,10 @@
     "AGENTS.md",
     "docs/README.md",
     "docs/AGENTS.md",
-    "docs/MENU_STRUCTURE.md"
+    "docs/MENU_STRUCTURE.md",
+    "docs/HOSTING.md",
+    "docs/PRODUCT.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "dev:cli": "tsx cli/src/index.ts",

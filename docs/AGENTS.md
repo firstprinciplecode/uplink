@@ -3,6 +3,7 @@
 For agents (Cursor, Claude Code, Codex, Windsurf, and similar) to use Uplink **non-interactively**.
 
 Install: `npm install -g uplink-cli` or `npx uplink-cli …`  
+Until **0.2.0** is on npm: `npm install -g github:firstprinciplecode/uplink#v0.2.0`  
 Package name: `uplink-cli` · Binary: `uplink`
 
 ## Auth
@@ -170,5 +171,7 @@ Agents should prefer the non-interactive commands above.
 ## More
 
 - Menu map: `docs/MENU_STRUCTURE.md`
+- Hosting: `docs/HOSTING.md`
+- Product: `docs/PRODUCT.md`
 - Website: https://uplink.spot
-- npm: https://www.npmjs.com/package/uplink-cli
+- npm: https://www.npmjs.com/package/uplink-cli (0.2.0 pending; use the GitHub tag until then)
