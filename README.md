@@ -15,18 +15,13 @@ Learn more at [uplink.spot](https://uplink.spot)
 
 ## Install
 
-**npm (current published: 0.1.39)** — guest login and DreamHost land in **0.2.0**, tagged on GitHub, npm publish waiting on org auth.
-
 ```bash
-# Until 0.2.0 is on npm:
-npm install -g github:firstprinciplecode/uplink#v0.2.0
-
-# After publish:
 npm install -g uplink-cli
+# or
 npx uplink-cli --help
 ```
 
-Changelog: [CHANGELOG.md](./CHANGELOG.md). Product overview: [docs/PRODUCT.md](./docs/PRODUCT.md). Hosting: [docs/HOSTING.md](./docs/HOSTING.md).
+`latest` on npm is **0.2.0** (guest login, email OTP, public `domains check`, DreamHost). Changelog: [CHANGELOG.md](./CHANGELOG.md). Product: [docs/PRODUCT.md](./docs/PRODUCT.md). Hosting: [docs/HOSTING.md](./docs/HOSTING.md).
 
 ## Start without signup
 ```bash

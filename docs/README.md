@@ -3,8 +3,7 @@
 ## Quick Start
 
 ```bash
-# 0.2.0 (guest login, public domain check) — GitHub tag until npm org auth lands
-npm install -g github:firstprinciplecode/uplink#v0.2.0
+npm install -g uplink-cli
 uplink menu          # interactive
 uplink --help        # commands
 ```
@@ -20,6 +19,6 @@ uplink --help        # commands
 ## Links
 
 - Website: [uplink.spot](https://uplink.spot)
-- npm: [uplink-cli](https://www.npmjs.com/package/uplink-cli) (0.1.39 until 0.2.0 publishes)
+- npm: [uplink-cli](https://www.npmjs.com/package/uplink-cli)
 - Source: [github.com/firstprinciplecode/uplink](https://github.com/firstprinciplecode/uplink)
 - API: `https://api.uplink.spot`
