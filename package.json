@@ -1,6 +1,6 @@
 {
   "name": "uplink-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Software for agents — share localhost, host apps, and attach domains from the terminal. JSON-first CLI for Cursor, Claude, Codex, and Windsurf.",
   "keywords": [
     "ai-agents",
@@ -45,7 +45,8 @@
     "docs/MENU_STRUCTURE.md",
     "docs/HOSTING.md",
     "docs/PRODUCT.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "tsconfig.json"
   ],
   "scripts": {
     "dev:cli": "tsx cli/src/index.ts",

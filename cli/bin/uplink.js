@@ -38,7 +38,12 @@ try {
 }
 
 // Run the CLI via tsx (no extra node wrapper so PATH/global tsx works)
-const child = spawn(tsxPath, [cliPath, ...args], {
+const tsconfigPath = path.join(projectRoot, "tsconfig.json");
+const tsxArgs = fs.existsSync(tsconfigPath)
+  ? ["--tsconfig", tsconfigPath, cliPath, ...args]
+  : [cliPath, ...args];
+
+const child = spawn(tsxPath, tsxArgs, {
   stdio: "inherit",
   cwd: projectRoot,
   env: { ...process.env, UPLINK_CWD: invokeCwd, UPLINK_BIN: invokeBin },
