@@ -18,7 +18,7 @@ Humans use `uplink` (keyboard menu). Agents use subcommands with `--json` and `-
 
 | Kind | How you get it | Can do | Cannot do |
 |------|----------------|--------|-----------|
-| **Guest** | Automatic on `tunnel create` or menu open | 1 tunnel (24h), public `domains check` | Hosting, databases, aliases, custom domains |
+| **Guest** | Automatic on `tunnel create` or menu open | 1 tunnel (24h), public domain search/check | Hosting, databases, aliases, custom domains |
 | **Verified** | `uplink login --email` then OTP | Guest plus hosting / DBs / registrars | Plan-gated extras (aliases, custom domains) |
 | **Admin** | Operator token in the control plane | Everything + Usage / System Status / Manage Tokens | — |
 

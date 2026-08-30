@@ -200,7 +200,7 @@ export async function startMenuSession(): Promise<void> {
 
     if (accountType === "guest") {
       mainMenu.push({
-        label: "Check domain availability",
+        label: "Find a domain",
         action: buildFindDomainAction({ promptLine, restoreRawMode }),
       });
       mainMenu.push({

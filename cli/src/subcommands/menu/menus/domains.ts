@@ -187,6 +187,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
             "CLI (agents):",
             "  uplink domains providers connect godaddy --token-env GODADDY_PAT --json",
             "  uplink domains list --json",
+            "  uplink domains search acme --json",
             "  uplink domains check example.com --json",
             "  uplink host domains add --id <app> --hostname example.com --json",
           ].join("\n");

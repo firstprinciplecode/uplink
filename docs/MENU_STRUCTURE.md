@@ -29,7 +29,7 @@ UPLINK
 ● connected
 
 Share                     → same full Share menu as verified users (no Aliases)
-Check domain availability → Domainking TUI if bundled, else inline `domains check` (public DNS/RDAP)
+Check domain availability → built-in Find a domain (DNS/RDAP across common TLDs)
 Continue with email       → preserve guest tunnel; unlock Hosting + Domains
 About
 Exit
@@ -76,15 +76,15 @@ CLI equivalents: `uplink host setup|deploy|list|status|logs|delete|analyze|prefl
 Domains
 ├── My domains              → uplink domains list
 ├── Connect registrar       → providers connect (token via env)
-├── Check availability      → domains check
+├── Find a domain           → built-in search TUI (also `uplink domains` / `domains search`)
 ├── Attach to app           → host domains add
 ├── Verify                  → host domains verify
 ├── List attached           → host domains list
 ├── Detach                  → host domains remove
-└── Search (optional TUI)   → Domainking if DOMAINKING_ENTRY / sibling repo exists
+└── Help
 ```
 
-Bare `uplink domains` opens the search TUI when available; otherwise it prints agent-friendly command hints.
+Bare `uplink domains` opens Find a domain. Agents use `domains search NAME --json` and `domains check example.com --json`.
 
 ---
 
@@ -106,4 +106,3 @@ CLI: `uplink admin status|tunnels|databases|tokens …`
 | `AGENTCLOUD_API_BASE` | API host | `https://api.uplink.spot` |
 | `TUNNEL_CTRL` | Relay | `tunnel.uplink.spot:7071` |
 | `TUNNEL_DOMAIN` | Tunnel DNS suffix | `x.uplink.spot` |
-| `DOMAINKING_ENTRY` | Optional search TUI entry | — |

@@ -101,7 +101,7 @@ export TUNNEL_DOMAIN=x.uplink.spot
 - URL not live — ensure something is listening on the port and the client started (`tunnel list` → `connected`)
 - Auth errors — verify `AGENTCLOUD_TOKEN` or `~/.uplink/credentials`; prefer `--token-stdin` for agents
 - Relay errors — `TUNNEL_CTRL=tunnel.uplink.spot:7071`
-- Domain search TUI — not bundled on npm; use `domains list` / `check` / `host domains *`
+- Domain search — `uplink domains` or `uplink domains search acme --json` (public DNS/RDAP)
 
 ## Docs
 - Agents: [AGENTS.md](./AGENTS.md)

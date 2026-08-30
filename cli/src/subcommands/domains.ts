@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { launchDomainking } from "../utils/launchDomainking";
 import { handleError, printJson } from "../utils/machine";
 import {
   adapters,
@@ -18,6 +17,8 @@ import {
   checkDomainAvailability,
   formatPublicAvailability,
 } from "../utils/domain-availability";
+import { searchDomains } from "../utils/domain-search";
+import { runDomainSearch } from "../tui/DomainSearch";
 
 // DreamHost last: it can only confirm ownership, not quote availability.
 const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost"];
@@ -133,11 +134,11 @@ export const domainsCommand = new Command("domains").description(
 
 domainsCommand.addHelpText(
   "after",
-  "\nWith no subcommand, opens the domain search TUI.\n"
+  "\nWith no subcommand, opens Find a domain (type a name; common TLDs are checked via DNS/RDAP).\n"
 );
 
-domainsCommand.action(() => {
-  const message = launchDomainking();
+domainsCommand.action(async () => {
+  const message = await runDomainSearch();
   if (message) console.log(message);
 });
 
@@ -208,6 +209,41 @@ domainsCommand
       const premium = quote.premium ? " premium" : "";
       console.log(`${quote.domain}  ${quote.status}${price}${premium}  [${quote.provider}]`);
       if (quote.error) console.log(`  ${quote.error}`);
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+domainsCommand
+  .command("search")
+  .description("Search a label across common TLDs, or check one exact domain")
+  .argument("[name]", "Bare label (acme) or full domain (acme.io)")
+  .option("--json", "Output JSON", false)
+  .action(async (name: string | undefined, opts: { json?: boolean }) => {
+    try {
+      if (!name) {
+        if (opts.json) throw new Error("Pass a name: uplink domains search acme --json");
+        const message = await runDomainSearch();
+        if (message) console.log(message);
+        return;
+      }
+      const results = await searchDomains(name);
+      if (opts.json) {
+        printJson({
+          query: name,
+          results: results.map((item) => ({
+            domain: item.domain,
+            provider: "public",
+            status: item.status,
+            buyable: null,
+            detail: item.detail,
+          })),
+        });
+        return;
+      }
+      for (const item of results) {
+        console.log(`${item.domain.padEnd(28)} ${item.status}`);
+      }
     } catch (error) {
       handleError(error, { json: opts.json });
     }

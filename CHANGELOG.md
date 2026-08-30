@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-08-29
+
+Built-in **Find a domain** in the CLI (no Domainking install). Type a label to check common TLDs via DNS/RDAP. `uplink domains` opens it; agents use `uplink domains search acme --json`. Domainking remains a separate app.
+
 ## 0.2.1 — 2026-08-29
 
 Ship `tsconfig.json` in the npm tarball so the menu's JSX compiles with `react-jsx`. 0.2.0 global installs crashed with `React is not defined` because tsx had no config and used the classic `React.createElement` transform.

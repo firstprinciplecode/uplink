@@ -112,9 +112,12 @@ Notes:
 ## Custom domains
 
 Registrar inventory is CLI. Attach/verify is under `host domains`.  
-The bare `uplink domains` search TUI is **optional** and not bundled with npm — use the JSON commands below.
+The bare `uplink domains` command opens Find a domain. Agents should use JSON:
 
 ```bash
+uplink domains search acme --json
+uplink domains check example.com --json
+uplink domains list --json
 uplink domains providers connect godaddy --token-env GODADDY_PAT --json
 uplink domains providers connect cloudflare --token-env CF_API_TOKEN --json
 uplink domains providers connect hostinger --token-env HOSTINGER_API_TOKEN --json
@@ -122,9 +125,6 @@ uplink domains providers connect dreamhost --token-env DREAMHOST_API_KEY --json
 uplink domains providers connect namecheap --token-env NAMECHEAP_API_KEY --user-env NAMECHEAP_API_USER --json
 uplink domains providers list --json
 uplink domains providers disconnect godaddy --json
-
-uplink domains list --json
-uplink domains check example.com --json
 
 echo "$TOKEN" | uplink --token-stdin host domains add --id app_xxx --hostname example.com --json
 echo "$TOKEN" | uplink --token-stdin host domains verify --id app_xxx --hostname example.com --json
@@ -150,7 +150,7 @@ echo "$TOKEN" | uplink --token-stdin db delete --id db_xxx --yes --json
 | URL 502 / not connected | Local process on `--port` not running, or client died — re-run `tunnel create` or check `tunnel list` |
 | Auth errors | Missing/invalid `AGENTCLOUD_TOKEN`; use `--token-stdin` |
 | `ALIAS_NOT_ENABLED` | Account does not have permanent aliases |
-| Domain search TUI missing | Expected on npm — use `domains list` / `check` / `host domains *` |
+| Domain search TUI missing | Not a TTY — use `domains search NAME --json` |
 | `HOST_APP_LIMIT_REACHED` | Free plan is 1 hosted app — delete one or the account needs hosting granted |
 | `HOST_STORAGE_LIMIT_REACHED` | Upload exceeds the 100 MB free hosting budget |
 | `HOST_DOMAIN_NOT_ENABLED` | Custom domains are paid — `*.host.uplink.spot` still works |
