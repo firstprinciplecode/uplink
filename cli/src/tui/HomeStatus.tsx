@@ -1,6 +1,5 @@
 import { Box, Text } from "ink";
 import type { MenuStatus } from "./App";
-import { Wordmark } from "./brand";
 import { formatBytes } from "./format";
 
 const LABEL_WIDTH = 12;
@@ -64,7 +63,6 @@ export function HomeStatus({ status }: { status: MenuStatus }) {
 
   return (
     <Box flexDirection="column">
-      <Wordmark />
       <Box marginTop={1}>
         <Text color={status.connected ? "green" : "yellow"}>
           ● {status.connected ? "connected" : "offline"}

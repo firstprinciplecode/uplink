@@ -1,6 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, readFileSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "fs";
 
 export type DetectedShell = { shellName: "zsh" | "bash" | ""; configFile: string | null };
 
@@ -53,11 +53,16 @@ export function upsertShellToken(configFile: string, token: string): { wrote: bo
   const configContent = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
   const lines = configContent.split("\n");
 
+  // Single-quote the value so shell metacharacters in a token can't be
+  // interpreted (escape any embedded single quote the POSIX way).
+  const quotedToken = `'${token.replace(/'/g, "'\\''")}'`;
+  const exportLine = `export AGENTCLOUD_TOKEN=${quotedToken}`;
+
   let replaced = false;
   const updatedLines = lines.map((line) => {
     if (line.match(/^\s*export\s+AGENTCLOUD_TOKEN=/)) {
       replaced = true;
-      return `export AGENTCLOUD_TOKEN=${token}`;
+      return exportLine;
     }
     return line;
   });
@@ -65,11 +70,17 @@ export function upsertShellToken(configFile: string, token: string): { wrote: bo
   if (!replaced) {
     updatedLines.push("");
     updatedLines.push("# Uplink API Token (added automatically)");
-    updatedLines.push(`export AGENTCLOUD_TOKEN=${token}`);
+    updatedLines.push(exportLine);
   }
 
-  writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o644 });
+  // The file holds a secret; write it 0600 so other local users can't read it.
+  writeFileSync(configFile, updatedLines.join("\n"), { flag: "w", mode: 0o600 });
+  try {
+    chmodSync(configFile, 0o600);
+  } catch {
+    /* best-effort tightening if the file pre-existed with wider mode */
+  }
   const verifyContent = readFileSync(configFile, "utf-8");
-  return { wrote: true, verifyOk: verifyContent.includes(`export AGENTCLOUD_TOKEN=${token}`) };
+  return { wrote: true, verifyOk: verifyContent.includes(exportLine) };
 }
 

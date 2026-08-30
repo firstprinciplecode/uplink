@@ -39,19 +39,15 @@ export const devCommand = new Command("dev")
 
       const clientPath = resolveTunnelClientPath();
       const ctrlHost = process.env.TUNNEL_CTRL ?? "tunnel.uplink.spot:7071";
-      const args = [
-        clientPath,
-        "--token",
-        result.token,
-        "--port",
-        String(port),
-        "--ctrl",
-        ctrlHost,
-      ];
+      // Token goes through the environment, never argv (see tunnel-clients.ts).
+      const args = [clientPath, "--port", String(port), "--ctrl", ctrlHost];
       if (!opts.json) {
-        console.log(`Starting tunnel client: node ${args.join(" ")}`);
+        console.log(`Starting tunnel client on port ${port} via ${ctrlHost}`);
       }
-      const child = spawn("node", args, { stdio: "inherit" });
+      const child = spawn("node", args, {
+        stdio: "inherit",
+        env: { ...process.env, TUNNEL_TOKEN: result.token },
+      });
 
       const shutdown = () => {
         try {

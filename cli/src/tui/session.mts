@@ -20,6 +20,7 @@ import {
 } from "../subcommands/menu/menus";
 import { buildFindDomainAction } from "../subcommands/menu/menus/domain-check";
 import { ports, smoke, tunnelClients } from "../subcommands/menu/effects";
+import { WORDMARK_TEXT } from "./brand";
 import { runInkMenu } from "./runMenu";
 import { fetchMenuSnapshot } from "./snapshot";
 import { isEmail, normalizeEmail, persistLogin, requestLoginCode, verifyLoginCode } from "../utils/login-flow";
@@ -38,7 +39,8 @@ async function continueWithEmail(): Promise<string | undefined> {
   clearScreen();
   try {
     process.stdout.write("\n");
-    process.stdout.write(colorWhite("UPLINK") + colorDim("  Continue with email\n\n"));
+    process.stdout.write(colorWhite(WORDMARK_TEXT) + "\n");
+    process.stdout.write(colorDim("Continue with email\n\n"));
     const email = normalizeEmail(await promptLine("Email: "));
     if (!isEmail(email)) return "Invalid email.";
 

@@ -233,11 +233,19 @@ const DEFAULT_TARBALL_EXCLUDES = [
   "npm-debug.log*",
   "yarn-debug.log*",
   "yarn-error.log*",
-  // Environment files (should use --env-file or uplink.host.json)
+  // Environment files (should use --env-file or uplink.host.json). Secrets must
+  // never be baked into the uploaded artifact/image layers — env is delivered
+  // separately via the app config API. The wizard creates .env.production, so it
+  // is critical that it is excluded here.
   ".env",
   ".env.local",
   ".env.development",
   ".env.development.local",
+  ".env.production",
+  ".env.production.local",
+  ".env.test",
+  ".env.test.local",
+  ".env.*.local",
   // Misc
   "*.pid",
   "*.seed",
@@ -334,6 +342,19 @@ function makeTarball(sourceDir: string): { tarPath: string; sizeBytes: number; s
   return { tarPath: tmp, sizeBytes: st.size, sha256 };
 }
 
+// Only send the account bearer to a URL that shares the resolved API origin.
+// The upload/complete URLs come from the server response; a compromised or
+// spoofed API could otherwise point them at an attacker host and exfiltrate the
+// token. Presigned storage URLs (different origin) must authenticate solely via
+// their signed headers.
+function isApiOriginUrl(target: string): boolean {
+  try {
+    return new URL(target).origin === new URL(getResolvedApiBase()).origin;
+  } catch {
+    return false;
+  }
+}
+
 async function uploadArtifact(
   uploadUrl: string,
   tarPath: string,
@@ -341,14 +362,21 @@ async function uploadArtifact(
 ): Promise<any> {
   const hasSignedHeaders = uploadHeaders && Object.keys(uploadHeaders).length > 0;
   const token = getApiToken();
+  const sameOrigin = isApiOriginUrl(uploadUrl);
   if (!hasSignedHeaders && !token) throw new Error("Missing AGENTCLOUD_TOKEN");
+  if (!hasSignedHeaders && token && !sameOrigin) {
+    throw new Error(
+      `Refusing to send credentials to non-API upload host (${new URL(uploadUrl).host}). ` +
+        `Expected signed upload headers from the API.`
+    );
+  }
 
   const headers: Record<string, string> = { ...(uploadHeaders || {}) };
   if (!headers["Content-Type"]) headers["Content-Type"] = "application/octet-stream";
   if (!headers["Content-Length"]) {
     headers["Content-Length"] = String(statSync(tarPath).size);
   }
-  if (!hasSignedHeaders && token) headers.Authorization = `Bearer ${token}`;
+  if (!hasSignedHeaders && token && sameOrigin) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(uploadUrl, {
     method: "PUT",
@@ -369,6 +397,11 @@ async function completeArtifactUpload(completeUrl?: string): Promise<void> {
   if (!completeUrl) return;
   const token = getApiToken();
   if (!token) throw new Error("Missing AGENTCLOUD_TOKEN");
+  if (!isApiOriginUrl(completeUrl)) {
+    throw new Error(
+      `Refusing to send credentials to non-API complete host (${new URL(completeUrl).host}).`
+    );
+  }
 
   const res = await fetch(completeUrl, {
     method: "POST",

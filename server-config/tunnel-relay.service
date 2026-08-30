@@ -12,7 +12,12 @@ Environment="TUNNEL_RELAY_HTTP=7070"
 Environment="TUNNEL_RELAY_CTRL=7071"
 Environment="TUNNEL_DOMAIN=x.uplink.spot"
 Environment="ALIAS_DOMAIN=uplink.spot"
-# RELAY_INTERNAL_SECRET is expected to be provided via /opt/agentcloud/.env
+# Validate tokens against the control plane so only tokens the API issued can
+# register. Requires /internal/allow-tls to be reachable + RELAY_INTERNAL_SECRET.
+Environment="TUNNEL_VALIDATE_TOKENS=true"
+# REQUIRED in production: shared secret protecting the relay's /internal/* API and
+# authenticating the relay's calls to the backend. Provide via /opt/agentcloud/.env
+# (RELAY_INTERNAL_SECRET=...). The service will start without it but log warnings.
 ExecStart=/usr/bin/node /opt/agentcloud/scripts/tunnel/relay-improved.js
 Restart=always
 RestartSec=10

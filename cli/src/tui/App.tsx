@@ -3,7 +3,9 @@ import { useState } from "react";
 import type { MenuChoice } from "../subcommands/menu/types";
 import { HomeStatus } from "./HomeStatus";
 import { AppInspector } from "./AppInspector";
+import { Wordmark } from "./brand";
 import { cleanLabel } from "./format";
+import { sanitizeForTerminal } from "../utils/sanitize";
 
 export type TunnelLine = { url: string; port: number };
 
@@ -139,18 +141,14 @@ export function MenuApp({
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
+      <Wordmark />
       {atRoot ? (
         <HomeStatus status={status} />
-      ) : (
-        <Box flexDirection="column">
-          <Text dimColor>UPLINK</Text>
-          {crumb ? (
-            <Box marginTop={1}>
-              <Text dimColor>{crumb}</Text>
-            </Box>
-          ) : null}
+      ) : crumb ? (
+        <Box marginTop={1}>
+          <Text dimColor>{crumb}</Text>
         </Box>
-      )}
+      ) : null}
 
       <Box flexDirection="column" marginTop={atRoot ? 1 : 1}>
         {current.map((choice, i) => {
@@ -178,7 +176,7 @@ export function MenuApp({
 
       {notice ? (
         <Box flexDirection="column" marginTop={1}>
-          {notice.split("\n").map((line, i) => (
+          {sanitizeForTerminal(notice).split("\n").map((line, i) => (
             <Text key={i} color={noticeColor(line)} dimColor={!noticeColor(line)}>
               {line || " "}
             </Text>

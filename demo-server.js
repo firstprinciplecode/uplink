@@ -103,6 +103,6 @@ server.listen(port, () => {
   console.log(`📡 Ready to tunnel! Create a tunnel with:`);
   console.log(`   uplink dev --tunnel --port ${port}`);
   console.log(`   or`);
-  console.log(`   node scripts/tunnel/client-improved.js --token <TOKEN> --port ${port} --ctrl 178.156.149.124:7071`);
+  console.log(`   TUNNEL_TOKEN=<TOKEN> node scripts/tunnel/client-improved.js --port ${port} --ctrl 178.156.149.124:7071`);
   console.log(`\nPress Ctrl+C to stop`);
 });

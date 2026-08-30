@@ -14,7 +14,7 @@ const http = require("http");
 const net = require("net");
 const tls = require("tls");
 const fs = require("fs");
-const { randomUUID } = require("crypto");
+const { randomUUID, timingSafeEqual } = require("crypto");
 
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
 const LISTEN_HTTP_HOST = process.env.TUNNEL_RELAY_HTTP_HOST || "127.0.0.1";
@@ -33,6 +33,45 @@ const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
 const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+
+// A subdomain label must be a valid DNS label. Anything else is rejected before
+// it is used as a routing key or interpolated into an internal API query.
+const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// Hop-by-hop headers must not be forwarded end-to-end (RFC 7230 §6.1). Stripping
+// them on the request path prevents request-smuggling/desync against the local app.
+const HOP_BY_HOP = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+function stripHopByHop(headers) {
+  const out = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (!HOP_BY_HOP.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+// Constant-time comparison of the internal secret to avoid leaking it via timing.
+function internalSecretMatches(req) {
+  const provided = req.headers[INTERNAL_SECRET_HEADER];
+  if (typeof provided !== "string" || provided.length === 0) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(INTERNAL_SECRET);
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 // Unique identifier for this relay process run (used to avoid double-counting in backend persistence)
 const RELAY_RUN_ID = randomUUID();
@@ -222,7 +261,7 @@ async function validateToken(token) {
   }
   
   try {
-    const url = `${API_BASE}/internal/allow-tls?domain=${token}.${TUNNEL_DOMAIN}`;
+    const url = `${API_BASE}/internal/allow-tls?domain=${encodeURIComponent(`${token}.${TUNNEL_DOMAIN}`)}`;
     const response = await new Promise((resolve, reject) => {
       const headers = INTERNAL_SECRET ? { [INTERNAL_SECRET_HEADER]: INTERNAL_SECRET } : undefined;
       const req = http.get(url, { timeout: 2000, agent: httpAgent, headers }, (res) => {
@@ -266,7 +305,7 @@ async function resolveAliasToToken(alias) {
     return cached.token;
   }
 
-  const url = `${API_BASE}/internal/resolve-alias?alias=${alias}`;
+  const url = `${API_BASE}/internal/resolve-alias?alias=${encodeURIComponent(alias)}`;
 
   try {
     const token = await new Promise((resolve, reject) => {
@@ -321,6 +360,7 @@ function extractTokenFromHost(host) {
   const parts = lower.split(".");
   if (parts.length < 3) return null;
   const token = parts[0];
+  if (!LABEL_RE.test(token)) return null;
   const domain = parts.slice(1).join(".");
   if (domain === TUNNEL_DOMAIN || domain.endsWith(`.${TUNNEL_DOMAIN}`)) {
     return token;
@@ -334,6 +374,7 @@ function extractAliasFromHost(host) {
   const parts = lower.split(".");
   if (parts.length < 3) return null;
   const alias = parts[0];
+  if (!LABEL_RE.test(alias)) return null;
   const domain = parts.slice(1).join(".");
   if (domain === ALIAS_DOMAIN || domain.endsWith(`.${ALIAS_DOMAIN}`)) {
     if (RESERVED_ALIASES.has(alias)) return null;
@@ -370,6 +411,20 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
 
   socket.on("data", async (chunk) => {
     buf += chunk.toString("utf8");
+    // Bound the buffer BEFORE searching for a newline, otherwise a client can
+    // stream unbounded bytes with no newline and OOM the relay (the per-line
+    // size check below would never run). The control port is internet-facing.
+    if (buf.length > MAX_REQUEST_SIZE) {
+      logError(new Error(`Control buffer overflow: ${buf.length} bytes`), "Control");
+      try {
+        socket.write(JSON.stringify({ type: "error", message: "Message too large" }) + "\n");
+      } catch {
+        /* ignore */
+      }
+      buf = "";
+      socket.destroy();
+      return;
+    }
     let idx;
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx);
@@ -387,6 +442,16 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
         const msg = JSON.parse(line);
         
         if (msg.type === "register" && msg.token) {
+          // Reject tokens that aren't well-formed DNS labels; they can never be
+          // routed to (extractTokenFromHost applies the same rule) and must not
+          // become map keys.
+          if (typeof msg.token !== "string" || !LABEL_RE.test(msg.token)) {
+            stats.invalidTokens++;
+            socket.write(JSON.stringify({ type: "error", message: "Invalid token" }) + "\n");
+            socket.end();
+            return;
+          }
+
           // Validate token
           const isValid = await validateToken(msg.token);
           if (!isValid) {
@@ -395,7 +460,27 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
             socket.end();
             return;
           }
-          
+
+          // SECURITY: reject takeover of a token that already has a live client.
+          // Without this, anyone who knows a token can re-register and overwrite
+          // the victim's entry, hijacking all traffic to their subdomain. A dead
+          // socket (client reconnecting after a drop) is allowed to replace itself.
+          const existing = clients.get(msg.token);
+          if (
+            existing &&
+            existing.socket &&
+            existing.socket !== socket &&
+            !existing.socket.destroyed &&
+            existing.socket.writable
+          ) {
+            log("rejected duplicate registration", msg.token.substring(0, 8) + "...", "ip", clientIp);
+            socket.write(
+              JSON.stringify({ type: "error", message: "Tunnel already connected" }) + "\n"
+            );
+            socket.end();
+            return;
+          }
+
           // Register client with metadata
           registeredToken = msg.token;
           clients.set(msg.token, {
@@ -414,6 +499,13 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
           const entry = pending.get(msg.id);
           if (!entry) {
             log("warn", "Response head for unknown request:", msg.id);
+            return;
+          }
+          // SECURITY: only the client that owns this request's token may answer
+          // it. Prevents a malicious client from injecting responses into another
+          // tenant's in-flight request.
+          if (entry.token !== socket.token) {
+            log("warn", "Cross-tenant response-head rejected for", msg.id);
             return;
           }
           entry.started = true;
@@ -448,6 +540,7 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
         } else if (msg.type === "response-chunk" && msg.id) {
           const entry = pending.get(msg.id);
           if (!entry) return;
+          if (entry.token !== socket.token) return;
           const data = Buffer.from(msg.data || "", "base64");
           entry.res.write(data);
           const tTok = getTraffic(trafficByToken, entry.token);
@@ -464,6 +557,7 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
         } else if (msg.type === "response-end" && msg.id) {
           const entry = pending.get(msg.id);
           if (!entry) return;
+          if (entry.token !== socket.token) return;
           pending.delete(msg.id);
           entry.res.end();
 
@@ -472,6 +566,10 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
           const entry = pending.get(msg.id);
           if (!entry) {
             log("warn", "Response for unknown request:", msg.id);
+            return;
+          }
+          if (entry.token !== socket.token) {
+            log("warn", "Cross-tenant response rejected for", msg.id);
             return;
           }
           pending.delete(msg.id);
@@ -517,6 +615,7 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
 
         } else if (msg.type === "ws-data" && msg.id) {
           const session = wsSessions.get(msg.id);
+          if (session && session.token !== socket.token) return;
           if (session && !session.socket.destroyed) {
             const data = Buffer.from(msg.data || "", "base64");
             session.socket.write(data);
@@ -529,6 +628,7 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
 
         } else if (msg.type === "ws-close" && msg.id) {
           const session = wsSessions.get(msg.id);
+          if (session && session.token !== socket.token) return;
           wsSessions.delete(msg.id);
           if (session && !session.socket.destroyed) {
             session.socket.end();
@@ -565,6 +665,31 @@ ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
   log(`Control TLS: ${CTRL_TLS_ENABLED ? "enabled" : "disabled"}`);
   log(`Token validation: ${VALIDATE_TOKENS ? "enabled" : "disabled"}`);
   log(`Rate limit: ${RATE_LIMIT_REQUESTS} requests/minute per token`);
+
+  // The control port is internet-facing. Without token validation, only the
+  // duplicate-registration guard stops a caller from claiming an unconnected
+  // token, so validation should be enabled in production.
+  if (process.env.NODE_ENV === "production") {
+    if (!VALIDATE_TOKENS) {
+      log(
+        "SECURITY WARNING: TUNNEL_VALIDATE_TOKENS is not enabled in production. " +
+          "Any client can register a token that isn't already connected. " +
+          "Set TUNNEL_VALIDATE_TOKENS=true and RELAY_INTERNAL_SECRET."
+      );
+    }
+    if (!INTERNAL_SECRET) {
+      log(
+        "SECURITY WARNING: RELAY_INTERNAL_SECRET is unset. Internal endpoints are " +
+          "only protected by the public-host gate. Set a secret in /opt/agentcloud/.env."
+      );
+    }
+    if (!CTRL_TLS_ENABLED) {
+      log(
+        "SECURITY WARNING: TUNNEL_CTRL_TLS is disabled. Registration tokens cross " +
+          "the control channel in cleartext."
+      );
+    }
+  }
 });
 
 // HTTP ingress -> forward to client (host-based routing)
@@ -574,9 +699,39 @@ const httpServer = http.createServer(async (req, res) => {
   const host = req.headers.host || "";
   const pathname = req.url.split("?")[0]; // Extract pathname before URL parsing
 
-  // Internal endpoints (protected by optional shared secret)
-  if (pathname === "/internal/connected-tokens" || pathname === "/internal/traffic-stats" || pathname === "/health") {
-    if (INTERNAL_SECRET && req.headers[INTERNAL_SECRET_HEADER] !== INTERNAL_SECRET) {
+  // Requests arriving via the public ingress carry a tunnel/alias Host (Caddy
+  // proxies *.x.uplink.spot and *.uplink.spot here preserving Host). Legitimate
+  // internal callers reach the loopback listener with a bare host (127.0.0.1).
+  const isPublicHost = Boolean(extractTokenFromHost(host) || extractAliasFromHost(host));
+
+  // Internal endpoints expose full tunnel tokens + client IPs, so they must be
+  // unreachable from the public internet. Two independent gates:
+  //   1. Never serve them to a request that came in on a public tunnel host.
+  //   2. When a shared secret is configured, require a timing-safe match.
+  // Both must pass; the host gate alone closes the remote token-dump even if the
+  // secret is unset, without breaking on-box internal callers.
+  if (pathname.startsWith("/internal/")) {
+    // 1. Never serve internal endpoints to a request that arrived on a public
+    //    tunnel/alias host. This closes the remote token-dump even when the
+    //    shared secret is unset, without breaking on-box loopback callers.
+    if (isPublicHost) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "forbidden" }));
+    }
+    // 2. Endpoints that expose live tokens + client IPs fail CLOSED: with no
+    //    secret configured they are disabled entirely, never open to loopback.
+    if (pathname === "/internal/connected-tokens" || pathname === "/internal/traffic-stats") {
+      if (!INTERNAL_SECRET) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        return res.end(
+          JSON.stringify({ error: "internal endpoints disabled: RELAY_INTERNAL_SECRET not set" })
+        );
+      }
+      if (!internalSecretMatches(req)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "forbidden" }));
+      }
+    } else if (INTERNAL_SECRET && !internalSecretMatches(req)) {
       res.writeHead(403, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "forbidden" }));
     }
@@ -664,8 +819,9 @@ const httpServer = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://${host || "localhost"}`);
 
-  // Friendly health endpoint when no Host token is provided
-  if (url.pathname === "/health" && (!host || !host.includes(TUNNEL_DOMAIN))) {
+  // Friendly health endpoint — only for non-public hosts, so operational stats
+  // aren't exposed through the public token/alias ingress.
+  if (url.pathname === "/health" && !isPublicHost) {
     const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(
@@ -768,7 +924,7 @@ const httpServer = http.createServer(async (req, res) => {
     id,
     method: req.method,
     path,
-    headers: req.headers,
+    headers: stripHopByHop(req.headers),
     body: body.length ? body.toString("base64") : "",
   };
   
@@ -918,26 +1074,9 @@ httpServer.on("error", (err) => {
   logError(err, "HTTP server error");
 });
 
-// Health endpoint (if accessed directly)
-httpServer.on("request", (req, res) => {
-  if (req.url === "/health" && req.headers.host && !req.headers.host.includes(TUNNEL_DOMAIN)) {
-    const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      status: "ok",
-      uptime,
-      stats: {
-        requests: stats.requests,
-        errors: stats.errors,
-        rateLimited: stats.rateLimited,
-        invalidTokens: stats.invalidTokens,
-        activeConnections: clients.size,
-        pendingRequests: pending.size,
-      },
-    }));
-    return;
-  }
-});
+// NOTE: /health is served by the main request handler above (gated on a
+// non-public host). A second "request" listener here would double-respond and
+// leaked stats via the alias domain, so it has been removed.
 
 // Graceful shutdown
 function shutdown() {

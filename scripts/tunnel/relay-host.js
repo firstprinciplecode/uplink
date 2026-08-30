@@ -11,9 +11,22 @@ const http = require("http");
 const net = require("net");
 const { randomUUID } = require("crypto");
 
+// Host-routing relay variant that lacks the production hardening in
+// relay-improved.js (token validation, duplicate-registration guard,
+// cross-tenant checks, internal-endpoint gating). Refuse to run in production
+// unless explicitly forced, so it can't silently reintroduce those holes.
+if (process.env.NODE_ENV === "production" && process.env.TUNNEL_ALLOW_UNHARDENED_RELAY !== "true") {
+  console.error(
+    "refusing to start relay-host.js in production: use scripts/tunnel/relay-improved.js " +
+      "(set TUNNEL_ALLOW_UNHARDENED_RELAY=true only if you understand the risk)"
+  );
+  process.exit(1);
+}
+
 const LISTEN_HTTP = Number(process.env.TUNNEL_RELAY_HTTP || 7070);
 const LISTEN_CTRL = Number(process.env.TUNNEL_RELAY_CTRL || 7071);
 const LISTEN_STATUS = Number(process.env.TUNNEL_RELAY_STATUS || 7072);
+const MAX_CTRL_BUFFER = Number(process.env.TUNNEL_MAX_REQUEST_SIZE || 10 * 1024 * 1024); // 10MB
 const TUNNEL_DOMAIN = process.env.TUNNEL_DOMAIN || "dev.uplink.spot";
 
 // token -> { socket, clientIp, targetPort, connectedAt }
@@ -56,6 +69,13 @@ const ctrlServer = net.createServer((socket) => {
 
   socket.on("data", (chunk) => {
     buf += chunk.toString("utf8");
+    // Bound the buffer so a client can't OOM the relay by streaming with no newline.
+    if (buf.length > MAX_CTRL_BUFFER) {
+      log("ctrl buffer overflow, destroying socket");
+      buf = "";
+      socket.destroy();
+      return;
+    }
     let idx;
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx);
@@ -177,9 +197,8 @@ httpServer.on("error", (err) => log("http error", err.message));
 const statusServer = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   
-  // CORS headers for browser access
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  // This server binds loopback and returns tunnel tokens + client IPs. Do NOT
+  // send wildcard CORS, or any website the operator visits could read it cross-origin.
   res.setHeader("Content-Type", "application/json");
   
   if (req.method === "OPTIONS") {

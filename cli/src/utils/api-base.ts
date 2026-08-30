@@ -28,6 +28,12 @@ export function normalizeApiBase(input: string | undefined | null): string | nul
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    // The bearer token is sent to this origin. Never allow plaintext HTTP for a
+    // remote host — only loopback, where there's no on-path attacker.
+    const host = url.hostname;
+    const isLoopback =
+      host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1";
+    if (url.protocol === "http:" && !isLoopback) return null;
     return url.origin;
   } catch {
     return null;

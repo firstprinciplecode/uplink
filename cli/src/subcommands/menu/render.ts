@@ -1,6 +1,7 @@
 import { clearScreen } from "./io";
 import { colorBold, colorDim, colorGreen, colorRed } from "./colors";
 import { DEFAULT_MENU_MESSAGE, type MenuChoice } from "./types";
+import { sanitizeForTerminal } from "../../utils/sanitize";
 
 export type RenderArgs = {
   banner: string;
@@ -100,8 +101,9 @@ export function renderMenu(args: RenderArgs) {
     console.log(colorDim("Working..."));
   } else if (message && message !== DEFAULT_MENU_MESSAGE) {
     console.log();
-    // Format multi-line messages nicely
-    const lines = message.split("\n");
+    // Format multi-line messages nicely (strip any control/ANSI sequences that
+    // may have come from server- or registrar-controlled data).
+    const lines = sanitizeForTerminal(message).split("\n");
     lines.forEach((line) => {
       // Color success/error indicators
       const styledLine = line

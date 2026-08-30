@@ -1,4 +1,5 @@
 import { Box, Text, useApp, useInput, render } from "ink";
+import { Wordmark } from "./brand";
 import TextInput from "ink-text-input";
 import { useEffect, useRef, useState } from "react";
 import type { PublicAvailability } from "../utils/domain-availability";
@@ -60,8 +61,10 @@ function DomainSearchApp() {
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Text dimColor>UPLINK</Text>
-      <Text>Find a domain</Text>
+      <Wordmark />
+      <Box marginTop={1}>
+        <Text>Find a domain</Text>
+      </Box>
       <Box marginTop={1}>
         <Text dimColor>search › </Text>
         <TextInput value={query} onChange={setQuery} placeholder="acme   or   acme.io" />

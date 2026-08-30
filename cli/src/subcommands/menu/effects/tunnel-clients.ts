@@ -1,5 +1,6 @@
 import { execSync, spawn } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { homedir } from "os";
 import path from "path";
 import { resolveProjectRoot } from "../../../utils/project-root";
 
@@ -14,6 +15,48 @@ export function resolveTunnelClientPath(): string {
   return clientPath;
 }
 
+// The tunnel token must not appear on the child's argv (it would be readable via
+// `ps` by any local user, who could then hijack the tunnel). We pass it through
+// the environment instead and keep a 0600 registry mapping pid -> {port, token}
+// so `list`/`stop` can still correlate local clients to their API tunnels.
+function registryDir(): string {
+  return path.join(homedir(), ".uplink", "tunnels");
+}
+
+function registryPath(pid: number): string {
+  return path.join(registryDir(), `${pid}.json`);
+}
+
+function writeTunnelRegistry(pid: number, entry: { port: number; token: string }): void {
+  try {
+    mkdirSync(registryDir(), { recursive: true, mode: 0o700 });
+    writeFileSync(registryPath(pid), JSON.stringify(entry), { mode: 0o600 });
+  } catch {
+    /* registry is best-effort; token stays out of argv regardless */
+  }
+}
+
+function readTunnelRegistry(pid: number): { port: number; token: string } | null {
+  try {
+    const raw = readFileSync(registryPath(pid), "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.token === "string" && typeof parsed?.port === "number") {
+      return { port: parsed.port, token: parsed.token };
+    }
+  } catch {
+    /* missing/corrupt entry */
+  }
+  return null;
+}
+
+function removeTunnelRegistry(pid: number): void {
+  try {
+    rmSync(registryPath(pid), { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Start the local tunnel client in the background (detached). */
 export function startTunnelClient(opts: {
   token: string;
@@ -25,17 +68,19 @@ export function startTunnelClient(opts: {
   const ctrl = opts.ctrl || process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
   const clientProcess = spawn(
     "node",
-    [clientPath, "--token", opts.token, "--port", String(opts.port), "--ctrl", ctrl],
+    [clientPath, "--port", String(opts.port), "--ctrl", ctrl],
     {
       stdio: "ignore",
       detached: true,
       cwd: projectRoot,
+      env: { ...process.env, TUNNEL_TOKEN: opts.token },
     }
   );
   clientProcess.unref();
   if (!clientProcess.pid) {
     throw new Error("Failed to start tunnel client process");
   }
+  writeTunnelRegistry(clientProcess.pid, { port: opts.port, token: opts.token });
   return { pid: clientProcess.pid, clientPath };
 }
 
@@ -51,20 +96,34 @@ export function findTunnelClients(): TunnelClient[] {
       .filter((line) => line.includes("scripts/tunnel/client-improved.js"));
 
     const clients: TunnelClient[] = [];
+    const livePids = new Set<number>();
 
     for (const line of lines) {
-      // Parse process line: PID COMMAND (from ps -o pid=,command=)
+      // Parse process line: PID COMMAND (from ps -o pid=,command=). The token is
+      // no longer on argv, so we only read pid + port here and recover the token
+      // from the 0600 registry written at start time.
       const pidMatch = line.match(/^\s*(\d+)/);
-      const tokenMatch = line.match(/--token\s+(\S+)/);
       const portMatch = line.match(/--port\s+(\d+)/);
+      if (!pidMatch || !portMatch) continue;
 
-      if (pidMatch && tokenMatch && portMatch) {
-        clients.push({
-          pid: parseInt(pidMatch[1], 10),
-          port: parseInt(portMatch[1], 10),
-          token: tokenMatch[1],
-        });
+      const pid = parseInt(pidMatch[1], 10);
+      livePids.add(pid);
+      const registry = readTunnelRegistry(pid);
+      clients.push({
+        pid,
+        port: parseInt(portMatch[1], 10),
+        token: registry?.token ?? "",
+      });
+    }
+
+    // Garbage-collect registry entries for clients that are no longer running.
+    try {
+      for (const file of readdirSync(registryDir())) {
+        const pid = parseInt(file.replace(/\.json$/, ""), 10);
+        if (Number.isFinite(pid) && !livePids.has(pid)) removeTunnelRegistry(pid);
       }
+    } catch {
+      /* registry dir may not exist yet */
     }
 
     return clients;
@@ -74,6 +133,7 @@ export function findTunnelClients(): TunnelClient[] {
 }
 
 export function killTunnelClient(pid: number): boolean {
+  removeTunnelRegistry(pid);
   try {
     process.kill(pid, "SIGTERM");
   } catch {

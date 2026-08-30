@@ -12,8 +12,9 @@
 	# email you@example.com
 	# Optional: protect any future on-demand TLS issuance with backend allowlist
 	on_demand_tls {
-		# Backend ask endpoint enforces secret + hostname validation (tokens/aliases)
-		ask https://api.uplink.spot/internal/allow-tls?secret={env.RELAY_INTERNAL_SECRET}
+		# Backend ask endpoint enforces secret + hostname validation (tokens/aliases).
+		# Loopback so we can hard-block /internal at the public edge without breaking TLS.
+		ask http://127.0.0.1:4000/internal/allow-tls?secret={env.RELAY_INTERNAL_SECRET}
 	}
 }
 
@@ -25,7 +26,16 @@
 
 api.uplink.spot {
 	import cloudflare_tls
-	reverse_proxy 127.0.0.1:4000
+
+	# SECURITY: /internal/* carries app env and is only guarded by a shared secret.
+	# Runner/builder/router call the backend on loopback, never through this edge.
+	handle /internal* {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:4000
+	}
 }
 
 # Tunnel ingress: host routing relies on preserving the Host header
@@ -55,13 +65,64 @@ x.uplink.spot {
 uplink.spot {
 	import cloudflare_tls
 	root * /var/www/uplink-website
-	file_server
 	encode gzip
 
-	# Fallback to index.html for SPA routing (if needed)
-	try_files {path} /index.html
+	# Security headers for the static marketing site. The CSP is scoped to what the
+	# site actually loads: self + Google Fonts (styles/fonts), GA4
+	# (googletagmanager/google-analytics), and the Uplink API (connect-src). All
+	# first-party scripts are external files, so no script 'unsafe-inline' is
+	# needed; 'unsafe-inline' for styles covers the few inline style attributes.
+	header {
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://www.googletagmanager.com; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com; connect-src 'self' https://api.uplink.spot https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+
+	# Never serve VCS metadata, env files, or other dotfiles from the web root.
+	@hidden path_regexp hidden /\.(git|env)(/|$)
+	handle @hidden {
+		respond 404
+	}
+
+	handle {
+		# Fallback to index.html for SPA routing (if needed)
+		try_files {path} /index.html
+		file_server
+	}
 }
 
+# Hosting
+*.host.uplink.spot {
+  tls {
+    dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+  }
 
+  reverse_proxy 127.0.0.1:8080
+}
 
+# Custom domains attached to hosted apps (e.g. universalfactory.ai -> app container).
+#
+# This is a catch-all HTTPS site: any hostname not matched by a more specific
+# site block lands here. Certificates are issued on demand via ACME (HTTP-01 /
+# TLS-ALPN-01), which works because the domain's DNS already points at this
+# server. Issuance is gated by the global on_demand_tls ask endpoint
+# (/internal/allow-tls), which only approves hostnames that exist in
+# app_domains with verified_at set — so strangers pointing random domains at
+# this server cannot mint certificates.
+https:// {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up Host {http.request.host}
+	}
+}
 
+# Redirect www to the apex site
+www.uplink.spot {
+	import cloudflare_tls
+	redir https://uplink.spot{uri} permanent
+}

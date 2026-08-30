@@ -29,9 +29,13 @@ function parseArgs() {
   return out;
 }
 
-const { token, port, ctrl, maxSize } = parseArgs();
+const parsed = parseArgs();
+// Prefer the token from the environment so it never appears on argv (which is
+// world-readable via `ps`). The --token flag is kept only for backwards compat.
+const token = process.env.TUNNEL_TOKEN || parsed.token;
+const { port, ctrl, maxSize } = parsed;
 if (!token || !port || !ctrl) {
-  console.error("Usage: node scripts/tunnel/client-improved.js --token <token> --port <port> --ctrl <host:port> [--max-size <bytes>]");
+  console.error("Usage: TUNNEL_TOKEN=<token> node scripts/tunnel/client-improved.js --port <port> --ctrl <host:port> [--max-size <bytes>]");
   process.exit(1);
 }
 
