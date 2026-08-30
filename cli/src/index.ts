@@ -10,6 +10,7 @@ import { signupCommand } from "./subcommands/signup";
 import { systemCommand } from "./subcommands/system";
 import { hostCommand } from "./subcommands/host";
 import { domainsCommand } from "./subcommands/domains";
+import { upgradeCommand, billingCommand } from "./subcommands/upgrade";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { ensureApiBase, parseTokenEnv } from "./utils/api-base";
@@ -39,6 +40,8 @@ program.addCommand(systemCommand);
 program.addCommand(menuCommand);
 program.addCommand(hostCommand);
 program.addCommand(domainsCommand);
+program.addCommand(upgradeCommand);
+program.addCommand(billingCommand);
 
 // Global pre-action hook to apply shared options
 let cachedTokenStdin: string | null = null;
