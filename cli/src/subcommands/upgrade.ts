@@ -18,7 +18,7 @@ function openInBrowser(url: string): void {
 }
 
 export const upgradeCommand = new Command("upgrade")
-  .description("Upgrade to Uplink Pro — more apps, always-on, custom domains, aliases")
+  .description("Upgrade to Uplink Pro — unlimited apps in 1 GB, always-on, custom domains, aliases")
   .option("--yearly", "Yearly billing (2 months free)", false)
   .option("--json", "Output JSON (prints the checkout URL, does not open a browser)", false)
   .action(async (opts) => {
