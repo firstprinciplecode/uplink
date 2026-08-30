@@ -2,7 +2,7 @@
 
 ## 0.2.3 — 2026-08-30
 
-New **`uplink upgrade`** (Uplink Pro subscription — $9/mo or `--yearly` $90/yr via Stripe Checkout) and **`uplink billing`** (Stripe billing portal for cancel/card changes). Pro unlocks unlimited hosted apps within 1 GB of storage, always-on, custom domains, and permanent aliases.
+New **`uplink upgrade`** (Uplink Pro subscription — $9/mo or `--yearly` $90/yr via Stripe Checkout) and **`uplink billing`** (Stripe billing portal for cancel/card changes). Pro unlocks unlimited hosted apps within 1 GB of storage, always-on for your 5 most-active apps, custom domains, and permanent aliases.
 
 Fix global CLI crash on every command (`host list`, `login`, …): `domains.ts` was statically importing Ink, so tsx tried to load `yoga-layout` as CommonJS (`Top-level await is currently not supported with the "cjs" output format`). Interactive Find a domain now runs as a child ESM process, same as the menu.
 
