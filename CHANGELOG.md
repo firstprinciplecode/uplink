@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — 2026-08-30
+
+New **`uplink upgrade`** (Uplink Pro subscription — $9/mo or `--yearly` $90/yr via Stripe Checkout) and **`uplink billing`** (Stripe billing portal for cancel/card changes). Pro unlocks 10 hosted apps, 1 GB storage, always-on, custom domains, and permanent aliases.
+
+Fix global CLI crash on every command (`host list`, `login`, …): `domains.ts` was statically importing Ink, so tsx tried to load `yoga-layout` as CommonJS (`Top-level await is currently not supported with the "cjs" output format`). Interactive Find a domain now runs as a child ESM process, same as the menu.
+
 ## 0.2.2 — 2026-08-29
 
 Built-in **Find a domain** in the CLI (no Domainking install). Type a label to check common TLDs via DNS/RDAP. `uplink domains` opens it; agents use `uplink domains search acme --json`. Domainking remains a separate app.

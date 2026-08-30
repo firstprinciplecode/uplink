@@ -1,5 +1,7 @@
 import { Command } from "commander";
+import { join } from "path";
 import { handleError, printJson } from "../utils/machine";
+import { runEsmEntry } from "../utils/run-esm";
 import {
   adapters,
   getAdapter,
@@ -18,7 +20,14 @@ import {
   formatPublicAvailability,
 } from "../utils/domain-availability";
 import { searchDomains } from "../utils/domain-search";
-import { runDomainSearch } from "../tui/DomainSearch";
+
+function runDomainSearchTui(): void {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log("Domain search needs a terminal. Agents: uplink domains search myapp --json");
+    return;
+  }
+  runEsmEntry(join(__dirname, "../tui/domain-search.mts"));
+}
 
 // DreamHost last: it can only confirm ownership, not quote availability.
 const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost"];
@@ -137,9 +146,8 @@ domainsCommand.addHelpText(
   "\nWith no subcommand, opens Find a domain (type a name; common TLDs are checked via DNS/RDAP).\n"
 );
 
-domainsCommand.action(async () => {
-  const message = await runDomainSearch();
-  if (message) console.log(message);
+domainsCommand.action(() => {
+  runDomainSearchTui();
 });
 
 domainsCommand
@@ -223,8 +231,7 @@ domainsCommand
     try {
       if (!name) {
         if (opts.json) throw new Error("Pass a name: uplink domains search acme --json");
-        const message = await runDomainSearch();
-        if (message) console.log(message);
+        runDomainSearchTui();
         return;
       }
       const results = await searchDomains(name);
