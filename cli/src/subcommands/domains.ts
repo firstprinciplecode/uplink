@@ -22,6 +22,7 @@ import {
   rdapRegistration,
   type RdapRegistration,
 } from "../utils/domain-availability";
+import { cachedRegistrations, storeRegistrations } from "../utils/rdap-cache";
 import { searchDomains } from "../utils/domain-search";
 import {
   createNamecheapAddFundsRequest,
@@ -140,9 +141,14 @@ function formatDay(date: Date): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** RDAP-check registration for domains whose source can't attest ownership. */
+/**
+ * RDAP-check registration for domains whose source can't attest ownership.
+ * Fresh results (24h) come from the local cache, so repeat runs are instant.
+ */
 async function verifyRegistrations(domains: string[]): Promise<Map<string, RdapRegistration>> {
-  const out = new Map<string, RdapRegistration>();
+  const unique = [...new Set(domains)];
+  const out = cachedRegistrations(unique);
+  const missing = unique.filter((domain) => !out.has(domain));
   const run = async (targets: string[], batchSize: number, pauseMs: number) => {
     for (let i = 0; i < targets.length; i += batchSize) {
       if (i > 0) await sleep(pauseMs);
@@ -150,13 +156,14 @@ async function verifyRegistrations(domains: string[]): Promise<Map<string, RdapR
       for (const result of results) out.set(result.domain, result);
     }
   };
-  await run([...new Set(domains)], 4, 400);
-  // rdap.org rate-limits bursts; give inconclusive lookups one slower retry.
+  await run(missing, 4, 400);
+  // Registries rate-limit bursts; give inconclusive lookups one slower retry.
   const inconclusive = [...out.values()].filter((r) => r.registered === null).map((r) => r.domain);
   if (inconclusive.length > 0) {
     await sleep(2000);
     await run(inconclusive, 2, 1000);
   }
+  if (missing.length > 0) storeRegistrations(out.values());
   return out;
 }
 

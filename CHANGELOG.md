@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.9 — 2026-08-31
+
+The menu's **My domains** now shows verified registration status (the same as `domains list --verify`) instead of "no expiry data" for zone/hosted entries. RDAP results are cached in `~/.uplink/rdap-cache.json` for 24 hours, so only the first open pays for the lookups.
+
 ## 0.2.8 — 2026-08-31
 
 `domains list` is now grouped by provider and honest about what it knows: cPanel entries show as **hosted** (a panel serving a site says nothing about ownership), registrar expiry dates in the past show as **EXPIRED**, and new **`--verify`** RDAP-checks every entry without registration data (DNS zones, hosted sites) to reveal lapsed domains. RDAP goes straight to each TLD registry via the IANA bootstrap, with a DNS-delegation fallback for registries that 404.

@@ -58,7 +58,9 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
         label: "My domains",
         action: async () => {
           try {
-            const output = runCliCapture(["domains", "list"]);
+            // --verify resolves registration for zone/hosted entries; results
+            // are cached for a day, so only the first open is slow.
+            const output = runCliCapture(["domains", "list", "--verify"]);
             restoreRawMode();
             return output || "No domains. Connect a registrar first.";
           } catch (error) {
