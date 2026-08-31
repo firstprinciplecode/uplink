@@ -302,8 +302,8 @@ domainsCommand
         console.log("");
       }
       if (!opts.verify && domains.some((item) => !parseExpiry(item.expiresAt))) {
-        console.log("Entries without expiry come from DNS zones / hosted sites and may be lapsed.");
-        console.log("Check actual registration: uplink domains list --verify");
+        console.log("Entries without expiry come from DNS zones / hosted sites, which don't include");
+        console.log("registration data. Confirm each one: uplink domains list --verify");
       }
     } catch (error) {
       handleError(error, { json: opts.json });
