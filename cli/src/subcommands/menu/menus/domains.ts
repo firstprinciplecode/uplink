@@ -202,7 +202,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
             "",
             "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap / DreamHost / any cPanel host",
             "  Connect     — save a registrar token or cPanel API token (same as the CLI)",
-            "  Find        — search names that are not yours yet",
+            "  Find        — search names (public DNS; m = more TLDs; connect a registrar for price)",
             "  Attach      — bind a hostname to a hosted app",
             "  Verify      — check DNS points at the hosting edge, then TLS",
             "",

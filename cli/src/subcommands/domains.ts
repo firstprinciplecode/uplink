@@ -367,18 +367,20 @@ domainsCommand
   .command("search")
   .description("Search a label across common TLDs, or check one exact domain")
   .argument("[name]", "Bare label (acme) or full domain (acme.io)")
+  .option("--more", "Include extra TLDs (geo, shop, studio, …)", false)
   .option("--json", "Output JSON", false)
-  .action(async (name: string | undefined, opts: { json?: boolean }) => {
+  .action(async (name: string | undefined, opts: { json?: boolean; more?: boolean }) => {
     try {
       if (!name) {
         if (opts.json) throw new Error("Pass a name: uplink domains search acme --json");
         runDomainSearchTui();
         return;
       }
-      const results = await searchDomains(name);
+      const results = await searchDomains(name, opts.more ? "more" : "default");
       if (opts.json) {
         printJson({
           query: name,
+          tlds: opts.more ? "more" : "default",
           results: results.map((item) => ({
             domain: item.domain,
             provider: "public",

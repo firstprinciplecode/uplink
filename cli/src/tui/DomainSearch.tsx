@@ -3,7 +3,7 @@ import { Wordmark } from "./brand";
 import TextInput from "ink-text-input";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PublicAvailability } from "../utils/domain-availability";
-import { expandDomainQuery } from "../utils/domain-search";
+import { expandDomainQuery, type SearchTldSet } from "../utils/domain-search";
 import { checkDomainAvailability } from "../utils/domain-availability";
 import { prepareStdinForPrompt } from "../subcommands/menu/io";
 import { readRegistrarStore } from "../registrars/store";
@@ -33,13 +33,13 @@ const DEBOUNCE_MS = 400;
 /** Approx terminal row where the result list starts (1-based, after wordmark/title/search). */
 const LIST_TOP_ROW = 8;
 
-function useLiveChecks(raw: string): Row[] {
+function useLiveChecks(raw: string, tldSet: SearchTldSet): Row[] {
   const [rows, setRows] = useState<Row[]>([]);
   const generation = useRef(0);
 
   useEffect(() => {
     const gen = ++generation.current;
-    const domains = expandDomainQuery(raw);
+    const domains = expandDomainQuery(raw, tldSet);
     if (domains.length === 0) {
       setRows([]);
       return;
@@ -54,7 +54,7 @@ function useLiveChecks(raw: string): Row[] {
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [raw]);
+  }, [raw, tldSet]);
 
   return rows;
 }
@@ -154,7 +154,9 @@ function DomainDetail({
             <Text color="yellow">Need ~{formatMoney(shortfall)} more in Namecheap balance to buy via API.</Text>
           )}
           {!state.namecheapConnected && (
-            <Text dimColor>Connect Namecheap to buy: uplink domains providers connect namecheap</Text>
+            <Text dimColor>
+              Connect Namecheap for price and buy: uplink domains providers connect namecheap
+            </Text>
           )}
           {state.namecheapConnected && contactMissingFields(state.contact).length > 0 && (
             <Text color="yellow">
@@ -181,13 +183,14 @@ function DomainDetail({
 function DomainSearchApp() {
   const { exit } = useApp();
   const [query, setQuery] = useState("");
+  const [moreTlds, setMoreTlds] = useState(false);
   const [showTaken, setShowTaken] = useState(false);
   const [focus, setFocus] = useState<Focus>("search");
   const [selected, setSelected] = useState(0);
   const [detail, setDetail] = useState<DetailState | null>(null);
   const [busy, setBusy] = useState(false);
   const [awaitConfirm, setAwaitConfirm] = useState(false);
-  const rows = useLiveChecks(query);
+  const rows = useLiveChecks(query, moreTlds ? "more" : "default");
 
   const available = rows.filter((row) => row.status === "available");
   const taken = rows.filter((row) => row.status === "taken");
@@ -413,6 +416,10 @@ function DomainSearchApp() {
       setShowTaken((prev) => !prev);
       return;
     }
+    if (input === "m" && focus === "list") {
+      setMoreTlds((prev) => !prev);
+      return;
+    }
     if (key.downArrow) {
       if (visible.length) moveSelection(1);
       return;
@@ -453,8 +460,11 @@ function DomainSearchApp() {
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       <Wordmark />
       <Box marginTop={1}>
-        <Text>Find a domain</Text>
+        <Text>Find a domain{moreTlds ? "  · more TLDs" : ""}</Text>
       </Box>
+      {!readRegistrarStore().namecheap && (
+        <Text dimColor>Availability only — connect Namecheap (or another registrar) for price and buy.</Text>
+      )}
       <Box marginTop={1}>
         <Text dimColor>search › </Text>
         <TextInput
@@ -496,7 +506,7 @@ function DomainSearchApp() {
       <Box marginTop={1}>
         <Text dimColor>
           {rows.length > 0 && !pending ? `${available.length} of ${rows.length} free · ` : ""}
-          ↑↓ / wheel select · enter / click details · tab taken · esc back
+          ↑↓ / wheel select · enter / click details · m {moreTlds ? "fewer TLDs" : "more TLDs"} · tab taken · esc back
         </Text>
       </Box>
     </Box>

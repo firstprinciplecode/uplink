@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.10 — 2026-08-31
+
+Find a domain keeps the 15 default TLDs; press **m** (or `uplink domains search acme --more`) for extra geo/shop/studio TLDs. Guests still get availability only — the TUI says to connect a registrar for price.
+
 ## 0.2.9 — 2026-08-31
 
 The menu's **My domains** now shows verified registration status (the same as `domains list --verify`) instead of "no expiry data" for zone/hosted entries. RDAP results are cached in `~/.uplink/rdap-cache.json` for 24 hours, so only the first open pays for the lookups.
