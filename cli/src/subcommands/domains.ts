@@ -19,6 +19,8 @@ import { cpanelAccountsOf, mergeCpanelCredentials, normalizeCpanelHost } from ".
 import {
   checkDomainAvailability,
   formatPublicAvailability,
+  rdapRegistration,
+  type RdapRegistration,
 } from "../utils/domain-availability";
 import { searchDomains } from "../utils/domain-search";
 import {
@@ -124,6 +126,60 @@ async function credentialsFromFlags(
   return creds;
 }
 
+/** Registrars report expiry in mixed formats (GoDaddy ISO, Namecheap MM/DD/YYYY). */
+function parseExpiry(value?: string): Date | undefined {
+  if (!value) return undefined;
+  const mdy = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const date = mdy ? new Date(`${mdy[3]}-${mdy[1]}-${mdy[2]}T00:00:00Z`) : new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function formatDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** RDAP-check registration for domains whose source can't attest ownership. */
+async function verifyRegistrations(domains: string[]): Promise<Map<string, RdapRegistration>> {
+  const out = new Map<string, RdapRegistration>();
+  const run = async (targets: string[], batchSize: number, pauseMs: number) => {
+    for (let i = 0; i < targets.length; i += batchSize) {
+      if (i > 0) await sleep(pauseMs);
+      const results = await Promise.all(targets.slice(i, i + batchSize).map(rdapRegistration));
+      for (const result of results) out.set(result.domain, result);
+    }
+  };
+  await run([...new Set(domains)], 4, 400);
+  // rdap.org rate-limits bursts; give inconclusive lookups one slower retry.
+  const inconclusive = [...out.values()].filter((r) => r.registered === null).map((r) => r.domain);
+  if (inconclusive.length > 0) {
+    await sleep(2000);
+    await run(inconclusive, 2, 1000);
+  }
+  return out;
+}
+
+function inventoryMarker(item: InventoryDomain, verified?: RdapRegistration): string {
+  const now = new Date();
+  if (verified) {
+    if (verified.registered === false) return "NOT REGISTERED — lapsed";
+    if (verified.registered === null) return `rdap inconclusive (${verified.detail})`;
+    const expiry = parseExpiry(verified.expiresAt);
+    if (expiry) {
+      return expiry < now
+        ? `registered · EXPIRED ${formatDay(expiry)} (rdap)`
+        : `registered · expires ${formatDay(expiry)} (rdap)`;
+    }
+    return verified.detail ? `registered · ${verified.detail}` : "registered (rdap)";
+  }
+  const expiry = parseExpiry(item.expiresAt);
+  if (expiry) {
+    return expiry < now ? `EXPIRED ${formatDay(expiry)}` : `expires ${formatDay(expiry)}`;
+  }
+  return item.status === "hosted" ? "hosted (ownership unknown)" : "no expiry data";
+}
+
 async function listInventory(providerFilter?: ProviderId): Promise<InventoryDomain[]> {
   const store = readRegistrarStore();
   const ids = providerFilter ? [providerFilter] : CHECK_ORDER.filter((id) => store[id]);
@@ -192,24 +248,62 @@ domainsCommand.action(() => {
 
 domainsCommand
   .command("list")
-  .description("List domains owned at connected registrars")
+  .description("Inventory across connected registrars and cPanel hosts, grouped by provider")
   .option("--provider <id>", "Only this provider (godaddy|cloudflare|hostinger|namecheap|dreamhost|cpanel)")
+  .option("--verify", "RDAP-check registration for entries without expiry data (zones/hosted sites)", false)
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
       const provider = parseProvider(opts.provider);
       const domains = await listInventory(provider);
+
+      // Zones (DreamHost) and hosted sites (cPanel) carry no registration
+      // data — a lapsed domain can linger there forever. --verify asks RDAP.
+      let verified: Map<string, RdapRegistration> | undefined;
+      if (opts.verify) {
+        const unverifiable = domains.filter((item) => !parseExpiry(item.expiresAt));
+        verified = await verifyRegistrations(unverifiable.map((item) => item.domain));
+      }
+
       if (opts.json) {
-        printJson({ domains, count: domains.length });
+        const enriched = domains.map((item) => {
+          const check = verified?.get(item.domain);
+          return check
+            ? {
+                ...item,
+                registration: {
+                  registered: check.registered,
+                  ...(check.expiresAt ? { expiresAt: check.expiresAt } : {}),
+                  ...(check.detail ? { detail: check.detail } : {}),
+                },
+              }
+            : item;
+        });
+        printJson({ domains: enriched, count: enriched.length });
         return;
       }
+
       if (domains.length === 0) {
         console.log("No domains. Connect a registrar: uplink domains providers connect godaddy");
         return;
       }
+
+      const byProvider = new Map<ProviderId, InventoryDomain[]>();
       for (const item of domains) {
-        const expiry = item.expiresAt ? `  expires ${item.expiresAt}` : "";
-        console.log(`- ${item.domain} (${item.provider}${expiry})`);
+        const group = byProvider.get(item.provider) || [];
+        group.push(item);
+        byProvider.set(item.provider, group);
+      }
+      for (const [id, items] of byProvider) {
+        console.log(`${id} (${items.length})`);
+        for (const item of items) {
+          console.log(`  ${item.domain.padEnd(30)} ${inventoryMarker(item, verified?.get(item.domain))}`);
+        }
+        console.log("");
+      }
+      if (!opts.verify && domains.some((item) => !parseExpiry(item.expiresAt))) {
+        console.log("Entries without expiry come from DNS zones / hosted sites and may be lapsed.");
+        console.log("Check actual registration: uplink domains list --verify");
       }
     } catch (error) {
       handleError(error, { json: opts.json });

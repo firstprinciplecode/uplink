@@ -27,7 +27,8 @@ export type RegistrarCredentials = {
 export type InventoryDomain = {
   domain: string;
   provider: ProviderId;
-  status: "owned";
+  /** "owned" = registrar registration; "hosted" = served by a panel (says nothing about ownership). */
+  status: "owned" | "hosted";
   expiresAt?: string;
 };
 

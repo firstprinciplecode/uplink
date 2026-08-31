@@ -129,7 +129,9 @@ async function listHostedDomains(creds: RegistrarCredentials): Promise<Inventory
         const normalized = domain.toLowerCase();
         if (seen.has(normalized)) continue;
         seen.add(normalized);
-        out.push({ domain: normalized, provider: "cpanel", status: "owned" });
+        // "hosted": the panel serves this domain; it says nothing about
+        // whether the registration is still owned.
+        out.push({ domain: normalized, provider: "cpanel", status: "hosted" });
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
@@ -165,7 +167,7 @@ export const cpanelAdapter: RegistrarAdapter = {
     // domains, otherwise let the chain fall through to a registrar.
     const hosted = await listHostedDomains(creds);
     if (hosted.some((item) => item.domain === domain.toLowerCase())) {
-      return { domain, provider: "cpanel", status: "owned", buyable: false };
+      return { domain, provider: "cpanel", status: "taken", buyable: false };
     }
     throw new Error("cPanel only knows domains hosted on the connected accounts");
   },
