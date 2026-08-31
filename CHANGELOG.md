@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7 — 2026-08-31
+
+Multiple **cPanel** accounts: `providers connect cpanel --host …` now appends (people have sites on several hosts), `providers disconnect cpanel --host …` removes one account, and `providers list` shows the connected hosts. One user, many shared hosts, one inventory.
+
 ## 0.2.6 — 2026-08-30
 
 Uplink as a **domain hub**: connect any **cPanel** host (Namecheap shared, Bluehost, HostGator, and most shared hosting) alongside registrars, so domains and sites scattered across providers land in one `domains list`. Connect with `uplink domains providers connect cpanel --host server.example.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN` (token from cPanel → Security → Manage API Tokens), or through the menu under Domains → Connect registrar.

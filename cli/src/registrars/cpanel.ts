@@ -1,4 +1,9 @@
-import type { InventoryDomain, RegistrarAdapter, RegistrarCredentials } from "./types";
+import type {
+  CpanelAccount,
+  InventoryDomain,
+  RegistrarAdapter,
+  RegistrarCredentials,
+} from "./types";
 
 /**
  * cPanel is not a registrar, but it is where many people's sites actually
@@ -9,6 +14,9 @@ import type { InventoryDomain, RegistrarAdapter, RegistrarCredentials } from "./
  *
  * Auth: a cPanel API token (Security → Manage API Tokens in the panel),
  * sent as `Authorization: cpanel user:token` to the UAPI on port 2083.
+ *
+ * A user can connect several cPanel accounts (different hosts); each
+ * `providers connect cpanel --host …` appends to `creds.accounts`.
  */
 
 type UapiResponse = {
@@ -31,41 +39,65 @@ export function normalizeCpanelHost(raw: string): string {
   return host;
 }
 
-function baseUrl(creds: RegistrarCredentials): string {
-  const host = normalizeCpanelHost(creds.host || "");
+/** All connected cPanel accounts, including the legacy single-account shape. */
+export function cpanelAccountsOf(creds: RegistrarCredentials): CpanelAccount[] {
+  const accounts: CpanelAccount[] = [];
+  const push = (account: { host?: string; apiUser?: string; token?: string }) => {
+    if (!account.host || !account.apiUser || !account.token) return;
+    const host = normalizeCpanelHost(account.host);
+    if (accounts.some((a) => a.host === host && a.apiUser === account.apiUser)) return;
+    accounts.push({ host, apiUser: account.apiUser, token: account.token });
+  };
+  for (const account of creds.accounts || []) push(account);
+  push(creds);
+  return accounts;
+}
+
+/** Merge a newly verified account into stored creds (replace same host+user). */
+export function mergeCpanelCredentials(
+  existing: RegistrarCredentials | undefined,
+  incoming: RegistrarCredentials
+): RegistrarCredentials {
+  const merged: CpanelAccount[] = existing ? cpanelAccountsOf(existing) : [];
+  for (const account of cpanelAccountsOf(incoming)) {
+    const at = merged.findIndex((a) => a.host === account.host && a.apiUser === account.apiUser);
+    if (at >= 0) merged[at] = account;
+    else merged.push(account);
+  }
+  return { accounts: merged };
+}
+
+function baseUrl(host: string): string {
   return host.includes(":") ? `https://${host}` : `https://${host}:2083`;
 }
 
-async function uapi(creds: RegistrarCredentials, module: string, fn: string): Promise<unknown> {
-  const user = creds.apiUser || "";
-  const token = creds.token || "";
-  if (!user || !token) throw new Error("cPanel needs a username and an API token");
-  const url = `${baseUrl(creds)}/execute/${module}/${fn}`;
+async function uapi(account: CpanelAccount, module: string, fn: string): Promise<unknown> {
+  const url = `${baseUrl(account.host)}/execute/${module}/${fn}`;
   let res: Response;
   try {
     res = await fetch(url, {
       headers: {
-        Authorization: `cpanel ${user}:${token}`,
+        Authorization: `cpanel ${account.apiUser}:${account.token}`,
         Accept: "application/json",
       },
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Could not reach cPanel at ${baseUrl(creds)} (${detail})`);
+    throw new Error(`Could not reach cPanel at ${baseUrl(account.host)} (${detail})`);
   }
   if (res.status === 401 || res.status === 403) {
-    throw new Error("cPanel rejected the credentials (check username and API token)");
+    throw new Error(`cPanel at ${account.host} rejected the credentials (check username and API token)`);
   }
   const text = await res.text();
   let body: UapiResponse;
   try {
     body = text ? (JSON.parse(text) as UapiResponse) : {};
   } catch {
-    throw new Error(`cPanel returned a non-JSON response (HTTP ${res.status})`);
+    throw new Error(`cPanel at ${account.host} returned a non-JSON response (HTTP ${res.status})`);
   }
   if (!res.ok || body.status !== 1) {
     const detail = body.errors?.filter(Boolean).join("; ") || `HTTP ${res.status}`;
-    throw new Error(`cPanel ${module}/${fn} failed: ${detail}`);
+    throw new Error(`cPanel ${module}/${fn} failed on ${account.host}: ${detail}`);
   }
   return body.data;
 }
@@ -75,20 +107,35 @@ function stringsOf(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.includes("."));
 }
 
+async function listAccountDomains(account: CpanelAccount): Promise<string[]> {
+  const data = (await uapi(account, "DomainInfo", "list_domains")) as Record<string, unknown> | null;
+  const out: string[] = [];
+  const main = data?.main_domain;
+  if (typeof main === "string" && main.includes(".")) out.push(main);
+  out.push(...stringsOf(data?.addon_domains));
+  out.push(...stringsOf(data?.parked_domains));
+  return out;
+}
+
 async function listHostedDomains(creds: RegistrarCredentials): Promise<InventoryDomain[]> {
-  const data = (await uapi(creds, "DomainInfo", "list_domains")) as Record<string, unknown> | null;
+  const accounts = cpanelAccountsOf(creds);
+  if (accounts.length === 0) throw new Error("cPanel needs a host, username, and API token");
   const out: InventoryDomain[] = [];
   const seen = new Set<string>();
-  const push = (domain: string) => {
-    const normalized = domain.toLowerCase();
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    out.push({ domain: normalized, provider: "cpanel", status: "owned" });
-  };
-  const main = data?.main_domain;
-  if (typeof main === "string" && main.includes(".")) push(main);
-  for (const domain of stringsOf(data?.addon_domains)) push(domain);
-  for (const domain of stringsOf(data?.parked_domains)) push(domain);
+  const errors: string[] = [];
+  for (const account of accounts) {
+    try {
+      for (const domain of await listAccountDomains(account)) {
+        const normalized = domain.toLowerCase();
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        out.push({ domain: normalized, provider: "cpanel", status: "owned" });
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (out.length === 0 && errors.length > 0) throw new Error(errors.join("; "));
   return out;
 }
 
@@ -96,12 +143,18 @@ export const cpanelAdapter: RegistrarAdapter = {
   id: "cpanel",
   label: "cPanel hosting",
   connectHelp:
-    "Any cPanel host (Namecheap shared, Bluehost, HostGator, …). --host server.example.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN (token: cPanel → Security → Manage API Tokens)",
+    "Any cPanel host (Namecheap shared, Bluehost, HostGator, …). --host server.example.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN (token: cPanel → Security → Manage API Tokens). Repeat with another --host to add more accounts.",
   async verify(creds) {
-    if (!creds.host) throw new Error("cPanel needs --host (e.g. server341.web-hosting.com)");
-    creds.host = normalizeCpanelHost(creds.host);
-    await listHostedDomains(creds);
-    return creds;
+    // Verify only the incoming account(s); the connect flow merges them
+    // into any previously stored accounts afterwards.
+    const accounts = cpanelAccountsOf(creds);
+    if (accounts.length === 0) {
+      throw new Error("cPanel needs --host (e.g. server341.web-hosting.com), a username, and an API token");
+    }
+    for (const account of accounts) {
+      await listAccountDomains(account);
+    }
+    return { accounts };
   },
   async listDomains(creds) {
     const domains = await listHostedDomains(creds);
@@ -114,6 +167,6 @@ export const cpanelAdapter: RegistrarAdapter = {
     if (hosted.some((item) => item.domain === domain.toLowerCase())) {
       return { domain, provider: "cpanel", status: "owned", buyable: false };
     }
-    throw new Error("cPanel only knows domains hosted on the connected account");
+    throw new Error("cPanel only knows domains hosted on the connected accounts");
   },
 };

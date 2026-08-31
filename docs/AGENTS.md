@@ -127,6 +127,8 @@ uplink domains providers connect hostinger --token-env HOSTINGER_API_TOKEN --jso
 uplink domains providers connect dreamhost --token-env DREAMHOST_API_KEY --json
 uplink domains providers connect namecheap --token-env NAMECHEAP_API_KEY --user-env NAMECHEAP_API_USER --json
 uplink domains providers connect cpanel --host server341.web-hosting.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN --json
+# Repeat connect with another --host to add more cPanel accounts; remove one with:
+uplink domains providers disconnect cpanel --host server341.web-hosting.com --json
 uplink domains providers list --json
 uplink domains providers disconnect godaddy --json
 

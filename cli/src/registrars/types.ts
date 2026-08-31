@@ -5,6 +5,12 @@ export function isProviderId(value: string): value is ProviderId {
   return (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
+export type CpanelAccount = {
+  host: string;
+  apiUser: string;
+  token: string;
+};
+
 export type RegistrarCredentials = {
   token?: string;
   apiUser?: string;
@@ -14,6 +20,8 @@ export type RegistrarCredentials = {
   host?: string;
   /** Additional API keys for providers with multiple accounts (e.g. DreamHost). */
   extraTokens?: string[];
+  /** Multiple cPanel accounts — people often have sites on several hosts. */
+  accounts?: CpanelAccount[];
 };
 
 export type InventoryDomain = {

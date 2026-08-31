@@ -15,6 +15,7 @@ import {
   type RegistrarCredentials,
 } from "../registrars";
 import { canPrompt, promptSecret, readEnvValue } from "../registrars/secret";
+import { cpanelAccountsOf, mergeCpanelCredentials, normalizeCpanelHost } from "../registrars/cpanel";
 import {
   checkDomainAvailability,
   formatPublicAvailability,
@@ -569,18 +570,25 @@ providers
   .action((opts) => {
     try {
       const store = readRegistrarStore();
-      const items = adapters.map((adapter) => ({
-        id: adapter.id,
-        label: adapter.label,
-        connected: Boolean(store[adapter.id]),
-        help: adapter.connectHelp,
-      }));
+      const items = adapters.map((adapter) => {
+        const creds = store[adapter.id];
+        const cpanelHosts =
+          adapter.id === "cpanel" && creds ? cpanelAccountsOf(creds).map((a) => a.host) : undefined;
+        return {
+          id: adapter.id,
+          label: adapter.label,
+          connected: Boolean(creds),
+          ...(cpanelHosts ? { hosts: cpanelHosts } : {}),
+          help: adapter.connectHelp,
+        };
+      });
       if (opts.json) {
         printJson({ providers: items });
         return;
       }
       for (const item of items) {
-        console.log(`- ${item.id}  ${item.connected ? "connected" : "not connected"}`);
+        const hosts = item.hosts?.length ? ` (${item.hosts.join(", ")})` : "";
+        console.log(`- ${item.id}  ${item.connected ? `connected${hosts}` : "not connected"}`);
         if (!item.connected) console.log(`    ${item.help}`);
       }
     } catch (error) {
@@ -606,7 +614,13 @@ providers
       const adapter = getAdapter(provider);
       const creds = await credentialsFromFlags(provider, opts);
       const verified = await adapter.verify(creds);
-      saveProvider(provider, verified);
+      // cPanel accumulates accounts (people have sites on several hosts);
+      // other providers replace the stored credential.
+      const toSave =
+        provider === "cpanel"
+          ? mergeCpanelCredentials(readRegistrarStore().cpanel, verified)
+          : verified;
+      saveProvider(provider, toSave);
       const listed = await adapter.listDomains(verified).catch(() => [] as InventoryDomain[]);
       if (opts.json) {
         printJson({
@@ -626,11 +640,28 @@ providers
   .command("disconnect")
   .description("Remove a saved registrar or cPanel credential")
   .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost | cpanel")
+  .option("--host <hostname>", "cPanel only: remove just this host's account")
   .option("--json", "Output JSON", false)
   .action((providerArg: string, opts) => {
     try {
       const provider = String(providerArg).toLowerCase();
       if (!isProviderId(provider)) throw new Error(`Unknown provider: ${providerArg}`);
+
+      if (provider === "cpanel" && opts.host) {
+        const host = normalizeCpanelHost(String(opts.host));
+        const existing = readRegistrarStore().cpanel;
+        const accounts = existing ? cpanelAccountsOf(existing).filter((a) => a.host !== host) : [];
+        const removed = existing ? cpanelAccountsOf(existing).length !== accounts.length : false;
+        if (accounts.length === 0) removeProvider(provider);
+        else saveProvider(provider, { accounts });
+        if (opts.json) {
+          printJson({ provider, host, removed, remainingAccounts: accounts.length });
+          return;
+        }
+        console.log(removed ? `Removed cPanel account on ${host}` : `No cPanel account on ${host}`);
+        return;
+      }
+
       const removed = removeProvider(provider);
       if (opts.json) {
         printJson({ provider, connected: false, removed });
