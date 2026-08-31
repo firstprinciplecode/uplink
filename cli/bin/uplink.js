@@ -27,11 +27,11 @@ if (args.length === 0) {
 // Find tsx - prefer project-local, otherwise fall back to PATH
 let tsxPath = "tsx";
 try {
-  // Newer tsx exposes a CLI entry at dist/cli.cjs
-  tsxPath = require.resolve("tsx/dist/cli.cjs", { paths: [projectRoot] });
+  // Package exports entry (tsx 4.21–4.23+)
+  tsxPath = require.resolve("tsx/cli", { paths: [projectRoot] });
 } catch (e) {
   try {
-    tsxPath = require.resolve("tsx/cli", { paths: [projectRoot] });
+    tsxPath = require.resolve("tsx/dist/cli.cjs", { paths: [projectRoot] });
   } catch (_) {
     // keep fallback to PATH
   }

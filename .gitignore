@@ -9,6 +9,10 @@ yarn-error.log*
 .env.local
 .env.*.local
 
+# FTP / FileZilla site manager exports (contain passwords)
+FileZilla.xml
+**/FileZilla.xml
+
 # Build outputs
 dist/
 build/
