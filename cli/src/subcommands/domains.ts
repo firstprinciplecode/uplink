@@ -20,6 +20,21 @@ import {
   formatPublicAvailability,
 } from "../utils/domain-availability";
 import { searchDomains } from "../utils/domain-search";
+import {
+  createNamecheapAddFundsRequest,
+  fetchNamecheapDomainContact,
+  getNamecheapBalance,
+  namecheapCartUrl,
+  registerNamecheapDomain,
+} from "../registrars/namecheap-purchase";
+import {
+  contactMissingFields,
+  readRegistrantContact,
+  writeRegistrantContact,
+  type RegistrantContact,
+} from "../utils/registrant-contact";
+import { openInBrowser } from "../utils/open-browser";
+import { promptLine } from "./menu/io";
 
 function runDomainSearchTui(): void {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -29,8 +44,8 @@ function runDomainSearchTui(): void {
   runEsmEntry(join(__dirname, "../tui/domain-search.mts"));
 }
 
-// DreamHost last: it can only confirm ownership, not quote availability.
-const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost"];
+// DreamHost and cPanel last: they can only confirm ownership, not quote availability.
+const CHECK_ORDER: ProviderId[] = ["godaddy", "cloudflare", "hostinger", "namecheap", "dreamhost", "cpanel"];
 
 function parseProvider(raw?: string): ProviderId | undefined {
   if (!raw) return undefined;
@@ -41,9 +56,33 @@ function parseProvider(raw?: string): ProviderId | undefined {
 
 async function credentialsFromFlags(
   provider: ProviderId,
-  opts: { tokenEnv?: string; userEnv?: string; accountEnv?: string; json?: boolean }
+  opts: { tokenEnv?: string; userEnv?: string; accountEnv?: string; host?: string; json?: boolean }
 ): Promise<RegistrarCredentials> {
   const interactive = canPrompt() && !opts.json;
+
+  if (provider === "cpanel") {
+    const host = opts.host
+      ? String(opts.host)
+      : interactive
+        ? (await promptLine("cPanel host (e.g. server341.web-hosting.com): ")).trim()
+        : "";
+    const apiUser = opts.userEnv
+      ? readEnvValue(opts.userEnv)
+      : interactive
+        ? await promptSecret("cPanel username: ")
+        : "";
+    const token = opts.tokenEnv
+      ? readEnvValue(opts.tokenEnv)
+      : interactive
+        ? await promptSecret("cPanel API token: ")
+        : "";
+    if (!host || !apiUser || !token) {
+      throw new Error(
+        "cPanel needs --host server.example.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN"
+      );
+    }
+    return { host, apiUser, token };
+  }
 
   if (provider === "namecheap") {
     const apiKey = opts.tokenEnv
@@ -153,7 +192,7 @@ domainsCommand.action(() => {
 domainsCommand
   .command("list")
   .description("List domains owned at connected registrars")
-  .option("--provider <id>", "Only this provider (godaddy|cloudflare|hostinger|namecheap|dreamhost)")
+  .option("--provider <id>", "Only this provider (godaddy|cloudflare|hostinger|namecheap|dreamhost|cpanel)")
   .option("--json", "Output JSON", false)
   .action(async (opts) => {
     try {
@@ -256,6 +295,271 @@ domainsCommand
     }
   });
 
+domainsCommand
+  .command("buy")
+  .description("Register a domain via Namecheap (charges account balance)")
+  .argument("<domain>", "Domain to register (e.g. alchemy.photos)")
+  .option("--years <n>", "Registration years", "1")
+  .option("--yes", "Skip confirmation (required for non-interactive)", false)
+  .option("--open-cart", "Open Namecheap browser cart instead of API purchase", false)
+  .option("--json", "Output JSON", false)
+  .action(async (domainArg: string, opts) => {
+    try {
+      const domain = String(domainArg).trim().toLowerCase();
+      if (!domain.includes(".")) throw new Error("Pass a full domain like alchemy.photos");
+      const years = Math.max(1, Number(opts.years) || 1);
+
+      if (opts.openCart) {
+        const url = namecheapCartUrl(domain, years);
+        if (opts.json) {
+          printJson({ domain, url, mode: "cart" });
+          return;
+        }
+        console.log(url);
+        openInBrowser(url);
+        return;
+      }
+
+      const store = readRegistrarStore();
+      const creds = store.namecheap;
+      if (!creds) throw new Error("Connect Namecheap first: uplink domains providers connect namecheap");
+
+      const quote = await getAdapter("namecheap").check(creds, domain);
+      if (!quote.buyable || quote.status !== "available") {
+        throw new Error(`${domain} is not available on Namecheap (${quote.status})`);
+      }
+
+      let contact = readRegistrantContact();
+      if (!contact || contactMissingFields(contact).length) {
+        const owned = await getAdapter("namecheap").listDomains(creds);
+        for (const item of owned.slice(0, 5)) {
+          const seeded = await fetchNamecheapDomainContact(creds, item.domain);
+          if (seeded && contactMissingFields(seeded).length === 0) {
+            writeRegistrantContact(seeded);
+            contact = seeded;
+            break;
+          }
+        }
+      }
+      if (!contact || contactMissingFields(contact).length) {
+        throw new Error(
+          "Registrant contact missing. Run: uplink domains contact set  (or buy once you own another Namecheap domain so we can copy WHOIS)"
+        );
+      }
+
+      const balance = await getNamecheapBalance(creds);
+      const price = quote.priceUsd ?? 0;
+      if (balance.available + 0.001 < price) {
+        const need = Math.max(10, Math.ceil(price - balance.available + 1));
+        const funds = await createNamecheapAddFundsRequest(creds, need);
+        if (opts.json) {
+          printJson({
+            domain,
+            error: "INSUFFICIENT_BALANCE",
+            priceUsd: price,
+            balanceUsd: balance.available,
+            addFundsUrl: funds.redirectUrl,
+            amount: funds.amount,
+            cartUrl: namecheapCartUrl(domain, years),
+          });
+          return;
+        }
+        console.log(
+          `Insufficient Namecheap balance (need ~$${price.toFixed(2)}, have $${balance.available.toFixed(2)}).`
+        );
+        console.log(`Add funds: ${funds.redirectUrl}`);
+        console.log(`Or browser cart: ${namecheapCartUrl(domain, years)}`);
+        openInBrowser(funds.redirectUrl);
+        process.exitCode = 30;
+        return;
+      }
+
+      if (!opts.yes) {
+        if (!canPrompt()) throw new Error("Pass --yes to buy non-interactively");
+        const answer = (await promptLine(`Buy ${domain} for ~$${price.toFixed(2)}/${years}yr? [y/N] `))
+          .trim()
+          .toLowerCase();
+        if (answer !== "y" && answer !== "yes") {
+          if (opts.json) printJson({ domain, cancelled: true });
+          else console.log("Cancelled");
+          return;
+        }
+      }
+
+      const result = await registerNamecheapDomain(creds, {
+        domain,
+        years,
+        contact,
+        premium: quote.premium,
+        premiumPrice: quote.premium ? quote.priceUsd : undefined,
+      });
+      if (opts.json) {
+        printJson({ ...result, priceUsd: price, provider: "namecheap" });
+        return;
+      }
+      console.log(
+        result.registered
+          ? `Registered ${result.domain}${result.chargedAmount != null ? ` · charged $${result.chargedAmount.toFixed(2)}` : ""}`
+          : `Namecheap returned registered=false for ${result.domain}`
+      );
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+domainsCommand
+  .command("fund")
+  .description("Open a Namecheap add-funds payment page (account balance for API purchases)")
+  .option("--amount <usd>", "Amount to add (min $5)", "20")
+  .option("--json", "Output JSON (does not open a browser)", false)
+  .action(async (opts) => {
+    try {
+      const store = readRegistrarStore();
+      const creds = store.namecheap;
+      if (!creds) throw new Error("Connect Namecheap first: uplink domains providers connect namecheap");
+      const amount = Number(opts.amount);
+      const funds = await createNamecheapAddFundsRequest(creds, amount);
+      const balance = await getNamecheapBalance(creds).catch(() => null);
+      if (opts.json) {
+        printJson({
+          amount: funds.amount,
+          redirectUrl: funds.redirectUrl,
+          tokenId: funds.tokenId,
+          balanceUsd: balance?.available,
+        });
+        return;
+      }
+      console.log(`Namecheap payment page (add $${funds.amount.toFixed(2)}):`);
+      console.log(funds.redirectUrl);
+      if (balance) console.log(`Current balance: $${balance.available.toFixed(2)} ${balance.currency}`);
+      openInBrowser(funds.redirectUrl);
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+const contactCmd = domainsCommand.command("contact").description("Registrant WHOIS profile for Namecheap purchases");
+
+contactCmd
+  .command("show")
+  .description("Show saved registrant contact (no secrets beyond WHOIS fields)")
+  .option("--json", "Output JSON", false)
+  .action((opts) => {
+    try {
+      const contact = readRegistrantContact();
+      if (opts.json) {
+        printJson({ contact, missing: contactMissingFields(contact) });
+        return;
+      }
+      if (!contact) {
+        console.log("No registrant profile. Run: uplink domains contact set");
+        return;
+      }
+      console.log(`${contact.firstName} ${contact.lastName}  <${contact.email}>`);
+      console.log(`${contact.address1}`);
+      console.log(`${contact.city}, ${contact.stateProvince} ${contact.postalCode}  ${contact.country}`);
+      console.log(contact.phone);
+      const missing = contactMissingFields(contact);
+      if (missing.length) console.log(`Missing: ${missing.join(", ")}`);
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+contactCmd
+  .command("set")
+  .description("Save registrant contact used for Namecheap domains.create")
+  .option("--first-name <v>", "First name")
+  .option("--last-name <v>", "Last name")
+  .option("--address1 <v>", "Street address")
+  .option("--city <v>", "City")
+  .option("--state <v>", "State / province")
+  .option("--postal <v>", "Postal code")
+  .option("--country <v>", "Country code (e.g. US)")
+  .option("--phone <v>", "Phone in +1.5555555555 form")
+  .option("--email <v>", "Email")
+  .option("--org <v>", "Organization (optional)")
+  .option("--from-domain <domain>", "Copy WHOIS from an owned Namecheap domain")
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      let contact: RegistrantContact | null = readRegistrantContact();
+
+      if (opts.fromDomain) {
+        const store = readRegistrarStore();
+        const creds = store.namecheap;
+        if (!creds) throw new Error("Connect Namecheap first");
+        contact = await fetchNamecheapDomainContact(creds, String(opts.fromDomain).toLowerCase());
+        if (!contact) throw new Error(`No contacts returned for ${opts.fromDomain}`);
+      }
+
+      const ask = async (label: string, current?: string, flag?: string) => {
+        if (flag) return flag;
+        if (!canPrompt() || opts.json) return current || "";
+        const answer = (await promptLine(`${label}${current ? ` [${current}]` : ""}: `)).trim();
+        return answer || current || "";
+      };
+
+      contact = {
+        firstName: await ask("First name", contact?.firstName, opts.firstName),
+        lastName: await ask("Last name", contact?.lastName, opts.lastName),
+        address1: await ask("Address", contact?.address1, opts.address1),
+        city: await ask("City", contact?.city, opts.city),
+        stateProvince: await ask("State/province", contact?.stateProvince, opts.state),
+        postalCode: await ask("Postal code", contact?.postalCode, opts.postal),
+        country: await ask("Country (US)", contact?.country || "US", opts.country),
+        phone: await ask("Phone (+1.5555555555)", contact?.phone, opts.phone),
+        email: await ask("Email", contact?.email, opts.email),
+        organizationName: (await ask("Organization (optional)", contact?.organizationName, opts.org)) || undefined,
+      };
+
+      const missing = contactMissingFields(contact);
+      if (missing.length) throw new Error(`Missing required fields: ${missing.join(", ")}`);
+      writeRegistrantContact(contact);
+      if (opts.json) {
+        printJson({ saved: true, contact });
+        return;
+      }
+      console.log("Saved registrant profile to ~/.uplink/registrant.json");
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
+contactCmd
+  .command("seed")
+  .description("Copy registrant contact from the first owned Namecheap domain")
+  .option("--json", "Output JSON", false)
+  .action(async (opts) => {
+    try {
+      const store = readRegistrarStore();
+      const creds = store.namecheap;
+      if (!creds) throw new Error("Connect Namecheap first");
+      const owned = await getAdapter("namecheap").listDomains(creds);
+      if (owned.length === 0) throw new Error("No owned Namecheap domains to copy from");
+      let contact: RegistrantContact | null = null;
+      let source = "";
+      for (const item of owned) {
+        contact = await fetchNamecheapDomainContact(creds, item.domain);
+        if (contact && contactMissingFields(contact).length === 0) {
+          source = item.domain;
+          break;
+        }
+      }
+      if (!contact || contactMissingFields(contact).length) {
+        throw new Error("Could not read a complete contact from owned domains");
+      }
+      writeRegistrantContact(contact);
+      if (opts.json) {
+        printJson({ saved: true, source, contact });
+        return;
+      }
+      console.log(`Saved registrant profile from ${source}`);
+    } catch (error) {
+      handleError(error, { json: opts.json });
+    }
+  });
+
 const providers = domainsCommand.command("providers").description("Connect registrar accounts");
 
 providers
@@ -286,17 +590,18 @@ providers
 
 providers
   .command("connect")
-  .description("Save a registrar credential after a live check")
-  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost")
+  .description("Save a registrar or cPanel credential after a live check")
+  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost | cpanel")
   .option("--token-env <name>", "Env var holding the API token (comma-separate names for multiple keys)")
-  .option("--user-env <name>", "Env var holding the Namecheap API user")
+  .option("--user-env <name>", "Env var holding the Namecheap API user or cPanel username")
   .option("--account-env <name>", "Env var holding a Cloudflare account id (optional)")
+  .option("--host <hostname>", "cPanel server hostname (e.g. server341.web-hosting.com)")
   .option("--json", "Output JSON", false)
   .action(async (providerArg: string, opts) => {
     try {
       const provider = String(providerArg).toLowerCase();
       if (!isProviderId(provider)) {
-        throw new Error(`Unknown provider: ${providerArg}. Use godaddy, cloudflare, hostinger, namecheap, or dreamhost`);
+        throw new Error(`Unknown provider: ${providerArg}. Use godaddy, cloudflare, hostinger, namecheap, dreamhost, or cpanel`);
       }
       const adapter = getAdapter(provider);
       const creds = await credentialsFromFlags(provider, opts);
@@ -319,8 +624,8 @@ providers
 
 providers
   .command("disconnect")
-  .description("Remove a saved registrar credential")
-  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost")
+  .description("Remove a saved registrar or cPanel credential")
+  .argument("<provider>", "godaddy | cloudflare | hostinger | namecheap | dreamhost | cpanel")
   .option("--json", "Output JSON", false)
   .action((providerArg: string, opts) => {
     try {

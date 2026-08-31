@@ -19,6 +19,7 @@ const PROVIDER_OPTIONS: SelectOption[] = [
   { label: "Hostinger", value: "hostinger" },
   { label: "Namecheap", value: "namecheap" },
   { label: "DreamHost", value: "dreamhost" },
+  { label: "cPanel hosting (Namecheap shared, Bluehost, HostGator, …)", value: "cpanel" },
 ];
 
 async function pickHostedApp(
@@ -77,7 +78,26 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
           const provider = choice.value;
           const extraEnv: Record<string, string> = {};
           const args = ["domains", "providers", "connect", provider, "--token-env", "UPLINK_CONNECT_TOKEN"];
-          if (provider === "namecheap") {
+          if (provider === "cpanel") {
+            const host = (await promptLine("cPanel host (e.g. server341.web-hosting.com, or back): ")).trim();
+            if (!host || host === "back") {
+              restoreRawMode();
+              return "";
+            }
+            const user = (await promptLine("cPanel username (or back): ")).trim();
+            if (!user || user === "back") {
+              restoreRawMode();
+              return "";
+            }
+            const token = (await promptLine("cPanel API token (Security → Manage API Tokens, or back): ")).trim();
+            if (!token || token === "back") {
+              restoreRawMode();
+              return "";
+            }
+            extraEnv.UPLINK_CONNECT_TOKEN = token;
+            extraEnv.UPLINK_CONNECT_USER = user;
+            args.push("--user-env", "UPLINK_CONNECT_USER", "--host", host);
+          } else if (provider === "namecheap") {
             const user = (await promptLine("Namecheap API user (or back): ")).trim();
             if (!user || user === "back") {
               restoreRawMode();
@@ -176,10 +196,10 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
         label: "Help",
         action: async () => {
           return [
-            "Uplink lists domains you already own at connected registrars, then attaches them to hosted apps.",
+            "One hub for domains and hosting spread across providers: registrars and cPanel hosts in a single inventory.",
             "",
-            "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap / DreamHost",
-            "  Connect     — save a registrar token (same as the CLI)",
+            "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap / DreamHost / any cPanel host",
+            "  Connect     — save a registrar token or cPanel API token (same as the CLI)",
             "  Find        — search names that are not yours yet",
             "  Attach      — bind a hostname to a hosted app",
             "  Verify      — check DNS points at the hosting edge, then TLS",

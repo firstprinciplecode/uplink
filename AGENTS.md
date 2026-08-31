@@ -111,7 +111,10 @@ Notes:
 
 ## Custom domains
 
-Registrar inventory is CLI. Attach/verify is under `host domains`.  
+Uplink is a hub for domains and hosting spread across providers: registrar inventory
+(GoDaddy, Cloudflare, Hostinger, Namecheap, DreamHost) and hosted domains from any
+**cPanel** account (Namecheap shared, Bluehost, HostGator, …) land in one `domains list`.
+Attach/verify is under `host domains`.
 The bare `uplink domains` command opens Find a domain. Agents should use JSON:
 
 ```bash
@@ -123,6 +126,7 @@ uplink domains providers connect cloudflare --token-env CF_API_TOKEN --json
 uplink domains providers connect hostinger --token-env HOSTINGER_API_TOKEN --json
 uplink domains providers connect dreamhost --token-env DREAMHOST_API_KEY --json
 uplink domains providers connect namecheap --token-env NAMECHEAP_API_KEY --user-env NAMECHEAP_API_USER --json
+uplink domains providers connect cpanel --host server341.web-hosting.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN --json
 uplink domains providers list --json
 uplink domains providers disconnect godaddy --json
 
@@ -132,7 +136,19 @@ echo "$TOKEN" | uplink --token-stdin host domains list --id app_xxx --json
 echo "$TOKEN" | uplink --token-stdin host domains remove --id app_xxx --hostname example.com --json
 ```
 
-`domains check` works without a registrar: it falls back to public DNS/RDAP and returns `provider: "public"` with no price. Do not treat RDAP “available” as buyable unless `domains check` says `buyable: true`. Purchase is not wired yet.
+`domains check` works without a registrar: it falls back to public DNS/RDAP and returns `provider: "public"` with no price. Do not treat RDAP “available” as buyable unless `domains check` says `buyable: true`.
+
+Purchase (Namecheap):
+
+```bash
+uplink domains contact seed --json          # copy WHOIS from an owned domain
+uplink domains contact set --json           # or set flags / interactive
+uplink domains fund --amount 20 --json      # payment page URL to tank balance
+uplink domains buy alchemy.photos --yes --json
+uplink domains buy alchemy.photos --open-cart --json   # browser cart instead
+```
+
+API buys charge Namecheap **account balance**. If balance is low, `buy` / the Find a domain TUI return/open an add-funds `redirectUrl` from `namecheap.users.createaddfundsrequest`.
 
 ## Databases (optional)
 

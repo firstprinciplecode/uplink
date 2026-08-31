@@ -8,7 +8,8 @@
 - **Share any local port**: `localhost:<port>` → public HTTPS (`https://abc123.x.uplink.spot`)
 - **Agent-first**: `--json`, stable exit codes, `--token-stdin` (no browser required)
 - **Hosting**: deploy Next.js / Vite / static apps to Uplink
-- **Domains**: list registrar inventory and attach custom hostnames to hosted apps
+- **Domain hub**: one inventory for domains scattered across GoDaddy, Cloudflare, Hostinger, Namecheap, DreamHost — and any cPanel host (Namecheap shared, Bluehost, HostGator, …)
+- **Custom hostnames**: attach a domain you own to a hosted app and verify DNS
 - **Interactive menu**: `uplink` for humans; CLI subcommands for agents
 
 Learn more at [uplink.spot](https://uplink.spot)
@@ -21,7 +22,7 @@ npm install -g uplink-cli
 npx uplink-cli --help
 ```
 
-`latest` on npm is **0.2.0** (guest login, email OTP, public `domains check`, DreamHost). Changelog: [CHANGELOG.md](./CHANGELOG.md). Product: [docs/PRODUCT.md](./docs/PRODUCT.md). Hosting: [docs/HOSTING.md](./docs/HOSTING.md).
+Changelog: [CHANGELOG.md](./CHANGELOG.md). Product: [docs/PRODUCT.md](./docs/PRODUCT.md). Hosting: [docs/HOSTING.md](./docs/HOSTING.md).
 
 ## Start without signup
 ```bash
@@ -68,6 +69,8 @@ echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin host setup \
 ## Domains (non-interactive)
 ```bash
 uplink domains providers connect godaddy --token-env GODADDY_PAT --json
+uplink domains providers connect cpanel --host server341.web-hosting.com \
+  --user-env CPANEL_USER --token-env CPANEL_API_TOKEN --json
 uplink domains list --json
 echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin \
   host domains add --id app_xxx --hostname example.com --json

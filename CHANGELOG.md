@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.6 — 2026-08-30
+
+Uplink as a **domain hub**: connect any **cPanel** host (Namecheap shared, Bluehost, HostGator, and most shared hosting) alongside registrars, so domains and sites scattered across providers land in one `domains list`. Connect with `uplink domains providers connect cpanel --host server.example.com --user-env CPANEL_USER --token-env CPANEL_API_TOKEN` (token from cPanel → Security → Manage API Tokens), or through the menu under Domains → Connect registrar.
+
+## 0.2.5 — 2026-08-30
+
+Find a domain: ↑↓ / mouse wheel to select results, enter or click for details, then buy via Namecheap API (or open cart / add-funds payment URL when balance is low). New commands: `domains buy`, `domains fund`, `domains contact show|set|seed`.
+
+## 0.2.4 — 2026-08-30
+
+Fix interactive menu crash (`uplink` / `uplink menu`): `domain-check.ts` still statically imported Ink's DomainSearch into the CommonJS graph, so tsx transformed `yoga-layout` as CJS (`Top-level await is currently not supported with the "cjs" output format`). Find a domain from the menu now spawns the ESM child the same way `uplink domains` does. Also stop passing the root CJS `tsconfig` into ESM Ink screens, and resolve `tsx` via `tsx/cli` for newer tsx releases.
+
 ## 0.2.3 — 2026-08-30
 
 New **`uplink upgrade`** (Uplink Pro subscription — $9/mo or `--yearly` $90/yr via Stripe Checkout) and **`uplink billing`** (Stripe billing portal for cancel/card changes). Pro unlocks unlimited hosted apps within 1 GB of storage, always-on for your 5 most-active apps, custom domains, and permanent aliases.

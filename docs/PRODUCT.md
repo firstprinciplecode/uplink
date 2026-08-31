@@ -10,7 +10,7 @@ Three surfaces, one CLI (`uplink`):
 
 1. **Share** — expose `localhost:<port>` as HTTPS (`https://<token>.x.uplink.spot`).
 2. **Hosting** — deploy a project to `https://<app_id>.host.uplink.spot` (email-verified accounts).
-3. **Domains** — check availability, list registrar inventory, attach a hostname to a hosted app.
+3. **Domains** — a hub for names spread across providers: one inventory from registrars (GoDaddy, Cloudflare, Hostinger, Namecheap, DreamHost) plus any cPanel host (Namecheap shared, Bluehost, HostGator, …), availability checks, and hostname attach/verify on hosted apps.
 
 Humans use `uplink` (keyboard menu). Agents use subcommands with `--json` and `--token-stdin`.
 
