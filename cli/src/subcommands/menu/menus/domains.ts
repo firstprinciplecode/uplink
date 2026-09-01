@@ -1,7 +1,15 @@
+import { isBackInput } from "../io";
 import type { SelectOption } from "../inline-tree-select";
 import type { MenuChoice } from "../types";
-import { buildFindDomainAction } from "./domain-check";
-import { parseHostedApps, runCli, runCliCapture } from "./hosting";
+import {
+  parseHostedApps,
+  runCli,
+  runCliCapture,
+  runCliResult,
+  parseCliJson,
+  type HostedApp,
+} from "./hosting";
+import { listAppDomains, type AppDomainRow } from "../domain-bind";
 
 type Deps = {
   promptLine: (question: string) => Promise<string>;
@@ -22,20 +30,35 @@ const PROVIDER_OPTIONS: SelectOption[] = [
   { label: "cPanel hosting (Namecheap shared, Bluehost, HostGator, …)", value: "cpanel" },
 ];
 
+function cliErrorText(result: { stdout: string; stderr: string }): string {
+  const fromJson =
+    parseCliJson<{ error?: string }>(result.stdout) || parseCliJson<{ error?: string }>(result.stderr);
+  return fromJson?.error || result.stderr || result.stdout || "Command failed";
+}
+
+function formatDns(dns?: { type: string; host: string; target: string }): string[] {
+  if (!dns) return [];
+  return [
+    `DNS needed: ${dns.type}  ${dns.host}  →  ${dns.target}`,
+    "Propagation can take a few minutes.",
+  ];
+}
+
 async function pickHostedApp(
   deps: Deps,
   title: string
-): Promise<{ name: string; id: string; url?: string } | null> {
+): Promise<{ kind: "app"; app: HostedApp } | { kind: "back" } | { kind: "empty" }> {
   const output = runCliCapture(["host", "list"]);
   if (!output || output.includes("No apps found")) {
     deps.restoreRawMode();
-    return null;
+    return { kind: "empty" };
   }
   const apps = parseHostedApps(output);
   if (apps.length === 0) {
     deps.restoreRawMode();
-    return null;
+    return { kind: "empty" };
   }
+  if (apps.length === 1) return { kind: "app", app: apps[0] };
   const options: SelectOption[] = apps.map((app) => ({
     label: `${app.name}${app.url ? `  ${app.url}` : ""}`,
     value: app.id,
@@ -43,9 +66,26 @@ async function pickHostedApp(
   const choice = await deps.inlineSelect(title, options, true);
   if (choice === null) {
     deps.restoreRawMode();
-    return null;
+    return { kind: "back" };
   }
-  return apps.find((app) => app.id === choice.value) ?? null;
+  const app = apps.find((item) => item.id === choice.value);
+  if (!app) {
+    deps.restoreRawMode();
+    return { kind: "empty" };
+  }
+  return { kind: "app", app };
+}
+
+function verifyHostname(appId: string, hostname: string): string[] {
+  const result = runCliResult(["host", "domains", "verify", "--id", appId, "--hostname", hostname, "--json"]);
+  const parsed = parseCliJson<AppDomainRow>(result.stdout);
+  if (parsed?.verified) {
+    return [`Verified ${hostname}`, `Live at https://${hostname} (certificate may take a first request).`];
+  }
+  const lines = [`Not verified yet: ${hostname}`];
+  if (parsed?.reason) lines.push(parsed.reason);
+  lines.push(...formatDns(parsed?.dns));
+  return lines;
 }
 
 export function buildDomainsMenu(deps: Deps): MenuChoice {
@@ -56,18 +96,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
     subMenu: [
       {
         label: "My domains",
-        action: async () => {
-          try {
-            // --verify resolves registration for zone/hosted entries; results
-            // are cached for a day, so only the first open is slow.
-            const output = runCliCapture(["domains", "list", "--verify"]);
-            restoreRawMode();
-            return output || "No domains. Connect a registrar first.";
-          } catch (error) {
-            restoreRawMode();
-            return error instanceof Error ? error.message : String(error);
-          }
-        },
+        screen: "my-domains",
       },
       {
         label: "Connect registrar",
@@ -82,17 +111,17 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
           const args = ["domains", "providers", "connect", provider, "--token-env", "UPLINK_CONNECT_TOKEN"];
           if (provider === "cpanel") {
             const host = (await promptLine("cPanel host (e.g. server341.web-hosting.com, or back): ")).trim();
-            if (!host || host === "back") {
+            if (!host || isBackInput(host)) {
               restoreRawMode();
               return "";
             }
             const user = (await promptLine("cPanel username (or back): ")).trim();
-            if (!user || user === "back") {
+            if (!user || isBackInput(user)) {
               restoreRawMode();
               return "";
             }
             const token = (await promptLine("cPanel API token (Security → Manage API Tokens, or back): ")).trim();
-            if (!token || token === "back") {
+            if (!token || isBackInput(token)) {
               restoreRawMode();
               return "";
             }
@@ -101,12 +130,12 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
             args.push("--user-env", "UPLINK_CONNECT_USER", "--host", host);
           } else if (provider === "namecheap") {
             const user = (await promptLine("Namecheap API user (or back): ")).trim();
-            if (!user || user === "back") {
+            if (!user || isBackInput(user)) {
               restoreRawMode();
               return "";
             }
             const key = (await promptLine("Namecheap API key (or back): ")).trim();
-            if (!key || key === "back") {
+            if (!key || isBackInput(key)) {
               restoreRawMode();
               return "";
             }
@@ -119,7 +148,7 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
                 `${PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider} API token (or back): `
               )
             ).trim();
-            if (!token || token === "back") {
+            if (!token || isBackInput(token)) {
               restoreRawMode();
               return "";
             }
@@ -137,83 +166,110 @@ export function buildDomainsMenu(deps: Deps): MenuChoice {
       },
       {
         label: "Find a domain",
-        action: buildFindDomainAction(deps),
+        screen: "find-domain",
       },
       {
         label: "Attach to app",
-        action: async () => {
-          const app = await pickHostedApp(deps, "Attach domain to which app?");
-          if (!app) return "No hosted apps. Deploy one under Host first.";
-          const hostname = (await promptLine("Hostname (e.g. example.com, or back): ")).trim().toLowerCase();
-          if (!hostname || hostname === "back") {
-            restoreRawMode();
-            return "";
-          }
-          runCli(["host", "domains", "add", "--id", app.id, "--hostname", hostname]);
-          restoreRawMode();
-          return `Attached ${hostname} to ${app.name}. Point DNS, then Verify.`;
-        },
+        screen: "attach-app",
       },
       {
         label: "Verify DNS",
         action: async () => {
-          const app = await pickHostedApp(deps, "Verify a domain on which app?");
-          if (!app) return "No hosted apps.";
-          const hostname = (await promptLine("Hostname to verify (or back): ")).trim().toLowerCase();
-          if (!hostname || hostname === "back") {
+          try {
+            const picked = await pickHostedApp(deps, "Verify a domain on which app?");
+            if (picked.kind === "back") return "";
+            if (picked.kind === "empty") return "No hosted apps.";
+            const rows = listAppDomains(picked.app.id);
+            if (rows.length === 0) {
+              restoreRawMode();
+              return `Nothing attached to ${picked.app.name} yet. Ask an agent to bind a hostname, then verify here.`;
+            }
+            const pending = rows.filter((row) => !row.verified);
+            const pool = pending.length > 0 ? pending : rows;
+            const choice = await deps.inlineSelect(
+              pending.length > 0 ? "Which hostname still needs DNS?" : "All verified — check again?",
+              pool.map((row) => ({
+                label: `${row.hostname}  ${row.verified ? "verified" : "pending"}`,
+                value: row.hostname,
+              })),
+              true
+            );
+            if (choice === null || typeof choice.value !== "string") {
+              restoreRawMode();
+              return "";
+            }
+            const lines = verifyHostname(picked.app.id, choice.value);
             restoreRawMode();
-            return "";
+            return lines.join("\n");
+          } catch (error) {
+            restoreRawMode();
+            return error instanceof Error ? error.message : String(error);
           }
-          runCli(["host", "domains", "verify", "--id", app.id, "--hostname", hostname]);
-          restoreRawMode();
-          return `Checked ${hostname} on ${app.name}.`;
         },
       },
       {
         label: "List on app",
         action: async () => {
-          const app = await pickHostedApp(deps, "List domains for which app?");
-          if (!app) return "No hosted apps.";
-          const output = runCliCapture(["host", "domains", "list", "--id", app.id]);
+          const picked = await pickHostedApp(deps, "List domains for which app?");
+          if (picked.kind === "back") return "";
+          if (picked.kind === "empty") return "No hosted apps.";
+          const output = runCliCapture(["host", "domains", "list", "--id", picked.app.id]);
           restoreRawMode();
-          return `${app.name}\n${output || "No custom domains attached."}`;
+          return `${picked.app.name}\n${output || "No custom domains attached."}`;
         },
       },
       {
         label: "Detach from app",
         action: async () => {
-          const app = await pickHostedApp(deps, "Detach a domain from which app?");
-          if (!app) return "No hosted apps.";
-          const hostname = (await promptLine("Hostname to detach (or back): ")).trim().toLowerCase();
-          if (!hostname || hostname === "back") {
+          try {
+            const picked = await pickHostedApp(deps, "Detach a domain from which app?");
+            if (picked.kind === "back") return "";
+            if (picked.kind === "empty") return "No hosted apps.";
+            const rows = listAppDomains(picked.app.id);
+            if (rows.length === 0) {
+              restoreRawMode();
+              return `Nothing attached to ${picked.app.name}.`;
+            }
+            const choice = await deps.inlineSelect(
+              `Detach from ${picked.app.name}? Routing for that hostname stops.`,
+              rows.map((row) => ({
+                label: `${row.hostname}  ${row.verified ? "verified" : "pending"}`,
+                value: row.hostname,
+              })),
+              true
+            );
+            if (choice === null || typeof choice.value !== "string") {
+              restoreRawMode();
+              return "";
+            }
+            runCli(["host", "domains", "remove", "--id", picked.app.id, "--hostname", choice.value]);
             restoreRawMode();
-            return "";
+            return `Detached ${choice.value} from ${picked.app.name}.`;
+          } catch (error) {
+            restoreRawMode();
+            return error instanceof Error ? error.message : String(error);
           }
-          runCli(["host", "domains", "remove", "--id", app.id, "--hostname", hostname]);
-          restoreRawMode();
-          return `Detached ${hostname} from ${app.name}.`;
         },
       },
       {
         label: "Help",
-        action: async () => {
-          return [
-            "One hub for domains and hosting spread across providers: registrars and cPanel hosts in a single inventory.",
+        page: [
+            "One hub for domains and hosting across registrars and cPanel hosts.",
             "",
-            "  My domains  — inventory from GoDaddy / Cloudflare / Hostinger / Namecheap / DreamHost / any cPanel host",
-            "  Connect     — save a registrar token or cPanel API token (same as the CLI)",
-            "  Find        — search names (public DNS; m = more TLDs; connect a registrar for price)",
-            "  Attach      — bind a hostname to a hosted app",
-            "  Verify      — check DNS points at the hosting edge, then TLS",
+            "  My domains  — search inventory, open a name for expiry / RDAP / attached apps",
+            "  Connect     — save a registrar or cPanel API token",
+            "  Find        — search names (public DNS; m = more TLDs)",
+            "  Attach      — pick an app, then copy bind/verify commands",
+            "  Verify      — after DNS is pointed, check the edge + TLS",
             "",
-            "CLI (agents):",
-            "  uplink domains providers connect godaddy --token-env GODADDY_PAT --json",
+            "Custom domains need a paid hosting plan. DNS stays at the registrar.",
+            "",
+            "CLI:",
             "  uplink domains list --json",
             "  uplink domains search acme --json",
-            "  uplink domains check example.com --json",
             "  uplink host domains add --id <app> --hostname example.com --json",
-          ].join("\n");
-        },
+            "  uplink host domains verify --id <app> --hostname example.com --json",
+          ].join("\n"),
       },
     ],
   };

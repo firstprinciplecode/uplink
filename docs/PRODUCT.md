@@ -1,6 +1,6 @@
 # Uplink
 
-**Software for agents** — share localhost, host apps, and attach domains from the terminal. No dashboard required.
+**Agent based web management** — share localhost, host apps, and attach domains from the terminal. No dashboard required.
 
 Website: [uplink.spot](https://uplink.spot) · CLI: [`uplink-cli`](https://www.npmjs.com/package/uplink-cli) · Agents: [AGENTS.md](../AGENTS.md)
 

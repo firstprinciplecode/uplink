@@ -1,11 +1,11 @@
 import { Box, Text, useApp, useInput, render } from "ink";
 import { Wordmark } from "./brand";
-import TextInput from "ink-text-input";
+import { Panel, SearchField, KeyBar } from "./chrome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PublicAvailability } from "../utils/domain-availability";
 import { expandDomainQuery, type SearchTldSet } from "../utils/domain-search";
 import { checkDomainAvailability } from "../utils/domain-availability";
-import { prepareStdinForPrompt } from "../subcommands/menu/io";
+import { prepareStdinForInk, enterTuiScreen, leaveTuiScreen } from "../subcommands/menu/io";
 import { readRegistrarStore } from "../registrars/store";
 import { getAdapter } from "../registrars";
 import type { DomainQuote } from "../registrars/types";
@@ -24,14 +24,11 @@ import {
   type RegistrantContact,
 } from "../utils/registrant-contact";
 import { openInBrowser } from "../utils/open-browser";
-import { useTerminalMouse } from "./use-terminal-mouse";
 
 type Row = PublicAvailability | { domain: string; status: "checking" };
 type Focus = "search" | "list" | "detail";
 
 const DEBOUNCE_MS = 400;
-/** Approx terminal row where the result list starts (1-based, after wordmark/title/search). */
-const LIST_TOP_ROW = 8;
 
 function useLiveChecks(raw: string, tldSet: SearchTldSet): Row[] {
   const [rows, setRows] = useState<Row[]>([]);
@@ -131,57 +128,57 @@ function DomainDetail({
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Wordmark />
-      <Box marginTop={1}>
+      <Wordmark crumb={state.domain} />
+      <Panel marginTop={1} accent>
         <Text bold>{state.domain}</Text>
-      </Box>
-      {state.loading ? (
-        <Box marginTop={1}>
+        {state.loading ? (
           <Text dimColor>Looking up Namecheap price & balance…</Text>
-        </Box>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          <Text>
-            Public: {state.publicStatus}
-            {quote ? ` · Namecheap: ${quote.status}` : ""}
-            {quote?.premium ? " (premium)" : ""}
-          </Text>
-          <Text>
-            Price: {formatMoney(price)}
-            {state.balance ? ` · Balance: ${formatMoney(state.balance.available, state.balance.currency)}` : ""}
-          </Text>
-          {shortfall > 0 && (
-            <Text color="yellow">Need ~{formatMoney(shortfall)} more in Namecheap balance to buy via API.</Text>
-          )}
-          {!state.namecheapConnected && (
-            <Text dimColor>
-              Connect Namecheap for price and buy: uplink domains providers connect namecheap
+        ) : (
+          <>
+            <Text>
+              Public: {state.publicStatus}
+              {quote ? ` · Namecheap: ${quote.status}` : ""}
+              {quote?.premium ? " (premium)" : ""}
             </Text>
-          )}
-          {state.namecheapConnected && contactMissingFields(state.contact).length > 0 && (
-            <Text color="yellow">
-              Missing registrant profile ({contactMissingFields(state.contact).join(", ")}). Run: uplink
-              domains contact set
+            <Text>
+              Price: {formatMoney(price)}
+              {state.balance ? ` · Balance: ${formatMoney(state.balance.available, state.balance.currency)}` : ""}
             </Text>
-          )}
-          {state.error && <Text color="red">{state.error}</Text>}
-          {state.message && <Text color="green">{state.message}</Text>}
-        </Box>
-      )}
-      <Box marginTop={1} flexDirection="column">
-        <Text dimColor>{actionHint}</Text>
-        <Text dimColor>
-          {canBuy ? "b buy · " : ""}
-          {state.namecheapConnected ? "f add funds · " : ""}
-          o open Namecheap cart · esc back
-        </Text>
-      </Box>
+            {shortfall > 0 && (
+              <Text color="yellow">Need ~{formatMoney(shortfall)} more in Namecheap balance to buy via API.</Text>
+            )}
+            {!state.namecheapConnected && (
+              <Text dimColor>
+                Connect Namecheap for price and buy: uplink domains providers connect namecheap
+              </Text>
+            )}
+            {state.namecheapConnected && contactMissingFields(state.contact).length > 0 && (
+              <Text color="yellow">
+                Missing registrant profile ({contactMissingFields(state.contact).join(", ")}). Run: uplink
+                domains contact set
+              </Text>
+            )}
+            {state.error && <Text color="red">{state.error}</Text>}
+            {state.message && <Text color="green">{state.message}</Text>}
+          </>
+        )}
+      </Panel>
+      <KeyBar
+        hint={`${actionHint} · ${canBuy ? "b buy · " : ""}${state.namecheapConnected ? "f add funds · " : ""}o Namecheap cart · esc/← back`}
+      />
     </Box>
   );
 }
 
-function DomainSearchApp() {
+export function DomainSearchApp({
+  onExit,
+  crumb,
+}: {
+  onExit?: () => void;
+  crumb?: string;
+} = {}) {
   const { exit } = useApp();
+  const leave = onExit ?? exit;
   const [query, setQuery] = useState("");
   const [moreTlds, setMoreTlds] = useState(false);
   const [showTaken, setShowTaken] = useState(false);
@@ -250,30 +247,6 @@ function DomainSearchApp() {
     },
     [visible.length]
   );
-
-  const onMouse = useCallback(
-    (event: { type: string; direction?: string; y?: number }) => {
-      if (focus === "detail" || busy) return;
-      if (event.type === "wheel") {
-        moveSelection(event.direction === "up" ? -1 : 1);
-        return;
-      }
-      if (event.type === "click" && typeof event.y === "number") {
-        if (visible.length === 0) return;
-        const index = event.y - LIST_TOP_ROW;
-        if (index >= 0 && index < visible.length) {
-          setSelected(index);
-          setFocus("list");
-          void openDetail(visible[index]);
-        } else if (focus === "list" && visible[selected]) {
-          void openDetail(visible[selected]);
-        }
-      }
-    },
-    [busy, focus, moveSelection, openDetail, selected, visible]
-  );
-
-  useTerminalMouse(onMouse, focus !== "detail");
 
   const runBuy = useCallback(async () => {
     if (!detail || busy) return;
@@ -344,24 +317,48 @@ function DomainSearchApp() {
     }
   }, [busy, detail]);
 
-  useInput((input, key) => {
-    if (busy) return;
+  const goBack = useCallback(() => {
+    if (focus === "detail") {
+      setDetail(null);
+      setFocus(visible.length ? "list" : "search");
+      setAwaitConfirm(false);
+      return;
+    }
+    if (focus === "list") {
+      setFocus("search");
+      return;
+    }
+    leave();
+  }, [leave, focus, visible.length]);
 
-    if (focus === "detail" && detail) {
-      if (key.escape || key.leftArrow) {
-        setDetail(null);
-        setFocus(visible.length ? "list" : "search");
+  const inputArmed = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      inputArmed.current = true;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useInput((input, key) => {
+    if (!inputArmed.current) return;
+    if (key.escape || key.leftArrow) {
+      if (focus === "detail" && awaitConfirm) {
         setAwaitConfirm(false);
         return;
       }
+      goBack();
+      return;
+    }
+    if (busy) return;
+
+    if (focus === "detail" && detail) {
       if (awaitConfirm) {
         if (input === "y" || input === "Y") {
           void runBuy();
           return;
         }
-        if (input === "n" || input === "N" || key.escape) {
+        if (input === "n" || input === "N") {
           setAwaitConfirm(false);
-          return;
         }
         return;
       }
@@ -399,19 +396,10 @@ function DomainSearchApp() {
         const url = namecheapCartUrl(detail.domain, 1);
         openInBrowser(url);
         setDetail({ ...detail, message: `Opened cart: ${url}` });
-        return;
       }
       return;
     }
 
-    if (key.escape) {
-      if (focus === "list") {
-        setFocus("search");
-        return;
-      }
-      exit();
-      return;
-    }
     if (key.tab) {
       setShowTaken((prev) => !prev);
       return;
@@ -428,12 +416,27 @@ function DomainSearchApp() {
       if (visible.length) moveSelection(-1);
       return;
     }
-    if (key.return && focus === "list" && visible[selected]) {
-      void openDetail(visible[selected]);
+    if (key.return) {
+      if (focus === "list" && visible[selected]) {
+        void openDetail(visible[selected]);
+        return;
+      }
+      if (focus === "search" && visible.length) {
+        setFocus("list");
+      }
       return;
     }
-    if (focus === "list" && input && !key.ctrl && !key.meta) {
-      // Typing returns to search
+    if (focus === "search") {
+      if (key.backspace || key.delete) {
+        setQuery((q) => q.slice(0, -1));
+        return;
+      }
+      if (input && !key.ctrl) {
+        setQuery((q) => q + input);
+      }
+      return;
+    }
+    if (focus === "list" && input && !key.ctrl) {
       setFocus("search");
       setQuery((q) => q + input);
     }
@@ -458,57 +461,51 @@ function DomainSearchApp() {
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Wordmark />
-      <Box marginTop={1}>
-        <Text>Find a domain{moreTlds ? "  · more TLDs" : ""}</Text>
-      </Box>
+      <Wordmark crumb={crumb} />
       {!readRegistrarStore().namecheap && (
-        <Text dimColor>Availability only — connect Namecheap (or another registrar) for price and buy.</Text>
+        <Panel marginTop={1}>
+          <Text dimColor>Availability only — connect Namecheap (or another registrar) for price and buy.</Text>
+        </Panel>
       )}
       <Box marginTop={1}>
-        <Text dimColor>search › </Text>
-        <TextInput
-          focus={focus === "search"}
+        <SearchField
           value={query}
-          onChange={(value) => {
-            setQuery(value);
-            setFocus("search");
-          }}
           placeholder="acme   or   acme.io"
+          focused={focus === "search"}
         />
       </Box>
       {visible.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Panel marginTop={1}>
+          <Text dimColor>{moreTlds ? "results · more TLDs" : "results"}</Text>
           {visible.map((row, index) => {
             const active = focus === "list" && index === selected;
             return (
               <Text
                 key={row.domain}
-                color={active ? "cyan" : statusColor(row.status)}
-                bold={active}
+                inverse={active}
+                color={active ? undefined : statusColor(row.status)}
                 dimColor={!active && (row.status === "checking" || row.status === "taken")}
               >
-                {active ? "› " : "  "}
+                {active ? " › " : "   "}
                 {statusGlyph(row.status)} {row.domain}
                 {row.status === "taken" ? "  taken" : ""}
+                {active ? " " : ""}
               </Text>
             );
           })}
-        </Box>
+        </Panel>
       )}
       {!showTaken && taken.length > 0 && (
-        <Box marginTop={1}>
-          <Text dimColor>
-            {taken.length} taken · tab to show
-          </Text>
-        </Box>
+        <Panel marginTop={1}>
+          <Text dimColor>{taken.length} taken · tab to show</Text>
+        </Panel>
       )}
-      <Box marginTop={1}>
-        <Text dimColor>
-          {rows.length > 0 && !pending ? `${available.length} of ${rows.length} free · ` : ""}
-          ↑↓ / wheel select · enter / click details · m {moreTlds ? "fewer TLDs" : "more TLDs"} · tab taken · esc back
-        </Text>
-      </Box>
+      <KeyBar
+        hint={
+          `${rows.length > 0 && !pending ? `${available.length} of ${rows.length} free · ` : ""}` +
+          `↑↓ select · enter details · m ${moreTlds ? "fewer TLDs" : "more TLDs"} · tab taken · esc/← back`
+        }
+      />
     </Box>
   );
 }
@@ -517,9 +514,19 @@ export async function runDomainSearch(): Promise<string> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return "Domain search needs a terminal. Agents: uplink domains search myapp --json";
   }
-  const instance = render(<DomainSearchApp />);
-  await instance.waitUntilExit();
-  instance.unmount();
-  prepareStdinForPrompt();
-  return "";
+  const nested = process.env.UPLINK_TUI_ALT === "1";
+  prepareStdinForInk();
+  enterTuiScreen();
+  try {
+    const instance = render(<DomainSearchApp />, {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      exitOnCtrlC: true,
+    });
+    await instance.waitUntilExit();
+    instance.unmount();
+    return "";
+  } finally {
+    if (!nested) leaveTuiScreen();
+  }
 }

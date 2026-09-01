@@ -26,8 +26,9 @@ const API_BASE = process.env.AGENTCLOUD_API_BASE || process.env.API_BASE || "htt
 const RATE_LIMIT_REQUESTS = Number(process.env.TUNNEL_RATE_LIMIT_REQUESTS || 1000); // per minute
 const RATE_LIMIT_WINDOW = 60000; // 1 minute in ms
 const MAX_REQUEST_SIZE = Number(process.env.TUNNEL_MAX_REQUEST_SIZE || 10 * 1024 * 1024); // 10MB
-const CTRL_TLS_ENABLED = process.env.TUNNEL_CTRL_TLS === "true";
-const CTRL_TLS_INSECURE = process.env.TUNNEL_CTRL_TLS_INSECURE === "true";
+// TLS control listener (runs alongside the legacy plaintext listener so
+// already-installed clients keep working). Enabled when a port + cert/key are set.
+const LISTEN_CTRL_TLS = Number(process.env.TUNNEL_RELAY_CTRL_TLS || 0);
 const CTRL_TLS_CA = process.env.TUNNEL_CTRL_CA || "";
 const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
 const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
@@ -394,17 +395,30 @@ function optionalRead(path) {
   }
 }
 
-const tlsOptions = CTRL_TLS_ENABLED
-  ? {
-      key: optionalRead(CTRL_TLS_KEY),
-      cert: optionalRead(CTRL_TLS_CERT),
-      ca: CTRL_TLS_CA ? [optionalRead(CTRL_TLS_CA)].filter(Boolean) : undefined,
-      requestCert: false,
-      rejectUnauthorized: !CTRL_TLS_INSECURE,
+// Re-read the certificate when Caddy/Let's Encrypt rotates it (mtime check per
+// handshake) so renewals do not require a relay restart.
+function makeSecureContextProvider(certPath, keyPath, caPath) {
+  let cached = null;
+  let certMtime = 0;
+  let keyMtime = 0;
+  return () => {
+    const certStat = fs.statSync(certPath).mtimeMs;
+    const keyStat = fs.statSync(keyPath).mtimeMs;
+    if (!cached || certStat !== certMtime || keyStat !== keyMtime) {
+      cached = tls.createSecureContext({
+        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(keyPath),
+        ca: caPath ? fs.readFileSync(caPath) : undefined,
+      });
+      certMtime = certStat;
+      keyMtime = keyStat;
+      log(`Control TLS certificate (re)loaded from ${certPath}`);
     }
-  : undefined;
+    return cached;
+  };
+}
 
-const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.createServer)((socket) => {
+const handleControlConnection = (socket) => {
   let buf = "";
   let registeredToken = null;
   const clientIp = getClientIp(socket);
@@ -658,11 +672,14 @@ const ctrlServer = (CTRL_TLS_ENABLED ? tls.createServer(tlsOptions) : net.create
   socket.on("error", (err) => {
     logError(err, "Control socket error");
   });
-});
+};
+
+// Legacy plaintext listener — kept so clients installed before the TLS rollout
+// keep working. New clients default to the TLS port.
+const ctrlServer = net.createServer(handleControlConnection);
 
 ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
-  log(`Tunnel control listening on ${LISTEN_CTRL}`);
-  log(`Control TLS: ${CTRL_TLS_ENABLED ? "enabled" : "disabled"}`);
+  log(`Tunnel control listening on ${LISTEN_CTRL} (plaintext, legacy)`);
   log(`Token validation: ${VALIDATE_TOKENS ? "enabled" : "disabled"}`);
   log(`Rate limit: ${RATE_LIMIT_REQUESTS} requests/minute per token`);
 
@@ -680,17 +697,48 @@ ctrlServer.listen(LISTEN_CTRL, "0.0.0.0", () => {
     if (!INTERNAL_SECRET) {
       log(
         "SECURITY WARNING: RELAY_INTERNAL_SECRET is unset. Internal endpoints are " +
-          "only protected by the public-host gate. Set a secret in /opt/agentcloud/.env."
+          "only protected by the public-host gate. Set a secret in the runtime .env."
       );
     }
-    if (!CTRL_TLS_ENABLED) {
+    if (!LISTEN_CTRL_TLS || !CTRL_TLS_CERT || !CTRL_TLS_KEY) {
       log(
-        "SECURITY WARNING: TUNNEL_CTRL_TLS is disabled. Registration tokens cross " +
-          "the control channel in cleartext."
+        "SECURITY WARNING: no TLS control listener configured. Registration tokens " +
+          "cross the control channel in cleartext. Set TUNNEL_RELAY_CTRL_TLS, " +
+          "TUNNEL_CTRL_CERT, and TUNNEL_CTRL_KEY."
       );
     }
   }
 });
+
+// TLS control listener (preferred). Serves the same protocol as the plaintext
+// port; certificate rotation is picked up per-handshake via SNICallback.
+let ctrlTlsServer = null;
+if (LISTEN_CTRL_TLS && CTRL_TLS_CERT && CTRL_TLS_KEY) {
+  const getSecureContext = makeSecureContextProvider(CTRL_TLS_CERT, CTRL_TLS_KEY, CTRL_TLS_CA);
+  ctrlTlsServer = tls.createServer(
+    {
+      cert: optionalRead(CTRL_TLS_CERT),
+      key: optionalRead(CTRL_TLS_KEY),
+      ca: CTRL_TLS_CA ? [optionalRead(CTRL_TLS_CA)].filter(Boolean) : undefined,
+      SNICallback: (_servername, cb) => {
+        try {
+          cb(null, getSecureContext());
+        } catch (err) {
+          logError(err, "TLS context reload");
+          cb(err);
+        }
+      },
+    },
+    handleControlConnection
+  );
+  ctrlTlsServer.on("tlsClientError", (err) => {
+    // Bots probing the port with bad handshakes are routine; log quietly.
+    logError(err, "Control TLS handshake");
+  });
+  ctrlTlsServer.listen(LISTEN_CTRL_TLS, "0.0.0.0", () => {
+    log(`Tunnel control (TLS) listening on ${LISTEN_CTRL_TLS}`);
+  });
+}
 
 // HTTP ingress -> forward to client (host-based routing)
 const httpServer = http.createServer(async (req, res) => {

@@ -37,7 +37,12 @@ async function namecheapCall(
     ClientIp: await clientIp(),
     ...extra,
   });
-  const res = await fetch(`${API_URL}?${params}`);
+  // POST keeps the API key out of the URL (query strings end up in proxy/server logs).
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
   const xml = await res.text();
   const status = /Status="([^"]+)"/.exec(xml)?.[1];
   if (status !== "OK") {

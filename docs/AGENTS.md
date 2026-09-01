@@ -177,7 +177,7 @@ echo "$TOKEN" | uplink --token-stdin db delete --id db_xxx --yes --json
 
 ## Interactive menu
 
-Humans: `uplink` or `uplink menu` (Share · Hosting · Domains).  
+Humans: `uplink` or `uplink menu` (Share · Domains · Hosting).  
 Agents should prefer the non-interactive commands above.
 
 ## URLs

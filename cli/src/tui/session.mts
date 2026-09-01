@@ -1,12 +1,11 @@
 import fetch from "node-fetch";
 import { apiRequest } from "../http";
-import { clearScreen, promptLine, restoreRawMode, truncate } from "../subcommands/menu/io";
+import { clearScreen, promptLine, restoreRawMode, truncate, isBackInput } from "../subcommands/menu/io";
 import { inlineSelect } from "../subcommands/menu/inline-tree-select";
 import {
   colorDim,
   colorGreen,
   colorRed,
-  colorWhite,
 } from "../subcommands/menu/colors";
 import { type MenuChoice } from "../subcommands/menu/types";
 import {
@@ -18,7 +17,6 @@ import {
   buildSystemStatusMenu,
   buildUsageMenu,
 } from "../subcommands/menu/menus";
-import { buildFindDomainAction } from "../subcommands/menu/menus/domain-check";
 import { ports, smoke, tunnelClients } from "../subcommands/menu/effects";
 import { WORDMARK_TEXT } from "./brand";
 import { runInkMenu } from "./runMenu";
@@ -39,14 +37,17 @@ async function continueWithEmail(): Promise<string | undefined> {
   clearScreen();
   try {
     process.stdout.write("\n");
-    process.stdout.write(colorWhite(WORDMARK_TEXT) + "\n");
+    process.stdout.write(colorGreen(WORDMARK_TEXT) + "\n");
     process.stdout.write(colorDim("Continue with email\n\n"));
-    const email = normalizeEmail(await promptLine("Email: "));
+    const emailRaw = await promptLine("Email: ");
+    if (isBackInput(emailRaw) || !emailRaw.trim()) return "";
+    const email = normalizeEmail(emailRaw);
     if (!isEmail(email)) return "Invalid email.";
 
     await requestLoginCode(email);
     process.stdout.write(`\nCode sent to ${email}.\n`);
     const code = (await promptLine("Code: ")).trim();
+    if (isBackInput(code) || !code) return "";
     if (!/^\d{6}$/.test(code)) return "Code must be 6 digits.";
 
     const result = await verifyLoginCode(email, code);
@@ -68,17 +69,15 @@ async function continueWithEmail(): Promise<string | undefined> {
 
 const aboutItem: MenuChoice = {
   label: "About",
-  action: async () => {
-    return [
-      "Uplink CLI",
-      "Open source CLI for sharing localhost and hosting apps.",
-      "Interactive menu + agent-friendly commands for automation.",
-      "",
-      "Website: https://uplink.spot",
-      "GitHub: https://github.com/firstprinciplecode/uplink",
-      "Issues: https://github.com/firstprinciplecode/uplink/issues",
-    ].join("\n");
-  },
+  page: [
+    "Uplink CLI",
+    "Open source CLI for sharing localhost and hosting apps.",
+    "Interactive menu + agent-friendly commands for automation.",
+    "",
+    "Website: https://uplink.spot",
+    "GitHub: https://github.com/firstprinciplecode/uplink",
+    "Issues: https://github.com/firstprinciplecode/uplink/issues",
+  ].join("\n"),
 };
 
 const exitItem: MenuChoice = {
@@ -203,7 +202,7 @@ export async function startMenuSession(): Promise<void> {
     if (accountType === "guest") {
       mainMenu.push({
         label: "Find a domain",
-        action: buildFindDomainAction({ promptLine, restoreRawMode }),
+        screen: "find-domain",
       });
       mainMenu.push({
         label: "Continue with email  (unlock hosting + domains)",
@@ -211,14 +210,14 @@ export async function startMenuSession(): Promise<void> {
       });
     } else {
       mainMenu.push(
-        buildHostingMenu({
+        buildDomainsMenu({
           promptLine,
           restoreRawMode,
           inlineSelect,
         })
       );
       mainMenu.push(
-        buildDomainsMenu({
+        buildHostingMenu({
           promptLine,
           restoreRawMode,
           inlineSelect,
@@ -261,6 +260,32 @@ export async function startMenuSession(): Promise<void> {
       );
     }
 
+    mainMenu.push({
+      label: "Get started",
+      subMenu: [
+        {
+          label: "Install",
+          subMenu: [
+            {
+              label: "npx uplink-cli",
+              copy: "npx uplink-cli",
+            },
+            {
+              label: "npm install -g uplink-cli",
+              copy: "npm install -g uplink-cli",
+            },
+            {
+              label: "GitHub",
+              href: "https://github.com/firstprinciplecode/uplink",
+            },
+            {
+              label: "npm",
+              href: "https://www.npmjs.com/package/uplink-cli",
+            },
+          ],
+        },
+      ],
+    });
     mainMenu.push(aboutItem);
     mainMenu.push(exitItem);
     }

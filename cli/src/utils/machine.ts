@@ -2,6 +2,7 @@
  * Machine-mode helpers for CLI commands.
  * Ensures JSON-only stdout in --json mode and consistent exit codes.
  */
+import { sanitizeForTerminal } from "./sanitize";
 
 export type MachineOptions = { json?: boolean };
 
@@ -39,7 +40,9 @@ export function handleError(error: unknown, opts: MachineOptions = {}) {
   if (opts.json) {
     printJson({ error: message });
   } else {
-    console.error(message);
+    // Error bodies can contain server/registrar-controlled text; strip control
+    // characters so they cannot inject ANSI escapes into the terminal.
+    console.error(sanitizeForTerminal(message));
   }
   process.exit(selectExitCode(message));
 }

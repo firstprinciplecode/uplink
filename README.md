@@ -1,6 +1,6 @@
 # Uplink CLI
 
-**Software for agents** — share localhost, host apps, and attach domains from the terminal. Built for Cursor, Claude Code, Codex, Windsurf, and humans who live in a shell.
+**Agent based web management** — share localhost, host apps, and attach domains from the terminal. Built for Cursor, Claude Code, Codex, Windsurf, and humans who live in a shell.
 
 ![Uplink CLI](./assets/cli-screenshot.png)
 
@@ -56,9 +56,9 @@ Full contract: **[AGENTS.md](./AGENTS.md)** (also at `docs/AGENTS.md`).
 ```bash
 uplink        # open menu
 ```
-- **Share** → Start tunnel → pick port → public URL
-- **Hosting** → Setup / Deploy / List / Delete
+- **Sharing** → Share localhost → pick port → public URL
 - **Domains** → connect registrar, attach hostname to a hosted app
+- **Hosting** → Setup / Deploy / List / Delete
 
 ## Hosting (non-interactive)
 ```bash
@@ -96,14 +96,14 @@ echo "$AGENTCLOUD_TOKEN" | uplink --token-stdin \
 ```bash
 export AGENTCLOUD_TOKEN=your-token
 export AGENTCLOUD_API_BASE=https://api.uplink.spot
-export TUNNEL_CTRL=tunnel.uplink.spot:7071
+export TUNNEL_CTRL=tunnel.uplink.spot:7443
 export TUNNEL_DOMAIN=x.uplink.spot
 ```
 
 ## Troubleshooting
 - URL not live — ensure something is listening on the port and the client started (`tunnel list` → `connected`)
 - Auth errors — verify `AGENTCLOUD_TOKEN` or `~/.uplink/credentials`; prefer `--token-stdin` for agents
-- Relay errors — `TUNNEL_CTRL=tunnel.uplink.spot:7071`
+- Relay errors — `TUNNEL_CTRL=tunnel.uplink.spot:7443` (TLS)
 - Domain search — `uplink domains` or `uplink domains search acme --json` (public DNS/RDAP)
 
 ## Docs

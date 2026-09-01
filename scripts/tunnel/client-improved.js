@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Improved tunnel client with auto-reconnect, better error handling, and health checks.
- * Usage: node scripts/tunnel/client-improved.js --token <token> --port 3000 --ctrl 127.0.0.1:7071
+ * Usage: TUNNEL_TOKEN=<token> node scripts/tunnel/client-improved.js --port 3000 --ctrl tunnel.uplink.spot:7443
  */
 
 const net = require("net");
@@ -21,8 +21,11 @@ function parseArgs() {
   const out = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--token") out.token = args[++i];
-    else if (a === "--port") out.port = Number(args[++i]);
+    if (a === "--token") {
+      // Refuse argv tokens: argv is world-readable via `ps`. Env only.
+      console.error("--token is no longer supported; pass the token via the TUNNEL_TOKEN env var.");
+      process.exit(1);
+    } else if (a === "--port") out.port = Number(args[++i]);
     else if (a === "--ctrl") out.ctrl = args[++i];
     else if (a === "--max-size") out.maxSize = Number(args[++i]);
   }
@@ -30,9 +33,9 @@ function parseArgs() {
 }
 
 const parsed = parseArgs();
-// Prefer the token from the environment so it never appears on argv (which is
-// world-readable via `ps`). The --token flag is kept only for backwards compat.
-const token = process.env.TUNNEL_TOKEN || parsed.token;
+// The token comes from the environment so it never appears on argv (which is
+// world-readable via `ps`).
+const token = process.env.TUNNEL_TOKEN;
 const { port, ctrl, maxSize } = parsed;
 if (!token || !port || !ctrl) {
   console.error("Usage: TUNNEL_TOKEN=<token> node scripts/tunnel/client-improved.js --port <port> --ctrl <host:port> [--max-size <bytes>]");
@@ -41,7 +44,12 @@ if (!token || !port || !ctrl) {
 
 const [CTRL_HOST, CTRL_PORT] = ctrl.split(":");
 const MAX_BODY_SIZE = maxSize || MAX_REQUEST_SIZE;
-const CTRL_TLS_ENABLED = process.env.TUNNEL_CTRL_TLS === "true";
+// TLS is the default for any non-loopback relay; the token and all proxied
+// traffic cross this channel. Set TUNNEL_CTRL_TLS=false only for local dev.
+const CTRL_HOST_IS_LOOPBACK = ["localhost", "127.0.0.1", "::1"].includes(CTRL_HOST);
+const CTRL_TLS_ENABLED = process.env.TUNNEL_CTRL_TLS
+  ? process.env.TUNNEL_CTRL_TLS === "true"
+  : !CTRL_HOST_IS_LOOPBACK;
 const CTRL_TLS_INSECURE = process.env.TUNNEL_CTRL_TLS_INSECURE === "true";
 const CTRL_TLS_CA_PATH = process.env.TUNNEL_CTRL_CA || "";
 const CTRL_TLS_CERT_PATH = process.env.TUNNEL_CTRL_CERT || "";

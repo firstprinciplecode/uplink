@@ -21,7 +21,7 @@ export function withLiveApps(tree: MenuChoice[], status: MenuStatus): MenuChoice
                 },
               ],
             }))
-          : [{ label: "No apps yet", action: async () => "No hosted apps." }],
+          : [{ label: "No apps yet", page: "No hosted apps. Use Setup to deploy one." }],
     };
     return { ...item, subMenu: [appsMenu, ...rest] };
   });

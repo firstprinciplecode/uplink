@@ -27,7 +27,7 @@ export const c = {
 };
 
 export function colorCyan(text: string) {
-  return `${c.brightCyan}${text}${c.reset}`;
+  return `${c.brightWhite}${text}${c.reset}`;
 }
 
 export function colorYellow(text: string) {
@@ -59,7 +59,7 @@ export function colorWhite(text: string) {
 }
 
 export function colorBlue(text: string) {
-  return `${c.softBlue}${text}${c.reset}`;
+  return `${c.brightWhite}${text}${c.reset}`;
 }
 
 export function colorSoftGray(text: string) {

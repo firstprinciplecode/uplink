@@ -41,10 +41,10 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
   } = deps;
 
   return {
-    label: "Share",
+    label: "Sharing",
     subMenu: [
       {
-        label: "Start tunnel",
+        label: "Share localhost",
         action: async () => {
           try {
             // Scan for active ports
@@ -143,7 +143,7 @@ export function buildManageTunnelsMenu(deps: Deps): MenuChoice {
         },
       },
       {
-        label: "Stop tunnel",
+        label: "Stop localhost",
         action: async () => {
           try {
             const processes = findTunnelClients();

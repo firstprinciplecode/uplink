@@ -23,7 +23,6 @@ export function runSmoke(script: "smoke:tunnel" | "smoke:db" | "smoke:all" | "te
       stdio: "inherit",
       env,
       cwd: projectRoot,
-      shell: true,
     });
     child.on("close", (code) => {
       if (code === 0) {

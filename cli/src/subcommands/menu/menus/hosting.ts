@@ -69,11 +69,13 @@ export function runCli(args: string[], extraEnv?: Record<string, string>): void 
   }
 }
 
-export function runCliCapture(args: string[], extraEnv?: Record<string, string>): string {
-  try {
-    process.stdin.setRawMode(false);
-  } catch {
-    /* ignore */
+export function runCliCapture(args: string[], extraEnv?: Record<string, string>, preserveRawMode = false): string {
+  if (!preserveRawMode) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch {
+      /* ignore */
+    }
   }
   const cliBin = process.env.UPLINK_BIN;
   const cmd = cliBin ? [cliBin, ...args] : [process.argv[1], ...args];
@@ -90,6 +92,44 @@ export function runCliCapture(args: string[], extraEnv?: Record<string, string>)
     );
   }
   return result.stdout?.trim() || "";
+}
+
+/** Capture stdout even when the command exits non-zero (verify / quota errors). */
+export function runCliResult(args: string[], extraEnv?: Record<string, string>, preserveRawMode = false): {
+  status: number;
+  stdout: string;
+  stderr: string;
+} {
+  if (!preserveRawMode) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch {
+      /* ignore */
+    }
+  }
+  const cliBin = process.env.UPLINK_BIN;
+  const cmd = cliBin ? [cliBin, ...args] : [process.argv[1], ...args];
+  const result = spawnSync(process.execPath, cmd, {
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
+  });
+  if (result.error) throw result.error;
+  return {
+    status: result.status ?? 0,
+    stdout: result.stdout?.trim() || "",
+    stderr: result.stderr?.trim() || "",
+  };
+}
+
+export function parseCliJson<T>(stdout: string): T | null {
+  const start = stdout.indexOf("{");
+  if (start < 0) return null;
+  try {
+    return JSON.parse(stdout.slice(start)) as T;
+  } catch {
+    return null;
+  }
 }
 
 export function buildHostingMenu(deps: Deps): MenuChoice {
@@ -196,8 +236,12 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
           
           // Ask about deleting volumes
           const deleteVolumesAnswer = (await promptLine(
-            "Also delete persistent data (databases, files)? (y/N): "
+            "Also delete persistent data (databases, files)? (y/N, or back): "
           )).trim().toLowerCase();
+          if (isBackInput(deleteVolumesAnswer)) {
+            restoreRawMode();
+            return "";
+          }
           const deleteVolumes = deleteVolumesAnswer === "y" || deleteVolumesAnswer === "yes";
           
           const args = ["host", "delete", "--id", selected.id];
@@ -212,25 +256,21 @@ export function buildHostingMenu(deps: Deps): MenuChoice {
       },
       {
         label: "Help",
-        action: async () => {
-          return [
+        page: [
             "Menu options:",
-            "  Setup Wizard     - First-time setup: creates Dockerfile, config, app, and deploys",
-            "  Deploy           - Redeploy to an existing app (faster, skips setup)",
-            "  Analyze          - Check project for deployment readiness",
-            "  Apps              - Arrow through apps to inspect url, status, and size",
-            "  Delete App       - Remove an app and optionally its data",
-            "  Custom domains   - also under the top-level Domains menu",
+            "  Setup     - First-time setup: creates Dockerfile, config, app, and deploys",
+            "  Deploy    - Redeploy to an existing app (faster, skips setup)",
+            "  Analyze   - Check project for deployment readiness",
+            "  Apps      - Arrow through apps to inspect url, status, and size",
+            "  Delete    - Remove an app and optionally its data",
+            "  Domains   - attach hostnames under the top-level Domains menu",
             "",
-            "CLI commands:",
-            "  uplink host setup --name <app> --path <path>   # Full setup + deploy",
-            "  uplink host deploy --name <app> --path <path>  # Just deploy (faster)",
-            "  uplink host status --id <app_id>               # Check build/run status",
-            "  uplink host logs --id <app_id>                 # View app logs",
-            "",
-            "Tip: Use 'Deploy' for updates, 'Setup' only for new projects.",
-          ].join("\n");
-        },
+            "CLI:",
+            "  uplink host setup --name <app> --path <path> --json",
+            "  uplink host deploy --name <app> --path <path> --json",
+            "  uplink host status --id <app_id> --json",
+            "  uplink host logs --id <app_id> --json",
+          ].join("\n"),
       },
     ],
   };

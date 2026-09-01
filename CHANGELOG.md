@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.11 — 2026-09-01
+
+TUI matches the site: white wordmark, full-row selection with numbers, Get started (copy install / GitHub / npm). Tunnel clients default to TLS on `tunnel.uplink.spot:7443` (token no longer on argv). Namecheap API calls POST so the key is not in query strings. Terminal output sanitizes server-controlled strings; registrar store dir is `0700`. CI runs typecheck, tunnel syntax, and `npm audit`.
+
 ## 0.2.10 — 2026-08-31
 
 Find a domain keeps the 15 default TLDs; press **m** (or `uplink domains search acme --more`) for extra geo/shop/studio TLDs. Guests still get availability only — the TUI says to connect a registrar for price.

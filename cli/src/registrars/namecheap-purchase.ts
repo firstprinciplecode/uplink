@@ -27,7 +27,8 @@ async function namecheapCall(
   creds: RegistrarCredentials,
   command: string,
   extra: Record<string, string>,
-  method: "GET" | "POST" = "GET"
+  // POST by default: keeps ApiKey out of URLs (query strings get logged by proxies).
+  method: "GET" | "POST" = "POST"
 ): Promise<string> {
   if (!creds.apiUser || !creds.apiKey) throw new Error("Namecheap API user and key are required");
   const params = new URLSearchParams({

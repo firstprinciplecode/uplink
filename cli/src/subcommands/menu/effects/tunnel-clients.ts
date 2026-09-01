@@ -1,4 +1,4 @@
-import { execSync, spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import path from "path";
@@ -65,7 +65,9 @@ export function startTunnelClient(opts: {
 }): { pid: number; clientPath: string } {
   const projectRoot = resolveProjectRoot(__dirname);
   const clientPath = resolveTunnelClientPath();
-  const ctrl = opts.ctrl || process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7071";
+  // 7443 is the TLS control port; the client enables TLS by default for any
+  // non-loopback relay host (see scripts/tunnel/client-improved.js).
+  const ctrl = opts.ctrl || process.env.TUNNEL_CTRL || "tunnel.uplink.spot:7443";
   const clientProcess = spawn(
     "node",
     [clientPath, "--port", String(opts.port), "--ctrl", ctrl],
@@ -87,9 +89,11 @@ export function startTunnelClient(opts: {
 export function findTunnelClients(): TunnelClient[] {
   try {
     // Find processes running client-improved.js (current user, match script path to avoid false positives)
+    // execFileSync with an args array: $USER comes from the environment and must
+    // never be interpolated into a shell string.
     const user = process.env.USER || "";
-    const psCmd = user ? `ps -u ${user} -o pid=,command=` : "ps -eo pid=,command=";
-    const output = execSync(psCmd, { encoding: "utf-8" });
+    const psArgs = user ? ["-u", user, "-o", "pid=,command="] : ["-eo", "pid=,command="];
+    const output = execFileSync("ps", psArgs, { encoding: "utf-8" });
     const lines = output
       .trim()
       .split("\n")
@@ -140,9 +144,10 @@ export function killTunnelClient(pid: number): boolean {
     return false;
   }
   try {
-    execSync(`kill -0 ${pid} && sleep 0.4 && kill -KILL ${pid} || true`, {
-      stdio: "ignore",
-    });
+    // Grace period after SIGTERM, then SIGKILL if still alive. Pure JS — no shell.
+    process.kill(pid, 0);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+    process.kill(pid, "SIGKILL");
   } catch {
     /* process already gone */
   }

@@ -1,7 +1,13 @@
 import { colorBold, colorDim } from "./colors";
 
-// Inline arrow-key selector (returns selected option, or null for "Back")
 export type SelectOption = { label: string; value: string | number | null };
+
+function isBackKey(str: string, bufEmpty = true): boolean {
+  if (str === "\u0003") return true;
+  if (str === "\u001b" || str === "\u001b\u001b") return true;
+  if (str === "\u001b[D" && bufEmpty) return true;
+  return false;
+}
 
 export async function inlineSelect(
   title: string,
@@ -9,61 +15,36 @@ export async function inlineSelect(
   includeBack: boolean = true
 ): Promise<{ index: number; value: string | number | null } | null> {
   return new Promise((resolve) => {
-    // Add "Back" option if requested
     const allOptions = includeBack ? [...options, { label: "Back", value: null }] : options;
-
     let selected = 0;
+    const hint = colorDim("↑↓ enter  ·  esc/← back");
+    const frameLines = allOptions.length + 4;
 
-    const renderSelector = () => {
-      // Clear previous render (move cursor up and clear lines)
-      const linesToClear = allOptions.length + 3;
-      process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
-
+    const paint = (initial: boolean) => {
+      if (!initial) {
+        process.stdout.write(`\x1b[${frameLines}A\x1b[0J`);
+      }
       console.log();
       console.log(colorDim(title));
       console.log();
-
       allOptions.forEach((opt, idx) => {
         const isLast = idx === allOptions.length - 1;
         const isSelected = idx === selected;
         const branch = isLast ? "└─" : "├─";
-
-        let label: string;
-        let branchColor: string;
-
-        if (isSelected) {
-          branchColor = colorBold(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = colorBold(opt.label);
-          }
-        } else {
-          branchColor = colorDim(branch);
-          if (opt.label === "Back") {
-            label = colorDim(opt.label);
-          } else {
-            label = opt.label;
-          }
-        }
-
+        const branchColor = isSelected ? colorBold(branch) : colorDim(branch);
+        const label =
+          opt.label === "Back"
+            ? colorDim(opt.label)
+            : isSelected
+              ? colorBold(opt.label)
+              : opt.label;
         console.log(`${branchColor} ${label}`);
       });
+      console.log(hint);
     };
 
-    // Initial render - print blank lines first so we can clear them
-    console.log();
-    console.log(colorDim(title));
-    console.log();
-    allOptions.forEach((opt, idx) => {
-      const isLast = idx === allOptions.length - 1;
-      const branch = isLast ? "└─" : "├─";
-      const branchColor = idx === 0 ? colorBold(branch) : colorDim(branch);
-      const label = idx === 0 ? colorBold(opt.label) : opt.label === "Back" ? colorDim(opt.label) : opt.label;
-      console.log(`${branchColor} ${label}`);
-    });
+    paint(true);
 
-    // Set up key handler
     try {
       process.stdin.ref();
       process.stdin.setRawMode(true);
@@ -72,42 +53,39 @@ export async function inlineSelect(
       /* ignore */
     }
 
+    const done = (value: { index: number; value: string | number | null } | null) => {
+      process.stdin.removeListener("data", keyHandler);
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        /* ignore */
+      }
+      resolve(value);
+    };
+
     const keyHandler = (key: Buffer) => {
       const str = key.toString();
-
-      if (str === "\u0003") {
-        // Ctrl+C
-        process.stdin.removeListener("data", keyHandler);
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.exit(0);
-      } else if (str === "\u001b[A") {
-        // Up arrow
+      if (isBackKey(str)) {
+        done(null);
+        return;
+      }
+      if (str === "\u001b[A") {
         selected = (selected - 1 + allOptions.length) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[B") {
-        // Down arrow
+        paint(false);
+        return;
+      }
+      if (str === "\u001b[B") {
         selected = (selected + 1) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[D") {
-        // Left arrow - same as selecting "Back"
-        process.stdin.removeListener("data", keyHandler);
-        resolve(null);
-      } else if (str === "\r") {
-        // Enter
-        process.stdin.removeListener("data", keyHandler);
+        paint(false);
+        return;
+      }
+      if (str === "\r") {
         const selectedOption = allOptions[selected];
         const isBack = selectedOption.label === "Back" || selectedOption.value === null;
-
-        if (isBack) {
-          resolve(null);
-        } else {
-          resolve({ index: selected, value: selectedOption.value });
-        }
+        done(isBack ? null : { index: selected, value: selectedOption.value });
       }
     };
 
     process.stdin.on("data", keyHandler);
   });
 }
-

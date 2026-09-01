@@ -2,8 +2,10 @@ import { colorAccent, colorBold, colorDim, colorSoftGray } from "./colors";
 
 export type SelectOption = { label: string; value: string | number | null };
 
-// Inline arrow-key selector (returns selected index, or null for "Back")
-// Clean, minimal styling inspired by Claude Code
+function isBackKey(str: string): boolean {
+  return str === "\u0003" || str === "\u001b" || str === "\u001b\u001b" || str === "\u001b[D";
+}
+
 export async function inlineSelect(
   title: string,
   options: SelectOption[],
@@ -12,19 +14,19 @@ export async function inlineSelect(
   return new Promise((resolve) => {
     const allOptions = includeBack ? [...options, { label: "Back", value: null }] : options;
     let selected = 0;
+    const hint = colorDim("  ↑↓ enter  ·  esc/← back");
+    const frameLines = allOptions.length + 4;
 
-    const renderSelector = () => {
-      const linesToClear = allOptions.length + 3;
-      process.stdout.write(`\x1b[${linesToClear}A\x1b[0J`);
-
+    const paint = (initial: boolean) => {
+      if (!initial) {
+        process.stdout.write(`\x1b[${frameLines}A\x1b[0J`);
+      }
       console.log();
       console.log("  " + colorSoftGray(title));
       console.log();
-
       allOptions.forEach((opt, idx) => {
         const isSelected = idx === selected;
         const pointer = isSelected ? colorAccent("›") : " ";
-        
         let label: string;
         if (opt.label === "Back") {
           label = colorSoftGray(opt.label);
@@ -33,20 +35,12 @@ export async function inlineSelect(
         } else {
           label = opt.label;
         }
-
         console.log(`  ${pointer} ${label}`);
       });
+      console.log(hint);
     };
 
-    console.log();
-    console.log("  " + colorSoftGray(title));
-    console.log();
-    allOptions.forEach((opt, idx) => {
-      const isSelected = idx === 0;
-      const pointer = isSelected ? colorAccent("›") : " ";
-      const label = opt.label === "Back" ? colorSoftGray(opt.label) : (isSelected ? colorBold(opt.label) : opt.label);
-      console.log(`  ${pointer} ${label}`);
-    });
+    paint(true);
 
     try {
       process.stdin.setRawMode(true);
@@ -55,30 +49,38 @@ export async function inlineSelect(
       /* ignore */
     }
 
+    const done = (value: { index: number; value: string | number | null } | null) => {
+      process.stdin.removeListener("data", keyHandler);
+      try {
+        process.stdin.setRawMode(false);
+      } catch {
+        /* ignore */
+      }
+      resolve(value);
+    };
+
     const keyHandler = (key: Buffer) => {
       const str = key.toString();
-
-      if (str === "\u0003") {
-        process.stdin.removeListener("data", keyHandler);
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.exit(0);
-      } else if (str === "\u001b[A") {
+      if (isBackKey(str)) {
+        done(null);
+        return;
+      }
+      if (str === "\u001b[A") {
         selected = (selected - 1 + allOptions.length) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[B") {
+        paint(false);
+        return;
+      }
+      if (str === "\u001b[B") {
         selected = (selected + 1) % allOptions.length;
-        renderSelector();
-      } else if (str === "\u001b[D") {
-        process.stdin.removeListener("data", keyHandler);
-        resolve(null);
-      } else if (str === "\r") {
-        process.stdin.removeListener("data", keyHandler);
+        paint(false);
+        return;
+      }
+      if (str === "\r") {
         const selectedOption = allOptions[selected];
         if (selectedOption.label === "Back" || selectedOption.value === null) {
-          resolve(null);
+          done(null);
         } else {
-          resolve({ index: selected, value: selectedOption.value });
+          done({ index: selected, value: selectedOption.value });
         }
       }
     };

@@ -38,7 +38,7 @@ export const devCommand = new Command("dev")
       }
 
       const clientPath = resolveTunnelClientPath();
-      const ctrlHost = process.env.TUNNEL_CTRL ?? "tunnel.uplink.spot:7071";
+      const ctrlHost = process.env.TUNNEL_CTRL ?? "tunnel.uplink.spot:7443";
       // Token goes through the environment, never argv (see tunnel-clients.ts).
       const args = [clientPath, "--port", String(port), "--ctrl", ctrlHost];
       if (!opts.json) {

@@ -67,15 +67,20 @@ export const loginCommand = new Command("login")
         return;
       }
 
-      const tokenExport = formatTokenForEnv(result.token, apiBase);
       console.log("Logged in.");
       console.log("");
       console.log(`  Email:    ${email}`);
       console.log(`  User ID:  ${result.userId}`);
-      console.log(`  Token:    ${result.token}`);
-      if (savedTo) console.log(`  Saved:    ${savedTo}`);
-      console.log("");
-      if (!savedTo) {
+      if (savedTo) {
+        // Token is on disk (0600); print only a prefix so the full secret
+        // doesn't land in scrollback or session recordings.
+        console.log(`  Token:    ${String(result.token).slice(0, 8)}… (saved)`);
+        console.log(`  Saved:    ${savedTo}`);
+        console.log("");
+      } else {
+        const tokenExport = formatTokenForEnv(result.token, apiBase);
+        console.log(`  Token:    ${result.token}`);
+        console.log("");
         console.log("To use this token:");
         console.log(`  export AGENTCLOUD_TOKEN="${tokenExport}"`);
       }

@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { Panel } from "./chrome";
 import { useEffect, useState } from "react";
 import type { MenuInspect } from "../subcommands/menu/types";
 import { ARTIFACT_CAP_BYTES, fetchAppInspect, type AppInspect } from "./snapshot";
@@ -39,7 +40,7 @@ function SizeGauge({ bytes }: { bytes: number }) {
         <Text dimColor>size</Text>
       </Box>
       <Text>
-        <Text color="green">{"█".repeat(filled)}</Text>
+        <Text color="white">{"█".repeat(filled)}</Text>
         <Text dimColor>{"░".repeat(GAUGE_WIDTH - filled)}</Text>
         <Text dimColor>
           {"  "}
@@ -61,15 +62,18 @@ export function AppInspector({ inspect }: { inspect?: MenuInspect }) {
   const [detail, setDetail] = useState<AppInspect | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Narrow the union once: only the "app" variant carries an id.
+  const appId = inspect?.kind === "app" ? inspect.id : undefined;
+
   useEffect(() => {
-    if (!inspect || inspect.kind !== "app") {
+    if (!appId) {
       setDetail(null);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       setLoading(true);
-      fetchAppInspect(inspect.id).then((next) => {
+      fetchAppInspect(appId).then((next) => {
         if (cancelled) return;
         setDetail(next);
         setLoading(false);
@@ -79,9 +83,9 @@ export function AppInspector({ inspect }: { inspect?: MenuInspect }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [inspect?.id, inspect?.kind]);
+  }, [appId]);
 
-  if (!inspect) return null;
+  if (!inspect || inspect.kind !== "app") return null;
 
   const url = detail?.url || inspect.url || "—";
   const deploy = detail?.deploy || (loading ? "…" : "—");
@@ -97,8 +101,8 @@ export function AppInspector({ inspect }: { inspect?: MenuInspect }) {
         : "none";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text dimColor>── inspect ──</Text>
+    <Panel marginTop={1}>
+      <Text dimColor>inspect</Text>
       <Row label="url" value={url} />
       <Row label="status" value={deploy} color={statusColor(detail?.deploy)} dim={!detail?.deploy} />
       <Row label="build" value={build} color={statusColor(detail?.build)} dim={!detail?.build} />
@@ -109,6 +113,6 @@ export function AppInspector({ inspect }: { inspect?: MenuInspect }) {
       )}
       <Row label="created" value={formatDate(detail?.createdAt || inspect.createdAt)} dim={!detail?.createdAt && !inspect.createdAt} />
       <Row label="domains" value={domainText} dim={domainText === "none"} />
-    </Box>
+    </Panel>
   );
 }

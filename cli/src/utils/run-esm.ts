@@ -22,8 +22,11 @@ export function resolveTsx(): string {
 
 function spawnEsmEntry(entry: string): { status: number | null; error?: Error } {
   const root = cliPackageRoot();
-  // Do not pass the package root tsconfig (module: commonjs). That forces
-  // esbuild into CJS output and breaks Ink/yoga-layout (top-level await).
+  try {
+    process.stdin.pause();
+  } catch {
+    /* ignore */
+  }
   const result = spawnSync(resolveTsx(), [entry], {
     stdio: "inherit",
     cwd: root,
@@ -50,7 +53,9 @@ export function runEsmEntry(entry: string): never {
 export function runEsmEntryAndWait(entry: string): void {
   const result = spawnEsmEntry(entry);
   if (result.error) throw result.error;
-  if (result.status && result.status !== 0) {
-    throw new Error(`Interactive screen exited with code ${result.status}`);
+  const status = result.status ?? 0;
+  // 0 = normal back/quit; 130 = ctrl+c — both return to the parent menu.
+  if (status !== 0 && status !== 130) {
+    throw new Error(`Interactive screen exited with code ${status}`);
   }
 }

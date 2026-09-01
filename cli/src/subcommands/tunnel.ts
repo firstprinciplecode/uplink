@@ -7,6 +7,7 @@ import {
   startTunnelClient,
 } from "./menu/effects/tunnel-clients";
 import { ensureGuestAccess } from "../utils/guest-access";
+import { sanitizeForTerminal } from "../utils/sanitize";
 
 type TunnelResponse = {
   id: string;
@@ -115,11 +116,11 @@ tunnelCommand
           client,
         });
       } else {
-        console.log(`Created tunnel ${tunnel.id}`);
-        console.log(`  url:    ${url ?? "-"}`);
-        console.log(`  token:  ${tunnel.token ?? "-"}`);
-        if (alias) console.log(`  alias:  ${alias}`);
-        else if (aliasError) console.log(`  alias:  failed - ${aliasError}`);
+        console.log(sanitizeForTerminal(`Created tunnel ${tunnel.id}`));
+        console.log(sanitizeForTerminal(`  url:    ${url ?? "-"}`));
+        console.log(sanitizeForTerminal(`  token:  ${tunnel.token ?? "-"}`));
+        if (alias) console.log(sanitizeForTerminal(`  alias:  ${alias}`));
+        else if (aliasError) console.log(sanitizeForTerminal(`  alias:  failed - ${aliasError}`));
         if (client) console.log(`  client: started (pid ${client.pid})`);
         else console.log(`  client: not started (--api-only)`);
       }
@@ -148,7 +149,9 @@ tunnelCommand
           const connected = t.connected ? "connected" : "idle";
           const token = t.token ? `${String(t.token).slice(0, 8)}…` : "-";
           console.log(
-            `${t.id}  ${t.url ?? t.ingressHttpUrl ?? "-"}  token=${token}  alias=${t.alias ?? "-"}  status=${t.status ?? "-"}  ${connected}`
+            sanitizeForTerminal(
+              `${t.id}  ${t.url ?? t.ingressHttpUrl ?? "-"}  token=${token}  alias=${t.alias ?? "-"}  status=${t.status ?? "-"}  ${connected}`
+            )
           );
         }
       }

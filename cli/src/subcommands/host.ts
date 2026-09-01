@@ -7,12 +7,13 @@ import { generateDockerfile, generateHostConfig } from "../templates";
 import { createHash } from "crypto";
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { basename, join, resolve } from "path";
-import { promptLine } from "./menu/io";
+import { promptLine, promptSecret } from "./menu/io";
 import { colorRed } from "./menu/colors";
 import os from "os";
 import fetch from "node-fetch";
 import { spawnSync } from "child_process";
 import { getResolvedApiBase, getResolvedApiToken } from "../utils/api-base";
+import { sanitizeForTerminal } from "../utils/sanitize";
 import { domainsCommand } from "./host-domains";
 
 type App = { id: string; name: string; url: string; createdAt?: string; updatedAt?: string };
@@ -1478,8 +1479,9 @@ hostCommand
       }
       console.log("Hosted apps:");
       for (const app of result.apps) {
-        console.log(`- ${app.name} (${app.id})`);
-        console.log(`  ${app.url}`);
+        // Names/URLs come from the server; strip control chars before printing.
+        console.log(sanitizeForTerminal(`- ${app.name} (${app.id})`));
+        console.log(sanitizeForTerminal(`  ${app.url}`));
       }
     } catch (error) {
       handleError(error, { json: opts.json });
@@ -1897,7 +1899,7 @@ hostCommand
           }
         }
         if (nextAuthStatus.needsSecret) {
-          const secret = (await promptLine("    Enter NEXTAUTH_SECRET (leave blank to skip): ")).trim();
+          const secret = (await promptSecret("    Enter NEXTAUTH_SECRET (leave blank to skip): ")).trim();
           if (secret) {
             nextAuthOverrides.NEXTAUTH_SECRET = secret;
           }

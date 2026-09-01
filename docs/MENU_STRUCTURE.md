@@ -14,7 +14,7 @@ The menu adapts by auth and role. Arrow keys + Enter (no numeric entry).
 | State | Condition | Main options |
 |-------|-----------|--------------|
 | Guest | No / invalid token → guest access is created silently on menu open | Share, Check domain availability, Continue with email, About, Exit |
-| Verified user | Email-verified token | Share, Hosting, Domains, About, Exit |
+| Verified user | Email-verified token | Share, Domains, Hosting, About, Exit |
 | Admin | `role: admin` | Same as user + Usage, System Status, Manage Tokens |
 | Offline | API unreachable | Connection details, About, Exit |
 
@@ -43,8 +43,8 @@ Creates tunnels **and** starts the local client (same as `uplink tunnel create`)
 
 ```
 Share
-├── Start tunnel     → scan ports / enter port → create + start client
-├── Stop tunnel      → kill local client + delete API record
+├── Share localhost  → scan ports / enter port → create + start client
+├── Stop localhost   → kill local client + delete API record
 ├── View tunnel stats
 ├── Active tunnels   → connected tunnels table
 └── Aliases          → list / create permanent URLs (premium)
@@ -104,5 +104,5 @@ CLI: `uplink admin status|tunnels|databases|tokens …`
 |----------|---------|---------|
 | `AGENTCLOUD_TOKEN` | Auth bearer | — |
 | `AGENTCLOUD_API_BASE` | API host | `https://api.uplink.spot` |
-| `TUNNEL_CTRL` | Relay | `tunnel.uplink.spot:7071` |
+| `TUNNEL_CTRL` | Relay | `tunnel.uplink.spot:7443` |
 | `TUNNEL_DOMAIN` | Tunnel DNS suffix | `x.uplink.spot` |
