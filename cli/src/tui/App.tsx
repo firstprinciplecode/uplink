@@ -13,6 +13,7 @@ import { MyDomainsScreen } from "./MyDomains";
 import { Panel, KeyBar, MenuRow } from "./chrome";
 import { openInBrowser } from "../utils/open-browser";
 import { copyToClipboard } from "../utils/copy-clipboard";
+import { extractHttpUrls, LinkifiedLine, preferredShareUrl } from "./links";
 
 export type TunnelLine = { url: string; port: number };
 
@@ -195,7 +196,22 @@ export function MenuApp({
         if (key.return) goBack();
         return;
       }
-      if (_input === "q" && atRoot && !notice) {
+      if (notice) {
+        const shareUrl = preferredShareUrl(extractHttpUrls(notice));
+        if (shareUrl && (_input === "o" || key.return || key.rightArrow)) {
+          openInBrowser(shareUrl);
+          return;
+        }
+        if (shareUrl && _input === "c") {
+          copyToClipboard(shareUrl);
+          return;
+        }
+        if (key.return || key.rightArrow) {
+          setNotice("");
+        }
+        return;
+      }
+      if (_input === "q" && atRoot) {
         finish({ kind: "quit" });
         return;
       }
@@ -208,7 +224,7 @@ export function MenuApp({
         setCursor((selected + 1) % current.length);
         return;
       }
-      if (/^[1-9]$/.test(_input) && !notice) {
+      if (/^[1-9]$/.test(_input)) {
         const index = Number(_input) - 1;
         if (current[index]) {
           setCursor(index);
@@ -217,10 +233,6 @@ export function MenuApp({
         return;
       }
       if (key.return || key.rightArrow) {
-        if (notice) {
-          setNotice("");
-          return;
-        }
         activateChoice(current[selected]);
       }
     },
@@ -287,9 +299,7 @@ export function MenuApp({
       {page ? (
         <Panel marginTop={1}>
           {sanitizeForTerminal(page.body).split("\n").map((line, i) => (
-            <Text key={i} color={noticeColor(line)} dimColor={!noticeColor(line)}>
-              {line || " "}
-            </Text>
+            <LinkifiedLine key={i} line={line} color={noticeColor(line)} dim={!noticeColor(line)} />
           ))}
         </Panel>
       ) : (
@@ -322,17 +332,19 @@ export function MenuApp({
       {!page && notice ? (
         <Panel marginTop={1}>
           {sanitizeForTerminal(notice).split("\n").map((line, i) => (
-            <Text key={i} color={noticeColor(line)} dimColor={!noticeColor(line)}>
-              {line || " "}
-            </Text>
+            <LinkifiedLine key={i} line={line} color={noticeColor(line)} dim={!noticeColor(line)} />
           ))}
         </Panel>
       ) : null}
 
       <KeyBar
         hint={
-          page || notice
+          page
             ? "esc/←/enter back"
+            : notice
+              ? preferredShareUrl(extractHttpUrls(notice))
+                ? "↵/o open url · c copy · esc/← back"
+                : "esc/←/enter back"
             : inspecting
               ? "↑↓ inspect · ↵ open · esc/← back"
               : atRoot

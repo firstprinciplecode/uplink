@@ -118,15 +118,24 @@ export function MenuRow({
   dim?: boolean;
 }) {
   const { stdout } = useStdout();
-  const inner = Math.max(16, (stdout?.columns ?? 80) - 8);
+  // App paddingX 1 + panel border 1 on each side.
+  const width = Math.max(8, (stdout?.columns ?? 80) - 4);
   const caret = active ? "▸" : " ";
-  const line = ` ${caret} ${index} ${label}${suffix ?? ""}`;
-  const padded = line.padEnd(inner).slice(0, inner);
+  const text = ` ${caret} ${index} ${label}${suffix ?? ""}`;
+  // Ink's renderer does trimEnd() on every line, which deletes trailing spaces
+  // and their background. U+2800 is a 1-col blank that trimEnd will not strip.
+  const fill = active && width > text.length ? "\u2800".repeat(width - text.length) : "";
+  const line = (text + fill).slice(0, width);
 
   return (
-    <Box width="100%">
-      <Text inverse={active} color={danger && active ? "red" : undefined} dimColor={dim && !active}>
-        {padded}
+    <Box width={width} flexShrink={0}>
+      <Text
+        wrap="truncate"
+        inverse={active}
+        color={active ? (danger ? "red" : undefined) : undefined}
+        dimColor={!active && dim}
+      >
+        {line}
       </Text>
     </Box>
   );

@@ -241,21 +241,21 @@ export async function createAndStartTunnel(apiRequest: ApiRequest, port: number)
     /* ignore */
   }
 
-  const lines = [`✓ Tunnel created and client started`, ``, `→ Public URL    ${url}`];
+  const lines = [`✓ Tunnel created and client started`, ``, `Public URL`, url];
 
   if (alias) {
     // Use aliasUrl from backend if available, otherwise construct it
     const aliasUrl = result.aliasUrl || `https://${alias}.uplink.spot`;
-    lines.push(`→ Alias         ${alias}`);
-    lines.push(`→ Alias URL     ${aliasUrl}`);
+    lines.push(``, `Alias URL`, aliasUrl);
   }
 
   lines.push(
+    ``,
     `→ Token         ${token}`,
     `→ Local port    ${port}`,
     ``,
-    `Tunnel client running in background.`,
-    `Use "Stop Tunnel" to disconnect.`
+    `Enter opens the URL. Esc goes back.`,
+    `Use Sharing › Stop localhost to disconnect.`
   );
 
   return lines.join("\n");

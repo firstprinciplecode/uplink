@@ -32,7 +32,7 @@ export function cliVersion(): string {
       // try next
     }
   }
-  return "0.2.10";
+  return "0.2.12";
 }
 
 export const WORDMARK_TEXT = ASCII_UPLINK.join("\n");

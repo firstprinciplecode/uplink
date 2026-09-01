@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { MenuInspect } from "../subcommands/menu/types";
 import { ARTIFACT_CAP_BYTES, fetchAppInspect, type AppInspect } from "./snapshot";
 import { formatBytes, formatDate } from "./format";
+import { LinkifiedLine } from "./links";
 
 const LABEL_WIDTH = 10;
 const GAUGE_WIDTH = 16;
@@ -24,9 +25,13 @@ function Row({
       <Box width={LABEL_WIDTH}>
         <Text dimColor>{label}</Text>
       </Box>
-      <Text color={color} dimColor={dim}>
-        {value}
-      </Text>
+      {value.startsWith("http://") || value.startsWith("https://") ? (
+        <LinkifiedLine line={value} color={color} dim={dim} />
+      ) : (
+        <Text color={color} dimColor={dim}>
+          {value}
+        </Text>
+      )}
     </Box>
   );
 }

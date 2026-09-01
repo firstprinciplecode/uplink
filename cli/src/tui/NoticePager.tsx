@@ -1,8 +1,11 @@
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sanitizeForTerminal } from "../utils/sanitize";
 import { Wordmark } from "./brand";
 import { Panel, KeyBar } from "./chrome";
+import { extractHttpUrls, LinkifiedLine, preferredShareUrl } from "./links";
+import { openInBrowser } from "../utils/open-browser";
+import { copyToClipboard } from "../utils/copy-clipboard";
 
 const PAGER_MIN_LINES = 8;
 
@@ -43,7 +46,17 @@ export function NoticePager({
     [maxScroll]
   );
 
+  const shareUrl = preferredShareUrl(extractHttpUrls(text));
+
   useInput((input, key) => {
+    if (shareUrl && (input === "o" || key.return || key.rightArrow)) {
+      openInBrowser(shareUrl);
+      return;
+    }
+    if (shareUrl && input === "c") {
+      copyToClipboard(shareUrl);
+      return;
+    }
     if (key.escape || key.leftArrow || key.return) {
       onClose();
       return;
@@ -84,18 +97,20 @@ export function NoticePager({
           {slice.map((line, i) => {
             const color = lineColor(line);
             return (
-              <Text key={scroll + i} color={color} dimColor={!color}>
-                {line || " "}
-              </Text>
+              <LinkifiedLine key={scroll + i} line={line} color={color} dim={!color} />
             );
           })}
         </Box>
       </Panel>
       <KeyBar
         hint={
-          maxScroll > 0
-            ? `${scroll + 1}–${end} of ${lines.length}  ·  ↑↓ / wheel  ·  space page  ·  esc/← back`
-            : "esc/← back"
+          [
+            maxScroll > 0 ? `${scroll + 1}–${end} of ${lines.length}  ·  ↑↓  ·  space page` : null,
+            shareUrl ? "↵/o open url · c copy" : null,
+            "esc/← back",
+          ]
+            .filter(Boolean)
+            .join("  ·  ")
         }
       />
     </Box>

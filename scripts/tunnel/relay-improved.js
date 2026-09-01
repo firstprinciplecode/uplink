@@ -34,6 +34,7 @@ const CTRL_TLS_CERT = process.env.TUNNEL_CTRL_CERT || "";
 const CTRL_TLS_KEY = process.env.TUNNEL_CTRL_KEY || "";
 const INTERNAL_SECRET = process.env.RELAY_INTERNAL_SECRET || "";
 const INTERNAL_SECRET_HEADER = "x-relay-internal-secret";
+const { sendOffline } = require("./offline-page");
 
 // A subdomain label must be a valid DNS label. Anything else is rejected before
 // it is used as a routing key or interpolated into an internal API query.
@@ -896,16 +897,28 @@ const httpServer = http.createServer(async (req, res) => {
       aliasKey = alias;
       token = await resolveAliasToToken(alias);
       if (!token) {
-        res.statusCode = 404;
-        res.setHeader("Content-Type", "text/plain");
-        return res.end("Alias not found or inactive");
+        sendOffline(req, res, 404, "Alias not found or inactive", {
+          mark: "missing",
+          title: "Nothing here",
+          detail: "This name is not attached to a live share.",
+          hint: "Share localhost from the CLI, or check the alias under Sharing.",
+        });
+        return;
       }
     } else {
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "text/plain");
-      return res.end(
-        `Invalid host. Expected <token>.${TUNNEL_DOMAIN} or <alias>.${ALIAS_DOMAIN}`
+      sendOffline(
+        req,
+        res,
+        404,
+        `Invalid host. Expected <token>.${TUNNEL_DOMAIN} or <alias>.${ALIAS_DOMAIN}`,
+        {
+          mark: "missing",
+          title: "Nothing here",
+          detail: "This hostname is not a valid Uplink share.",
+          hint: `Use a link like token.${TUNNEL_DOMAIN} or alias.${ALIAS_DOMAIN}.`,
+        }
       );
+      return;
     }
   }
 
@@ -920,9 +933,13 @@ const httpServer = http.createServer(async (req, res) => {
   // Check if client is connected
   const clientData = clients.get(token);
   if (!clientData) {
-    res.statusCode = 502;
-    res.setHeader("Content-Type", "text/plain");
-    return res.end("Tunnel not connected");
+    sendOffline(req, res, 502, "Tunnel not connected", {
+      mark: "tunnel",
+      title: "Tunnel not connected",
+      detail: "This share is live, but nothing is attached on the other side yet.",
+      hint: "From the CLI: Sharing → Share localhost",
+    });
+    return;
   }
 
   const path = url.pathname + (url.search || "");
@@ -981,8 +998,13 @@ const httpServer = http.createServer(async (req, res) => {
   } catch (err) {
     logError(err, "Failed to send request to client");
     pending.delete(id);
-    res.statusCode = 502;
-    return res.end("Failed to forward request");
+    sendOffline(req, res, 502, "Failed to forward request", {
+      mark: "tunnel",
+      title: "Tunnel not connected",
+      detail: "The relay could not reach the local client for this share.",
+      hint: "Re-run Sharing → Share localhost, then refresh.",
+    });
+    return;
   }
 
   // Timeout applies only until the response starts streaming
@@ -990,8 +1012,12 @@ const httpServer = http.createServer(async (req, res) => {
     const entry = pending.get(id);
     if (entry && !entry.started) {
       pending.delete(id);
-      res.statusCode = 504;
-      res.end("Gateway timeout");
+      sendOffline(req, res, 504, "Gateway timeout", {
+        mark: "tunnel",
+        title: "Share timed out",
+        detail: "The local process did not answer in time. It may not be listening, or the tunnel client stalled.",
+        hint: "Confirm the port is serving, then share again.",
+      });
     }
   }, 30000);
 

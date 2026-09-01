@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12 — 2026-09-01
+
+TUI: full-width inverted menu rows (Ink was trimming the highlight). After you share a tunnel, the public URL is a real link — Enter/o opens it, c copies. Relay/hosting 502 pages are a centered Uplink screen instead of a one-line error.
+
 ## 0.2.11 — 2026-09-01
 
 TUI matches the site: white wordmark, full-row selection with numbers, Get started (copy install / GitHub / npm). Tunnel clients default to TLS on `tunnel.uplink.spot:7443` (token no longer on argv). Namecheap API calls POST so the key is not in query strings. Terminal output sanitizes server-controlled strings; registrar store dir is `0700`. CI runs typecheck, tunnel syntax, and `npm audit`.

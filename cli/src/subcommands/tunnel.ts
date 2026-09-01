@@ -117,7 +117,8 @@ tunnelCommand
         });
       } else {
         console.log(sanitizeForTerminal(`Created tunnel ${tunnel.id}`));
-        console.log(sanitizeForTerminal(`  url:    ${url ?? "-"}`));
+        if (url) console.log(sanitizeForTerminal(url));
+        else console.log("  url:    -");
         console.log(sanitizeForTerminal(`  token:  ${tunnel.token ?? "-"}`));
         if (alias) console.log(sanitizeForTerminal(`  alias:  ${alias}`));
         else if (aliasError) console.log(sanitizeForTerminal(`  alias:  failed - ${aliasError}`));
