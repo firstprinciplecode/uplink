@@ -119,6 +119,8 @@ The bare `uplink domains` command opens Find a domain. Agents should use JSON:
 
 ```bash
 uplink domains search acme --json
+uplink domains search ~space --json
+# `.inc` TLD browse is interactive (TUI): uplink domains search
 uplink domains check example.com --json
 uplink domains list --json
 uplink domains providers connect godaddy --token-env GODADDY_PAT --json

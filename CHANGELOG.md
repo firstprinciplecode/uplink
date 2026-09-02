@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.13 — 2026-09-01
+
+Find a domain matches DomainKing query modes: `.inc` browses a TLD, `~space` / `~space.inc` scans related words, and Namecheap prices show on the result list when connected. `uplink domains search ~space --json` works for agents; TLD browse stays interactive.
+
 ## 0.2.12 — 2026-09-01
 
 TUI: full-width inverted menu rows (Ink was trimming the highlight). After you share a tunnel, the public URL is a real link — Enter/o opens it, c copies. Relay/hosting 502 pages are a centered Uplink screen instead of a one-line error.

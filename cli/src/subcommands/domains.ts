@@ -365,8 +365,8 @@ domainsCommand
 
 domainsCommand
   .command("search")
-  .description("Search a label across common TLDs, or check one exact domain")
-  .argument("[name]", "Bare label (acme) or full domain (acme.io)")
+  .description("Search a label across common TLDs, an exact domain, related words (~space), or browse a TLD in the TUI (.inc)")
+  .argument("[name]", "Label (acme), domain (acme.io), related (~space), or TLD browse (.inc, TUI only)")
   .option("--more", "Include extra TLDs (geo, shop, studio, …)", false)
   .option("--json", "Output JSON", false)
   .action(async (name: string | undefined, opts: { json?: boolean; more?: boolean }) => {

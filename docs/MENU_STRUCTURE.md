@@ -76,7 +76,7 @@ CLI equivalents: `uplink host setup|deploy|list|status|logs|delete|analyze|prefl
 Domains
 ├── My domains              → uplink domains list
 ├── Connect registrar       → providers connect (token via env)
-├── Find a domain           → built-in search TUI (also `uplink domains` / `domains search`)
+├── Find a domain           → TUI: label, exact domain, `.tld` browse, `~word` related; Namecheap prices when connected
 ├── Attach to app           → host domains add
 ├── Verify                  → host domains verify
 ├── List attached           → host domains list
