@@ -13,7 +13,7 @@ echo "$TOKEN" | uplink --token-stdin host logs --id app_xxx --json
 echo "$TOKEN" | uplink --token-stdin host delete --id app_xxx --yes --json
 ```
 
-Public URL is `https://<app_id>.host.uplink.spot` (the app **id**, not the name). Custom hostnames attach with `host domains add` / `verify`.
+Public URL is `https://app-<uuid>.host.uplink.spot`: the app **id** (`app_<uuid>`, not the name) written with a hyphen, because `_` is not valid in a hostname and strict TLS clients (Python, Java, Go) reject it. The underscore form still routes for older links. Custom hostnames attach with `host domains add` / `verify`.
 
 ## What gets deployed
 

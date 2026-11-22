@@ -9,7 +9,7 @@ Website: [uplink.spot](https://uplink.spot) · CLI: [`uplink-cli`](https://www.n
 Three surfaces, one CLI (`uplink`):
 
 1. **Share** — expose `localhost:<port>` as HTTPS (`https://<token>.x.uplink.spot`).
-2. **Hosting** — deploy a project to `https://<app_id>.host.uplink.spot` (email-verified accounts).
+2. **Hosting** — deploy a project to `https://app-<uuid>.host.uplink.spot` (email-verified accounts).
 3. **Domains** — a hub for names spread across providers: one inventory from registrars (GoDaddy, Cloudflare, Hostinger, Namecheap, DreamHost) plus any cPanel host (Namecheap shared, Bluehost, HostGator, …), availability checks, and hostname attach/verify on hosted apps.
 
 Humans use `uplink` (keyboard menu). Agents use subcommands with `--json` and `--token-stdin`.
@@ -30,7 +30,7 @@ Guest → verified **merges**: the existing tunnel stays; credentials land in `~
 |------|--------|
 | Tunnel | `https://<token>.x.uplink.spot` |
 | Alias (plan) | `https://<alias>.uplink.spot` |
-| Hosted app | `https://<app_id>.host.uplink.spot` |
+| Hosted app | `https://app-<uuid>.host.uplink.spot` |
 | Custom domain | hostname attached + verified on an app |
 
 Reserved alias labels include `www`, `api`, `x`, `host`, `docs`, `status`.
