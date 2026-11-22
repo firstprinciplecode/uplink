@@ -119,12 +119,20 @@ step_relay_health() {
     return
   fi
   # Check relay health directly on port 7070 (HTTP) - this tests the relay's JSON endpoint
-  # Caddy on 443 returns plain text for x.uplink.spot, so we bypass it for the health check
+  # Caddy on 443 for x.uplink.spot is a static 200, so we bypass it here.
   if curl -sS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" \
     "http://${RELAY_IP}:7070/health" | grep -q '"status":"ok"'; then
     pass "Relay /health (via relay port 7070)"
   else
     fail "Relay /health failed at http://${RELAY_IP}:7070/health"
+    status=1
+  fi
+  # Public status-page contract: reserved host, not an alias.
+  if curl -sS --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" \
+    "https://tunnel.uplink.spot/health" | grep -q '"status":"ok"'; then
+    pass "Relay /health (https://tunnel.uplink.spot/health)"
+  else
+    fail "Relay /health failed at https://tunnel.uplink.spot/health"
     status=1
   fi
 }

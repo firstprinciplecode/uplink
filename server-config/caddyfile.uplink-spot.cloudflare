@@ -73,7 +73,7 @@ uplink.spot {
 	# first-party scripts are external files, so no script 'unsafe-inline' is
 	# needed; 'unsafe-inline' for styles covers the few inline style attributes.
 	header {
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://www.googletagmanager.com; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com; connect-src 'self' https://api.uplink.spot https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://www.googletagmanager.com; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com; connect-src 'self' https://api.uplink.spot https://tunnel.uplink.spot https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com"
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
@@ -115,6 +115,14 @@ uplink.spot {
 https:// {
 	tls {
 		on_demand
+		# ECDSA defaults to YE2 → Root YE, which Chrome still flags as
+		# "Not secure". RSA intermediates chain to ISRG Root X1.
+		key_type rsa2048
+		issuer acme {
+			preferred_chains {
+				root_common_name "ISRG Root X1"
+			}
+		}
 	}
 	reverse_proxy 127.0.0.1:8080 {
 		header_up Host {http.request.host}

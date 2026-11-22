@@ -96,7 +96,18 @@ const wsSessions = new Map();
 // alias -> { token, timestamp }
 const aliasCache = new Map();
 const ALIAS_CACHE_TTL = 60000;
-const RESERVED_ALIASES = new Set(["www", "api", "x", "t", "docs", "support", "status", "health", "mail"]);
+const RESERVED_ALIASES = new Set([
+  "www",
+  "api",
+  "x",
+  "t",
+  "docs",
+  "support",
+  "status",
+  "health",
+  "mail",
+  "tunnel",
+]);
 
 // Traffic stats (in-memory)
 // token -> { requests, responses, bytesIn, bytesOut, lastSeenAt, lastStatus }
@@ -383,6 +394,11 @@ function extractAliasFromHost(host) {
     return alias;
   }
   return null;
+}
+
+function isOpsHealthHost(host) {
+  const h = (host || "").toLowerCase().replace(/:\d+$/, "");
+  return h === "127.0.0.1" || h === "localhost" || h === "::1" || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(h);
 }
 
 // Control server: clients connect and register their token/port
@@ -868,25 +884,34 @@ const httpServer = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://${host || "localhost"}`);
 
-  // Friendly health endpoint — only for non-public hosts, so operational stats
-  // aren't exposed through the public token/alias ingress.
+  // Public liveness on reserved hosts (tunnel.uplink.spot). Stats stay on
+  // loopback/IP so token/alias ingress cannot dump relay internals.
   if (url.pathname === "/health" && !isPublicHost) {
-    const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(
-      JSON.stringify({
-        status: "ok",
-        uptime,
-        stats: {
-          requests: stats.requests,
-          errors: stats.errors,
-          rateLimited: stats.rateLimited,
-          invalidTokens: stats.invalidTokens,
-          activeConnections: clients.size,
-          pendingRequests: pending.size,
-        },
-      })
-    );
+    const headers = {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Cache-Control": "no-store",
+    };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, headers);
+      return res.end();
+    }
+    const body = { status: "ok" };
+    if (isOpsHealthHost(host)) {
+      body.uptime = Math.floor((Date.now() - stats.startTime) / 1000);
+      body.stats = {
+        requests: stats.requests,
+        errors: stats.errors,
+        rateLimited: stats.rateLimited,
+        invalidTokens: stats.invalidTokens,
+        activeConnections: clients.size,
+        pendingRequests: pending.size,
+      };
+    }
+    res.writeHead(200, headers);
+    return res.end(JSON.stringify(body));
   }
 
   let token = extractTokenFromHost(host);
